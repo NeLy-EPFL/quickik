@@ -4,6 +4,9 @@ description = "Fast and minimalist inverse kinematics library written in Rust"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["python"]
+
 [dependencies]
 log = "0.4"
 nalgebra = "0.35"

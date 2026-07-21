@@ -1,0 +1,15 @@
+[package]
+name = "fastik-python"
+description = "Python bindings for the FastIK inverse kinematics library"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "fastik"
+crate-type = ["cdylib"]
+
+[dependencies]
+fastik_core = { package = "fastik", path = ".." }
+nalgebra = "0.35"
+pyo3 = { version = "0.29", features = ["extension-module"] }
