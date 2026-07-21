@@ -24,7 +24,7 @@ struct DofRecord {
 
 /// Reusable workspace for forward kinematics computations, including memory
 /// buffers that should be allocated once and reused across multiple (typically
-/// all) calls to `forward_kinematics_with_jacobian`.
+/// all) calls to [`evaluate_fwdkin`].
 pub struct ForwardKinematicsWorkspace {
     /// Number of joints (and therefore keypoints) in the kinematic tree
     n_joints: usize,

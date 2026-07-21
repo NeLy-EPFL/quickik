@@ -52,9 +52,13 @@ impl State {
         let d_root_rot = Vector3::new(delta[3], delta[4], delta[5]);
         self.root_rot = unit_quat_from_axis_angle_vec(d_root_rot) * self.root_rot;
 
-        // Body DOF state
-        for (i, angle) in self.dof_angles.iter_mut().enumerate() {
+        // Body DOF state, clamped to each DOF's angle limits (if any)
+        let dofs = self.kinematic_tree.joints.iter().flat_map(|j| &j.dofs);
+        for (i, (angle, dof)) in self.dof_angles.iter_mut().zip(dofs).enumerate() {
             *angle += delta[N_ROOT_DOFS + i];
+            if let Some([min, max]) = dof.limits {
+                *angle = angle.clamp(min, max);
+            }
         }
     }
 }

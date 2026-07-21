@@ -4,12 +4,12 @@ use nalgebra::{DMatrix, DVector, Vector3};
 
 use crate::body_plan::{KinematicTree, N_ROOT_DOFS};
 use crate::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use crate::observation::KeypointObservation;
+use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
 use crate::state::State;
 
 /// Configuration for the inverse kinematics solver.
 #[derive(Clone, Copy, Debug)]
-pub struct SolverConfig {
+pub struct SolverConfig<M: Mapper3Dto2D = NoMapper> {
     /// Fixed number of Gauss-Newton steps per solve.
     pub n_iterations: usize,
     /// Levenberg-Marquardt damping added to the normal equations' diagonal.
@@ -20,28 +20,42 @@ pub struct SolverConfig {
     /// This regularization term improves robustness when keypoints are missing
     /// or noisy, but can also bias the solution away from the true pose.
     pub neutral_pose_weight: f32,
+    /// Mapper used to project every [`Position2D`] observation. `None` if
+    /// keypoint observations will be provided in 3D.
+    ///
+    /// [`Position2D`]: crate::observation::KeypointObservation::Position2D
+    pub mapper: Option<M>,
 }
 
-impl Default for SolverConfig {
+impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
     fn default() -> Self {
         SolverConfig {
             n_iterations: 10,
             damping: 1e-6,
             neutral_pose_weight: 1e-3,
+            mapper: None,
         }
     }
 }
 
 /// The inverse kinematics solver.
-pub struct Solver {
+///
+/// Generic over the mapper `M` used to project 3D positions and Jacobians to
+/// 2D for [`Position2D`] observations. Set to [`NoMapper`] if observations
+/// are given in 3D (default). The mapper is fixed once upon construction, so
+/// each solver can only accept one type of observation.
+///
+/// [`Position2D`]: crate::observation::KeypointObservation::Position2D
+pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     workspace: ForwardKinematicsWorkspace,
     neutral_joint_angles: Vec<f32>,
     jtj: DMatrix<f32>,
     jtr: DVector<f32>,
+    pub config: SolverConfig<M>,
 }
 
-impl Solver {
-    pub fn new(kinematic_tree: &KinematicTree) -> Self {
+impl<M: Mapper3Dto2D> Solver<M> {
+    pub fn new(kinematic_tree: &KinematicTree, config: SolverConfig<M>) -> Self {
         // Populate neutral joint angles
         let mut neutral_joint_angles = vec![0.0; kinematic_tree.n_dofs()];
         for joint in &kinematic_tree.joints {
@@ -57,25 +71,19 @@ impl Solver {
             neutral_joint_angles,
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
+            config,
         }
     }
 
-    /// Runs `config.n_iterations` Gauss-Newton steps in place on `state`,
-    /// given one observation per keypoint (`observations.len() ==
-    /// state.kinematic_tree.n_joints()`, in `state.kinematic_tree.joints` order). Warm
-    /// start by reusing the same `state` across frames rather than
-    /// constructing a new one -- and reuse this same `Solver` too, since it
-    /// must have been built from that `state`'s own bodyplan.
-    pub fn solve(
-        &mut self,
-        state: &mut State,
-        observations: &[KeypointObservation],
-        config: &SolverConfig,
-    ) {
+    /// Runs Gauss-Newton steps in place on `state` given one observation per
+    /// keypoint (although the observations may be [`Missing`]).
+    ///
+    /// [`Missing`]: crate::observation::KeypointObservation::Missing
+    pub fn solve(&mut self, state: &mut State, observations: &[KeypointObservation]) {
         debug_assert_eq!(observations.len(), state.kinematic_tree.n_joints());
 
         let state_dim = state.state_dim();
-        for _ in 0..config.n_iterations {
+        for _ in 0..self.config.n_iterations {
             evaluate_fwdkin(&mut self.workspace, state);
 
             self.jtj.fill(0.0);
@@ -87,6 +95,7 @@ impl Solver {
                 let jacobian_3d = self.workspace.kpt_jacobian.rows(3 * k, 3).into_owned();
                 accumulate_keypoint_residual(
                     obs,
+                    self.config.mapper.as_ref(),
                     &self.workspace.kpt_positions[k],
                     &jacobian_3d,
                     &mut self.jtj,
@@ -97,7 +106,7 @@ impl Solver {
             accumulate_neutral_pose_prior(
                 state,
                 &self.neutral_joint_angles,
-                config.neutral_pose_weight,
+                self.config.neutral_pose_weight,
                 &mut self.jtj,
                 &mut self.jtr,
             );
@@ -107,7 +116,7 @@ impl Solver {
             // than 1, for example when coordinates are pixel coordinates and
             // can go up to thousands), the damping term is scaled up to match.
             for i in 0..state_dim {
-                self.jtj[(i, i)] += config.damping * self.jtj[(i, i)].max(1.0);
+                self.jtj[(i, i)] += self.config.damping * self.jtj[(i, i)].max(1.0);
             }
 
             // Update state
@@ -120,8 +129,9 @@ impl Solver {
     }
 }
 
-fn accumulate_keypoint_residual(
+fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     obs: &KeypointObservation,
+    mapper: Option<&M>,
     fwdkin_pos3d: &Vector3<f32>,
     jacobian_3d: &DMatrix<f32>,
     jtj: &mut DMatrix<f32>,
@@ -134,11 +144,10 @@ fn accumulate_keypoint_residual(
             *jtj += jacobian_3d.transpose() * jacobian_3d * weight;
             *jtr += jacobian_3d.transpose() * residual * weight;
         }
-        KeypointObservation::Position2D {
-            obs_pos,
-            weight,
-            mapper,
-        } => {
+        KeypointObservation::Position2D { obs_pos, weight } => {
+            let mapper = mapper.expect(
+                "Position2D observation given to a Solver constructed with mapper: None",
+            );
             let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
             let residual = obs_pos - fwdkin_pos2d;
             *jtj += jacobian_2d.transpose() * &jacobian_2d * weight;

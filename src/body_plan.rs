@@ -50,7 +50,7 @@ pub struct Joint {
 /// A kinematic tree, i.e. body plan, or skeleton.
 #[derive(Clone, Debug)]
 pub struct KinematicTree {
-    /// Joints in the kinematic tree. The order is should be consistent with
+    /// Joints in the kinematic tree. The order should be consistent with
     /// `parent` indices in the `Joint` instances.
     pub joints: Vec<Joint>,
     /// Index of the root joint in `joints`. Should usually be 0.

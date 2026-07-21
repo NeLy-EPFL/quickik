@@ -6,18 +6,24 @@
 use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
 
 /// Observation of a single keypoint, e.g. from MoCap data.
+///
+/// A [`Position2D`] observation carries no mapper of its own -- the mapper
+/// used to project the forward-kinematics position into 2D is specified once
+/// when [`Solver`] is constructed.
+///
+/// [`Position2D`]: KeypointObservation::Position2D
+/// [`Solver`]: crate::solver::Solver
 #[derive(Clone, Copy, Debug)]
-pub enum KeypointObservation<M: Mapper3Dto2D> {
+pub enum KeypointObservation {
     /// Not observed this frame (e.g. occluded).
     Missing,
     /// A 3D world position, e.g. triangulated from multiple calibrated cameras.
     Position3D { obs_pos: Vector3<f32>, weight: f32 },
-    /// A 2D pixel position from a single calibrated camera.
-    Position2D {
-        obs_pos: Vector2<f32>,
-        weight: f32,
-        mapper: M,
-    },
+    /// A 2D pixel position from the single calibrated camera (or other
+    /// mapper) that the consuming [`Solver`] was constructed with.
+    ///
+    /// [`Solver`]: crate::solver::Solver
+    Position2D { obs_pos: Vector2<f32>, weight: f32 },
 }
 
 /// Mapping 3D keypoint positions in world coordinates and their Jacobians to
@@ -25,13 +31,32 @@ pub enum KeypointObservation<M: Mapper3Dto2D> {
 /// the MoCap data provides 2D pixel coordinates from a camera, this might be a
 /// camera calibration model. If the MoCap data already provides reprojected 2D
 /// physical coordinates, this might simply be a reduced-rank identity mapping.
-pub trait Mapper3Dto2D {
+pub trait Mapper3Dto2D: Copy + std::fmt::Debug {
     /// Maps a 3D world position and its Jacobian to 2D.
     fn project_3d_to_2d(
         &self,
         pos_world3d: &Vector3<f32>,
         jacobian_world3d: &DMatrix<f32>,
     ) -> (Vector2<f32>, DMatrix<f32>);
+}
+
+/// Placeholder mapper for a [`Solver`] that receives 3D keypoint observations.
+///
+/// [`Solver`]: crate::solver::Solver
+#[derive(Clone, Copy, Debug)]
+pub struct NoMapper;
+
+impl Mapper3Dto2D for NoMapper {
+    fn project_3d_to_2d(
+        &self,
+        _pos_world3d: &Vector3<f32>,
+        _jacobian_world3d: &DMatrix<f32>,
+    ) -> (Vector2<f32>, DMatrix<f32>) {
+        unreachable!(
+            "NoMapper::project_3d_to_2d was called -- a Solver<NoMapper> (no mapper set) was \
+             given a Position2D observation"
+        )
+    }
 }
 
 /// A pinhole camera for inverse kinematics from 2D keypoint observations.
@@ -79,6 +104,7 @@ impl Mapper3Dto2D for Camera {
 }
 
 /// A 2D X-Y view of a 3D keypoint, already in world coordinates.
+#[derive(Clone, Copy, Debug)]
 pub struct XYView;
 
 impl Mapper3Dto2D for XYView {
