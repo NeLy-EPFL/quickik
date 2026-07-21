@@ -192,6 +192,55 @@ fn solve_respects_joint_limits() {
 }
 
 #[test]
+fn convergence_tolerance_stops_iterating_early() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    // Tolerances far larger than any single Gauss-Newton step's magnitude in
+    // this toy problem, so every solve below should stop after exactly one
+    // iteration regardless of its n_iterations cap.
+    let generous_tolerance_config = SolverConfig {
+        neutral_pose_weight: 0.0,
+        position_tolerance: 10.0,
+        angle_tolerance: 10.0,
+        ..SolverConfig::default()
+    };
+
+    let mut state_few = State::neutral_pose(tree.clone());
+    let mut solver_few: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            n_iterations: 1,
+            ..generous_tolerance_config
+        },
+    );
+    solver_few.solve(&mut state_few, &observations);
+
+    let mut state_many = State::neutral_pose(tree.clone());
+    let mut solver_many: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            n_iterations: 50,
+            ..generous_tolerance_config
+        },
+    );
+    solver_many.solve(&mut state_many, &observations);
+
+    // If early termination weren't stopping solver_many after its first
+    // iteration too, it would have kept converging further than solver_few
+    // over its remaining 49 iterations, and the two states would differ.
+    assert_eq!(state_few.dof_angles, state_many.dof_angles);
+    assert_eq!(state_few.root_pos, state_many.root_pos);
+}
+
+#[test]
 #[should_panic(expected = "Solver constructed with mapper: None")]
 fn position2d_observation_on_mapperless_solver_panics() {
     let tree = common::two_joint_chain();

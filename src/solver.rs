@@ -20,6 +20,18 @@ pub struct SolverConfig<M: Mapper3Dto2D = NoMapper> {
     /// This regularization term improves robustness when keypoints are missing
     /// or noisy, but can also bias the solution away from the true pose.
     pub neutral_pose_weight: f32,
+    /// Stop iterating early once an update step's largest root-position
+    /// component drops below this value, *and* the largest angle update drops
+    /// below [`angle_tolerance`](Self::angle_tolerance). In other words,
+    /// `n_iterations` acts as a maximum cap rather than a fixed step count.
+    /// This is useful for warm-started frames, which may converge much sooner.
+    /// Set to 0 to disable early termination.
+    ///
+    /// [`Missing`]: crate::observation::KeypointObservation::Missing
+    pub position_tolerance: f32,
+    /// See [`position_tolerance`](Self::position_tolerance). Specified in
+    /// radians.
+    pub angle_tolerance: f32,
     /// Mapper used to project every [`Position2D`] observation. `None` if
     /// keypoint observations will be provided in 3D.
     ///
@@ -33,6 +45,8 @@ impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
             n_iterations: 10,
             damping: 1e-6,
             neutral_pose_weight: 1e-3,
+            position_tolerance: 1e-3,
+            angle_tolerance: 1e-3,
             mapper: None,
         }
     }
@@ -75,8 +89,9 @@ impl<M: Mapper3Dto2D> Solver<M> {
         }
     }
 
-    /// Runs Gauss-Newton steps in place on `state` given one observation per
-    /// keypoint (although the observations may be [`Missing`]).
+    /// Runs `self.config.n_iterations` Gauss-Newton steps in place on
+    /// `state`, given observations for all  keypoints (although the observation
+    /// type may be [`Missing`] for some).
     ///
     /// [`Missing`]: crate::observation::KeypointObservation::Missing
     pub fn solve(&mut self, state: &mut State, observations: &[KeypointObservation]) {
@@ -125,7 +140,26 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 // no update if all keypoints are missing or if numerically unstable
                 .unwrap_or_else(|| DVector::zeros(state_dim));
             state.apply_delta(&delta);
+
+            if self.has_converged(&delta) {
+                break;
+            }
         }
+    }
+
+    fn has_converged(&self, delta: &DVector<f32>) -> bool {
+        // Positions: delta[0..3] is root position
+        let max_abs_position_delta = delta
+            .rows(0, 3)
+            .iter()
+            .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+        // Angles: delta[3..6] is root rotation, the rest are DOF angles
+        let max_abs_angle_delta = delta
+            .rows(3, delta.len() - 3)
+            .iter()
+            .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+        max_abs_position_delta <= self.config.position_tolerance
+            && max_abs_angle_delta <= self.config.angle_tolerance
     }
 }
 
@@ -145,9 +179,8 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
             *jtr += jacobian_3d.transpose() * residual * weight;
         }
         KeypointObservation::Position2D { obs_pos, weight } => {
-            let mapper = mapper.expect(
-                "Position2D observation given to a Solver constructed with mapper: None",
-            );
+            let mapper = mapper
+                .expect("Position2D observation given to a Solver constructed with mapper: None");
             let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
             let residual = obs_pos - fwdkin_pos2d;
             *jtj += jacobian_2d.transpose() * &jacobian_2d * weight;
