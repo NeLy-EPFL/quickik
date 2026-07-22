@@ -93,14 +93,17 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
     }
     println!(
         "(kpt rms/max: 3D distance to target, model units. angle err: max abs error over all \
-         42 DOFs, degrees, mod 2*pi. \"w=0\" = neutral_pose_weight=0, isolating solver/FK \
-         correctness from the intentional regularization bias.)\n"
+         {} DOFs, degrees, mod 2*pi. \"w=0\" = neutral_pose_weight=0, isolating solver/FK \
+         correctness from the intentional regularization bias.)\n",
+        tree.state_dim()
     );
 }
 
 /// Real-data cross-solver test: feed real (noisy) mocap keypoints, warm
-/// started frame-to-frame like real usage, and compare fastik's fit quality
-/// and reconstructed keypoints against flygym.ik's on the same targets.
+/// started frame-to-frame like real usage, and check fastik's fit quality.
+/// When `frames` also carries a reference solver's reconstruction (currently
+/// only NeuroMechFly/flygym.ik, via `RealFrame::flygym_ik_reconstructed_ego`),
+/// also compares fastik's reconstructed keypoints against it.
 pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
 
@@ -121,10 +124,12 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
         fastik_rms_all.push(rms);
         fastik_max_all.push(max);
 
-        let (cross_rms, cross_max) =
-            residual_stats(&workspace.kpt_positions, &frame.flygym_ik_reconstructed_ego);
-        cross_rms_all.push(cross_rms);
-        cross_max_all.push(cross_max);
+        if let Some(flygym_ik_reconstructed_ego) = &frame.flygym_ik_reconstructed_ego {
+            let (cross_rms, cross_max) =
+                residual_stats(&workspace.kpt_positions, flygym_ik_reconstructed_ego);
+            cross_rms_all.push(cross_rms);
+            cross_max_all.push(cross_max);
+        }
     }
 
     let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
@@ -138,12 +143,16 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
         mean(&fastik_rms_all),
         max_of(&fastik_max_all)
     );
-    println!(
-        "  cross-solver agreement (vs flygym.ik): rms={:.5}  mean={:.5}  max={:.5}\n",
-        rms_of(&cross_rms_all),
-        mean(&cross_rms_all),
-        max_of(&cross_max_all)
-    );
+    if cross_rms_all.is_empty() {
+        println!("  cross-solver agreement: no reference reconstruction in fixtures, skipped\n");
+    } else {
+        println!(
+            "  cross-solver agreement (vs flygym.ik): rms={:.5}  mean={:.5}  max={:.5}\n",
+            rms_of(&cross_rms_all),
+            mean(&cross_rms_all),
+            max_of(&cross_max_all)
+        );
+    }
 }
 
 pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {

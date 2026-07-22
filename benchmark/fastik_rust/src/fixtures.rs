@@ -35,21 +35,22 @@ impl SyntheticFrame {
 }
 
 /// A real (noisy) mocap frame, rigidly aligned into this model's own frame
-/// convention, plus flygym.ik's own solved reconstruction for the same
-/// target -- for a cross-solver comparison. Sparsely sampled (every 30th
-/// recorded frame, ~91ms apart): good for a diverse correctness check, but
-/// understates how warm "warm start" is in real continuous use -- see
-/// [`NativeRateFrame`] for a warm-start *performance* benchmark instead.
+/// convention, plus -- for bodies with a reference solver to cross-check
+/// against (currently only NeuroMechFly/flygym.ik) -- that solver's own
+/// reconstruction for the same target. Sparsely sampled (every 30th recorded
+/// frame, ~91ms apart): good for a diverse correctness check, but understates
+/// how warm "warm start" is in real continuous use -- see [`NativeRateFrame`]
+/// for a warm-start *performance* benchmark instead.
 #[derive(Deserialize)]
 pub struct RealFrame {
     #[allow(dead_code)]
     pub frame: usize,
     pub target_ego: Vec<[f32; 3]>,
-    pub flygym_ik_reconstructed_ego: Vec<[f32; 3]>,
+    pub flygym_ik_reconstructed_ego: Option<Vec<[f32; 3]>>,
     #[allow(dead_code)]
-    pub flygym_ik_success: bool,
+    pub flygym_ik_success: Option<bool>,
     #[allow(dead_code)]
-    pub flygym_ik_cost: f32,
+    pub flygym_ik_cost: Option<f32>,
 }
 
 /// One frame of a *contiguous* run of consecutive recorded frames (no gaps),

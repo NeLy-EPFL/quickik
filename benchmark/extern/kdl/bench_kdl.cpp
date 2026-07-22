@@ -33,21 +33,17 @@
 //    joints can be used as both an IK target and an FK query point.
 //
 // 4. Solve loop: NOT `TreeIkSolverPos_NR_JL` (KDL's own convenience wrapper
-//    around `TreeIkSolverVel_wdls`). Reading treeiksolverpos_nr_jl.cpp shows
-//    its only early-stop check is `residual_norm < eps` -- the combined L2
+//    around `TreeIkSolverVel_wdls`). Its only early-stop check is
+//    `residual_norm < eps` (treeiksolverpos_nr_jl.cpp) -- the combined L2
 //    norm of ALL 30 endpoints' position error at once. On real (imperfectly
-//    fittable) mocap data that residual has a floor around 0.08-0.13 (see
-//    the correctness section below), so `residual_norm < eps` can never
-//    trigger for any `eps` tight enough to be meaningful, and every solve
-//    silently burns the full `kMaxIter` -- this is not a tuning choice, it's
-//    a solve loop with no working early-stop for data like this. `solve()`
+//    fittable) mocap data that residual has a floor around 0.08-0.13, well
+//    above any `eps` tight enough to be meaningful, so the check never
+//    triggers and every solve silently burns the full `kMaxIter`. `solve()`
 //    below reimplements the same per-iteration math (call the velocity
 //    solver, apply the update) directly against `TreeIkSolverVel_wdls`, and
-//    adds the missing step-size check `TreeIkSolverPos_NR_JL` lacks (max abs
+//    adds the step-size check `TreeIkSolverPos_NR_JL` lacks: max abs
 //    component of the per-iteration joint delta, matching fastik's own
-//    `position_tolerance`/`angle_tolerance` semantics exactly). See
-//    README.md for the sweep proving this loses no accuracy while cutting
-//    iteration counts by 5.5-20x depending on tolerance.
+//    `position_tolerance`/`angle_tolerance` semantics exactly.
 
 #include <kdl/frames.hpp>
 #include <kdl/jntarray.hpp>
@@ -174,9 +170,10 @@ KdlModel build_model(const BodyPlan &plan) {
 // Per-thread (and per-main-solve) solver bundle: KDL's tree IK/FK solvers
 // hold mutable Eigen scratch buffers as member state, so each concurrent
 // solve needs its own instances -- built fresh from the (read-only,
-// freely-shareable) BodyPlan. No joint-limit clamping: all JSON limits are
-// null (see kBigLimit's old use, now dropped along with
-// `TreeIkSolverPos_NR_JL`, which was the only consumer of q_min/q_max).
+// freely-shareable) BodyPlan. No joint-limit clamping needed: all JSON dof
+// limits are null, and `q_min`/`q_max` are only used by
+// `TreeIkSolverPos_NR_JL`, which this file doesn't use (see file header
+// note 4).
 struct SolverBundle {
   KdlModel model;
   TreeFkSolverPos_recursive fk;
@@ -359,13 +356,53 @@ double run_multithread_once(const BodyPlan &plan, const std::vector<double> &neu
   return elapsed_us(t0) / 1e6;  // seconds
 }
 
-void write_results_json(double single_frame_latency_us, double single_frame_latency_max_us,
+void write_results_json(const std::string &body, double single_frame_latency_us, double single_frame_latency_max_us,
                          double single_thread_throughput_fps, double multi_thread_throughput_fps) {
   std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../../plot/results";
   std::filesystem::create_directories(out_dir);
-  std::ofstream out(out_dir / "kdl.json");
+  std::ofstream out(out_dir / ("kdl-" + body + ".json"));
+  std::string notes =
+      "Orocos KDL has no native floating-base joint or "
+      "position-only-IK task; the free-floating root is modeled as 6 "
+      "scalar joints in series (TransX/Y/Z, RotZ/Y/X -- a sequential "
+      "Euler-like parametrization, not fastik's singularity-free "
+      "quaternion), and position-only fitting is emulated by zeroing the "
+      "3 rotational rows of TreeIkSolverVel_wdls's task-space weight "
+      "matrix per endpoint. Uses a hand-written outer loop (not KDL's own "
+      "TreeIkSolverPos_NR_JL, whose only early-stop -- a combined "
+      "residual norm over all endpoints -- never triggers on real, "
+      "imperfectly-fittable mocap data, so it silently always burns the "
+      "full iteration cap) adding a fastik-tolerance-matched step-size "
+      "early-stop instead, cutting mean iteration count from the full cap "
+      "to ~7 on the fly body with no change in residual accuracy. KDL is "
+      "still far slower than fastik/RBDL on this workload, though -- its "
+      "per-iteration cost (a dense SVD over the task-space Jacobian) is "
+      "inherently much higher than RBDL's/fastik's normal-equations solve, "
+      "a genuine algorithmic difference, not a tuning artifact. "
+      "multi_thread_throughput_fps "
+      "uses simple contiguous chunking (8 independent, "
+      "internally-warm-started, externally-cold-started chunks), not "
+      "fastik's overlap-stitched segmented solve, since KDL has no "
+      "parallel solve path to mirror. single_frame_latency_max_us forces "
+      "max_iter=10 (not this file's own kMaxIter=100 ceiling) so the "
+      "forced-worst-case number is comparable to fastik/RBDL/Pinocchio's, "
+      "which all cap at 10.";
+  if (body == "g1") {
+    notes +=
+        " Unlike the fly, G1's step-size early-stop NEVER triggers within "
+        "kMaxIter=100 -- every single_frame_latency_us call burns the full "
+        "100 iterations, landing at a real but looser ~3-4mm position "
+        "residual (vs. the fly's ~10-micron near-exact fit), which is why "
+        "single_frame_latency_us (100 real iterations) is larger than "
+        "single_frame_latency_max_us (only 10 forced iterations) for this "
+        "body -- backwards from every other body/library combination in "
+        "this comparison, and not a bug: it reflects KDL's own actual "
+        "default behavior being worse than the shared 10-iteration cap on "
+        "this harder problem, not an inconsistency in the measurement.";
+  }
   out << "{\n"
       << "  \"name\": \"kdl\",\n"
+      << "  \"body\": \"" << body << "\",\n"
       << "  \"language\": \"cpp\",\n"
       << "  \"formulation\": \"whole-tree\",\n"
       << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
@@ -373,42 +410,29 @@ void write_results_json(double single_frame_latency_us, double single_frame_late
       << "  \"single_thread_throughput_fps\": " << single_thread_throughput_fps << ",\n"
       << "  \"multi_thread_throughput_fps\": " << multi_thread_throughput_fps << ",\n"
       << "  \"multi_thread_n_threads\": " << kNThreads << ",\n"
-      << "  \"notes\": \"Orocos KDL has no native floating-base joint or "
-         "position-only-IK task; the free-floating root is modeled as 6 "
-         "scalar joints in series (TransX/Y/Z, RotZ/Y/X -- a sequential "
-         "Euler-like parametrization, not fastik's singularity-free "
-         "quaternion), and position-only fitting is emulated by zeroing the "
-         "3 rotational rows of TreeIkSolverVel_wdls's task-space weight "
-         "matrix per endpoint. Uses a hand-written outer loop (not KDL's own "
-         "TreeIkSolverPos_NR_JL, whose only early-stop -- a combined "
-         "residual norm over all 30 endpoints -- never triggers on real, "
-         "imperfectly-fittable mocap data, so it silently always burns the "
-         "full iteration cap) adding a fastik-tolerance-matched step-size "
-         "early-stop instead; see README.md for the sweep proving this loses "
-         "no accuracy while cutting mean iteration count from maxed-out to "
-         "~7. Even with this fix, KDL is still far slower than fastik/RBDL "
-         "on this workload -- its per-iteration cost (a dense SVD over a "
-         "180x48 task-space Jacobian) is inherently much higher than "
-         "RBDL's/fastik's normal-equations solve, a genuine algorithmic "
-         "difference, not a tuning artifact. multi_thread_throughput_fps "
-         "uses simple contiguous chunking (8 independent, "
-         "internally-warm-started, externally-cold-started chunks), not "
-         "fastik's overlap-stitched segmented solve, since KDL has no "
-         "parallel solve path to mirror. single_frame_latency_max_us forces "
-         "max_iter=10 (not this file's own kMaxIter=100 ceiling) so the "
-         "forced-worst-case number is comparable to fastik/RBDL/Pinocchio's, "
-         "which all cap at 10.\"\n"
+      << "  \"notes\": \"" << notes << "\"\n"
       << "}\n";
 }
 
-}  // namespace
+// One body to benchmark: its name (used for the output filename and JSON
+// "body" field) and its matching body-plan/fixtures files under assets_dir.
+struct BodyConfig {
+  const char *name;
+  const char *body_plan;
+  const char *fixtures;
+};
 
-int main() {
-  const std::filesystem::path assets_dir = std::filesystem::path(__FILE__).parent_path() / "../../assets";
+constexpr BodyConfig kBodies[] = {
+    {"neuromechfly", "neuromechfly_ypr_legs.json", "fixtures.json"},
+    {"g1", "g1_body_plan.json", "fixtures_g1.json"},
+};
 
-  BodyPlan plan = load_body_plan((assets_dir / "neuromechfly_ypr_legs.json").string());
-  std::vector<double> neutral_angles = load_neutral_angles((assets_dir / "neuromechfly_ypr_legs.json").string());
-  Json fixtures = parse_json_file((assets_dir / "fixtures.json").string());
+void run_body(const BodyConfig &body, const std::filesystem::path &assets_dir) {
+  std::printf("\n########## body: %s ##########\n\n", body.name);
+
+  BodyPlan plan = load_body_plan((assets_dir / body.body_plan).string());
+  std::vector<double> neutral_angles = load_neutral_angles((assets_dir / body.body_plan).string());
+  Json fixtures = parse_json_file((assets_dir / body.fixtures).string());
 
   SolverBundle sb(plan);
   std::printf("KDL tree: %u segments, %u dofs (%zu floating-base + %zu real)\n\n", sb.model.tree.getNrOfSegments(),
@@ -447,7 +471,15 @@ int main() {
   std::printf("n_frames=%-6zu elapsed=%9.3fs  throughput=%10.1f frames/s\n", sequence.size(), elapsed_s,
               multithread_fps);
 
-  write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps);
-  std::printf("\nWrote ../../plot/results/kdl.json\n");
+  write_results_json(body.name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us,
+                      multithread_fps);
+  std::printf("\nWrote ../../plot/results/kdl-%s.json\n", body.name);
+}
+
+}  // namespace
+
+int main() {
+  const std::filesystem::path assets_dir = std::filesystem::path(__FILE__).parent_path() / "../../assets";
+  for (const auto &body : kBodies) run_body(body, assets_dir);
   return 0;
 }

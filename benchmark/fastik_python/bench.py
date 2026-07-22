@@ -2,8 +2,9 @@
 Python bindings, mirroring `benchmark/src/{correctness,perf}.rs` (the Rust
 API benchmark) so the two are directly comparable.
 
-Uses the same `assets/fixtures.json`/`assets/neuromechfly_ypr_legs.json` as
-the Rust benchmark (see `generate_fixtures.py`). Requires:
+Runs against every body listed in `BODIES` below, each with its own
+body-plan + fixtures JSON pair under `assets/` (see `generate_fixtures.py`).
+Requires:
 
   - fastik's Python extension built for this interpreter (see
     `python/README` or the top-level README's "Python" install section --
@@ -29,6 +30,7 @@ exactly, for a fair cross-language comparison.
 
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -39,11 +41,50 @@ import fastik
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
 
-fixtures = json.loads((ASSETS_DIR / "fixtures.json").read_text())
-bodyplan = json.loads((ASSETS_DIR / "neuromechfly_ypr_legs.json").read_text())
-JOINTS = bodyplan["joints"]
-LEG_JOINT_NAMES = fixtures["leg_joint_names"]
-assert [j["name"] for j in JOINTS][1:] == LEG_JOINT_NAMES
+BODIES = [
+    {
+        "name": "neuromechfly",
+        "body_plan": "neuromechfly_ypr_legs.json",
+        "fixtures": "fixtures.json",
+    },
+    {
+        "name": "g1",
+        "body_plan": "g1_body_plan.json",
+        "fixtures": "fixtures_g1.json",
+    },
+]
+
+
+@dataclass
+class BodyContext:
+    """Everything derived from one body's body-plan + fixtures JSON pair,
+    built once per body and threaded explicitly through the functions below
+    instead of living in module globals."""
+
+    name: str
+    tree: "fastik.KinematicTree"
+    fixtures: dict
+    joints: list
+    leg_joint_names: list
+    dof_offsets: dict
+
+
+def build_body_context(name, body_plan, fixtures):
+    body_plan_path = ASSETS_DIR / body_plan
+    fixtures = json.loads((ASSETS_DIR / fixtures).read_text())
+    joints = json.loads(body_plan_path.read_text())["joints"]
+    leg_joint_names = fixtures["leg_joint_names"]
+    assert [j["name"] for j in joints][1:] == leg_joint_names
+
+    dof_offsets = {}
+    cursor = 0
+    for j in joints:
+        dof_offsets[j["name"]] = cursor
+        cursor += len(j["dofs"])
+
+    tree = fastik.KinematicTree.from_json_file(str(body_plan_path))
+    return BodyContext(name, tree, fixtures, joints, leg_joint_names, dof_offsets)
+
 
 # -----------------------------------------------------------------------------
 # Independent forward kinematics, straight from the JSON body plan -- does not
@@ -51,20 +92,13 @@ assert [j["name"] for j in JOINTS][1:] == LEG_JOINT_NAMES
 # state, mirroring the Rust benchmark's use of fastik's own (Python-unexposed)
 # evaluate_fwdkin for the same purpose.
 # -----------------------------------------------------------------------------
-_DOF_OFFSETS = {}
-_cursor = 0
-for _j in JOINTS:
-    _DOF_OFFSETS[_j["name"]] = _cursor
-    _cursor += len(_j["dofs"])
-
-
-def forward_kinematics(dof_angles, root_pos, root_rot_wxyz):
-    """Returns keypoint positions in `leg_joint_names` order (root excluded),
-    matching `target_ego`'s layout in the fixtures."""
+def forward_kinematics(ctx, dof_angles, root_pos, root_rot_wxyz):
+    """Returns keypoint positions in `ctx.leg_joint_names` order (root
+    excluded), matching `target_ego`'s layout in the fixtures."""
     w, x, y, z = root_rot_wxyz
     world_pos = {}
     world_rot = {}
-    for j in JOINTS:
+    for j in ctx.joints:
         name, parent = j["name"], j["parent"]
         if parent is None:
             origin, rot = np.array(root_pos, dtype=float), R.from_quat([x, y, z, w])
@@ -73,12 +107,12 @@ def forward_kinematics(dof_angles, root_pos, root_rot_wxyz):
             origin = p_origin + p_rot.apply(j["offset_pos"])
             qw, qx, qy, qz = j["offset_quat"]
             rot = p_rot * R.from_quat([qx, qy, qz, qw])
-        dof_start = _DOF_OFFSETS[name]
+        dof_start = ctx.dof_offsets[name]
         for i, dof in enumerate(j["dofs"]):
             axis = np.array(dof["axis"])
             rot = rot * R.from_rotvec(axis * dof_angles[dof_start + i])
         world_pos[name], world_rot[name] = origin, rot
-    return np.array([world_pos[name] for name in LEG_JOINT_NAMES])
+    return np.array([world_pos[name] for name in ctx.leg_joint_names])
 
 
 def build_observations(target_ego):
@@ -96,21 +130,23 @@ def angle_error_deg(solved, ground_truth):
 # -----------------------------------------------------------------------------
 # Correctness (mirrors correctness.rs)
 # -----------------------------------------------------------------------------
-def run_correctness():
-    tree = fastik.KinematicTree.from_json_file(str(ASSETS_DIR / "neuromechfly_ypr_legs.json"))
+def run_correctness(ctx):
+    tree = ctx.tree
 
     print("== Synthetic exact-fit frames (bug hunt) ==")
     print(f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}")
     default_solver = fastik.Solver(tree, fastik.SolverConfig())
     zero_reg_solver = fastik.Solver(tree, fastik.SolverConfig(neutral_pose_weight=0.0))
-    for i, frame in enumerate(fixtures["synthetic_frames"]):
+    for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
-        ground_truth = np.array(frame["ground_truth_dof_angles_per_leg"]).flatten()
+        ground_truth = np.concatenate(
+            [np.asarray(g, dtype=float) for g in frame["ground_truth_dof_angles_per_leg"]]
+        )
         obs = build_observations(target)
 
         state = fastik.State.neutral_pose(tree)
         default_solver.solve(state, obs)
-        solved_pts = forward_kinematics(state.dof_angles, state.root_pos, state.root_rot)
+        solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
         residual = np.linalg.norm(solved_pts - target, axis=1)
         angle_err = angle_error_deg(state.dof_angles, ground_truth)
 
@@ -124,8 +160,8 @@ def run_correctness():
         )
     print(
         "(kpt rms/max: 3D distance to target, via an independent from-JSON FK "
-        "replica, model units. angle err: max abs error over all 42 DOFs, "
-        "degrees, mod 2*pi. \"w=0\" = neutral_pose_weight=0.)\n"
+        f"replica, model units. angle err: max abs error over all {tree.n_dofs} "
+        'DOFs, degrees, mod 2*pi. "w=0" = neutral_pose_weight=0.)\n'
     )
 
     print("== Real mocap frames (cross-solver vs. flygym.ik) ==")
@@ -136,28 +172,32 @@ def run_correctness():
     # keypoint pooled together is a *different*, not-quite-comparable
     # statistic from a per-frame-then-aggregated one).
     fastik_rms, fastik_max, cross_rms, cross_max = [], [], [], []
-    for frame in fixtures["real_frames"]:
+    for frame in ctx.fixtures["real_frames"]:
         target = np.array(frame["target_ego"])
         state = seq.solve_frame(build_observations(target))
-        solved_pts = forward_kinematics(state.dof_angles, state.root_pos, state.root_rot)
+        solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
         dists = np.linalg.norm(solved_pts - target, axis=1)
         fastik_rms.append(np.sqrt((dists**2).mean()))
         fastik_max.append(dists.max())
-        cross_dists = np.linalg.norm(solved_pts - np.array(frame["flygym_ik_reconstructed_ego"]), axis=1)
-        cross_rms.append(np.sqrt((cross_dists**2).mean()))
-        cross_max.append(cross_dists.max())
+        reconstructed = frame.get("flygym_ik_reconstructed_ego")
+        if reconstructed is not None:
+            cross_dists = np.linalg.norm(solved_pts - np.array(reconstructed), axis=1)
+            cross_rms.append(np.sqrt((cross_dists**2).mean()))
+            cross_max.append(cross_dists.max())
     fastik_rms, fastik_max = np.array(fastik_rms), np.array(fastik_max)
-    cross_rms, cross_max = np.array(cross_rms), np.array(cross_max)
-    print(f"over {len(fixtures['real_frames'])} frames:")
+    print(f"over {len(ctx.fixtures['real_frames'])} frames:")
     print(
         f"  fastik fit residual to target:      "
         f"rms={np.sqrt((fastik_rms**2).mean()):.5f}  mean={fastik_rms.mean():.5f}  max={fastik_max.max():.5f}"
     )
-    print(
-        f"  cross-solver agreement (vs flygym.ik): "
-        f"rms={np.sqrt((cross_rms**2).mean()):.5f}  mean={cross_rms.mean():.5f}  max={cross_max.max():.5f}\n"
-    )
-    return tree
+    if cross_rms:
+        cross_rms, cross_max = np.array(cross_rms), np.array(cross_max)
+        print(
+            f"  cross-solver agreement (vs flygym.ik): "
+            f"rms={np.sqrt((cross_rms**2).mean()):.5f}  mean={cross_rms.mean():.5f}  max={cross_max.max():.5f}\n"
+        )
+    else:
+        print("  cross-solver agreement (vs flygym.ik): n/a (no reference in fixtures)\n")
 
 
 # -----------------------------------------------------------------------------
@@ -166,7 +206,7 @@ def run_correctness():
 def summarize(label, samples_sec):
     """Prints the usual latency/throughput summary and returns the mean in
     microseconds, for callers that also want the number for
-    results/fastik-python.json."""
+    results/fastik-python-<body>.json."""
     samples_us = np.sort(np.array(samples_sec) * 1e6)
     n = len(samples_us)
     mean = samples_us.mean()
@@ -225,8 +265,8 @@ def frames_for_n_segments(n_segments):
     return SEGMENT_LEN + max(n_segments - 1, 0) * (SEGMENT_LEN - OVERLAP_LEN)
 
 
-def tiled_native_rate_sequence(length):
-    base = [build_observations(f["target_ego"]) for f in fixtures["native_rate_frames"]]
+def tiled_native_rate_sequence(ctx, length):
+    base = [build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]]
     return [base[i % len(base)] for i in range(length)]
 
 
@@ -240,12 +280,17 @@ def bench_multithread_sequence_throughput(tree, sequence):
 
 
 def write_results_json(
-    single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
+    body,
+    single_frame_latency_us,
+    single_frame_latency_max_us,
+    single_thread_throughput_fps,
+    multi_thread_throughput_fps,
 ):
-    """Writes plot/results/fastik-python.json for plot/plot_comparison.py to
-    pick up."""
+    """Writes plot/results/fastik-python-<body>.json for
+    plot/plot_comparison.py to pick up."""
     results = {
         "name": "fastik-python",
+        "body": body,
         "language": "python",
         "formulation": "whole-tree",
         "single_frame_latency_us": single_frame_latency_us,
@@ -257,15 +302,16 @@ def write_results_json(
     }
     out_dir = BENCHMARK_DIR / "plot" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "fastik-python.json").write_text(json.dumps(results, indent=2))
+    (out_dir / f"fastik-python-{body}.json").write_text(json.dumps(results, indent=2))
 
 
-def run_performance(tree):
+def run_performance(ctx):
+    tree = ctx.tree
     print(f"fastik Python-bindings benchmark (state_dim={tree.n_dofs + 6})\n")
 
     # Same fixture-derived target used by the Rust and C++ benchmarks, so
     # this number is directly comparable across all three.
-    target = np.array(fixtures["synthetic_frames"][0]["target_ego"])
+    target = np.array(ctx.fixtures["synthetic_frames"][0]["target_ego"])
     print("-- single-frame time (latency), default config (adaptive early stop) --")
     single_frame_latency_us = summarize(
         "solve()", bench_single_frame_latency(tree, target, 20_000, fastik.SolverConfig())
@@ -280,7 +326,7 @@ def run_performance(tree):
     )
 
     print("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --")
-    native_obs = [build_observations(f["target_ego"]) for f in fixtures["native_rate_frames"]]
+    native_obs = [build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]]
     single_thread_mean_us = summarize(
         "SequenceSolver.solve_frame",
         bench_solve_sequence(tree, native_obs, fastik.SolverConfig()),
@@ -290,7 +336,7 @@ def run_performance(tree):
         f"\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, "
         f"{MULTITHREAD_N_THREADS} threads) --"
     )
-    sequence = tiled_native_rate_sequence(frames_for_n_segments(MULTITHREAD_N_THREADS))
+    sequence = tiled_native_rate_sequence(ctx, frames_for_n_segments(MULTITHREAD_N_THREADS))
     elapsed = bench_multithread_sequence_throughput(tree, sequence)
     multithread_fps = len(sequence) / elapsed
     print(
@@ -298,9 +344,15 @@ def run_performance(tree):
         f"throughput={multithread_fps:>10.1f} frames/s"
     )
 
-    write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps)
+    write_results_json(
+        ctx.name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
+    )
 
 
 if __name__ == "__main__":
-    tree = run_correctness()
-    run_performance(tree)
+    for body in BODIES:
+        print(f"===== body: {body['name']} =====\n")
+        ctx = build_body_context(body["name"], body["body_plan"], body["fixtures"])
+        run_correctness(ctx)
+        run_performance(ctx)
+        print()

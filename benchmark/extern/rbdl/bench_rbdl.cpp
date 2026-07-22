@@ -5,32 +5,31 @@
 // into this directory.
 //
 // -----------------------------------------------------------------------
-// Modeling notes and a real RBDL limitation found along the way:
+// Modeling notes and a real RBDL limitation:
 //
-// 1. Whole-tree, whole-keypoint-set solve: unlike KDL/TRAC-IK/FABRIK (which
-//    can only fit one chain endpoint per solve call, or need explicit
-//    per-endpoint task-space hacks), RBDL's `InverseKinematicsConstraintSet`
-//    natively takes an arbitrary list of point constraints solved jointly in
-//    one linear system, so -- like fastik -- this benchmark fits all 30 leg
+// 1. Whole-tree, whole-keypoint-set solve: unlike KDL (which needs an
+//    explicit per-endpoint task-space hack -- zeroing the rotational weight
+//    rows, see ../kdl/bench_kdl.cpp -- to do position-only multi-endpoint
+//    fitting), RBDL's `InverseKinematicsConstraintSet` natively takes an
+//    arbitrary list of point constraints solved jointly in one linear
+//    system, so -- like fastik -- this benchmark fits all 30 leg
 //    keypoints (every coxa/femur/tibia/claw, not just the 6 claws)
 //    simultaneously against the floating thorax root, in a single Model.
 //
-// 2. Floating base: the investigation notes suggested RBDL's native
-//    `JointTypeFloatingBase` (translation + quaternion) "should just work"
-//    for the free-floating thorax root. It does not, for this solver: RBDL
-//    stores a spherical/floating-base joint's quaternion with its w
-//    component *appended* at the very end of the Q vector (see
-//    rbdl/Model.h's `multdof3_w_index`), so for such a model
-//    `model.q_size != model.qdot_size` (49 vs 48 here). But
+// 2. Floating base: RBDL's native `JointTypeFloatingBase` (translation +
+//    quaternion) crashes this solver. RBDL stores a spherical/floating-base
+//    joint's quaternion with its w component *appended* at the very end of
+//    the Q vector (see rbdl/Model.h's `multdof3_w_index`), so for such a
+//    model `model.q_size != model.qdot_size` (49 vs 48 here). But
 //    `InverseKinematicsConstraintSet`'s internal Newton step
 //    (src/Kinematics.cc, the `Wn`/`delta_theta` block) sizes its damping
 //    matrix and `Qres += delta_theta` update using `Qres.size()` (== q_size)
-//    while the Jacobian-derived `delta_theta` is sized `qdot_size` --
-//    confirmed by a minimal repro that segfaults immediately on the very
-//    first `InverseKinematics()` call whenever a `JointTypeFloatingBase` (or
-//    bare `JointTypeSpherical`) joint is in the model. This looks like a
-//    genuine upstream bug in RBDL's IK code for models with quaternion
-//    joints, not a modeling mistake on our part.
+//    while the Jacobian-derived `delta_theta` is sized `qdot_size` -- a
+//    dimension mismatch that segfaults on the very first
+//    `InverseKinematics()` call whenever a `JointTypeFloatingBase` (or bare
+//    `JointTypeSpherical`) joint is in the model. This looks like a genuine
+//    upstream bug in RBDL's IK code for models with quaternion joints, not a
+//    modeling mistake on our part.
 //
 //    Workaround (used here, and functionally equivalent to what the KDL
 //    benchmark already does for the same reason): the thorax root is
@@ -63,17 +62,13 @@
 //    per-component max-abs-value check, but comparable in spirit (both are
 //    "stop once the update step is negligible" criteria).
 //
-//    Tuning: `lambda=1e-6` (unaffected by the below -- see README.md's
-//    sweep), `max_steps=10`, `step_tol=1e-3` -- literally fastik's own
-//    `n_iterations`/`position_tolerance`/`angle_tolerance` defaults, not
-//    independently chosen. An earlier version of this benchmark used
-//    `max_steps=300, step_tol=1e-10` (RBDL's own tighter-than-necessary
-//    defaults): a step_tol/max_steps sweep (see README.md) found this
-//    produced IDENTICAL residual accuracy (mean rms 0.0759 either way) while
-//    being ~5.4x slower (single-thread throughput 535 fps vs. 2,396 fps) --
-//    the gap was RBDL grinding out iterations chasing precision the real,
-//    imperfectly-fittable mocap data can never actually reach, not real
-//    solver work. Matching fastik's own tolerance/cap avoids that waste.
+//    Tuning: `lambda=1e-6`, `max_steps=10`, `step_tol=1e-3` -- literally
+//    fastik's own `n_iterations`/`position_tolerance`/`angle_tolerance`
+//    defaults, for a fair comparison. RBDL's own defaults (`max_steps=300,
+//    step_tol=1e-10`) are far tighter than this problem needs: real,
+//    imperfectly-fittable mocap data never gets close enough to trigger
+//    them, so they only burn extra iterations without improving accuracy
+//    (see README.md).
 
 #include <algorithm>
 #include <chrono>
@@ -101,8 +96,7 @@ using Clock = std::chrono::steady_clock;
 // Damped Levenberg-Marquardt tuning for InverseKinematicsConstraintSet --
 // literally fastik's own SolverConfig::default() values (n_iterations,
 // position_tolerance/angle_tolerance); see the file header comment and
-// README.md for why, and for the sweep showing this loses zero accuracy
-// vs. RBDL's own (much slower) defaults.
+// README.md for why.
 constexpr double kLambda = 1e-6;
 constexpr unsigned int kMaxSteps = 10;
 constexpr double kStepTol = 1e-3;
@@ -397,13 +391,14 @@ void run_correctness(RbdlModel &m, const rmath::VectorNd &q_neutral, const Json 
       "README.md.)\n\n");
 }
 
-void write_results_json(double single_frame_latency_us, double single_frame_latency_max_us,
+void write_results_json(const std::string &body, double single_frame_latency_us, double single_frame_latency_max_us,
                          double single_thread_throughput_fps, double multi_thread_throughput_fps) {
   std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../../plot/results";
   std::filesystem::create_directories(out_dir);
-  std::ofstream out(out_dir / "rbdl.json");
+  std::ofstream out(out_dir / ("rbdl-" + body + ".json"));
   out << "{\n"
       << "  \"name\": \"rbdl\",\n"
+      << "  \"body\": \"" << body << "\",\n"
       << "  \"language\": \"cpp\",\n"
       << "  \"formulation\": \"whole-tree\",\n"
       << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
@@ -415,19 +410,17 @@ void write_results_json(double single_frame_latency_us, double single_frame_late
          "Levenberg-Marquardt normal equations (J^T J + Wn) delta_q = J^T e, closer to fastik's own "
          "Gauss-Newton than to RBDL's simple transpose/DLS InverseKinematics() free function. Tuning "
          "(max_steps=10, step_tol=1e-3) is literally fastik's own n_iterations/tolerance defaults, "
-         "chosen after a sweep found RBDL's own tighter defaults (max_steps=300, step_tol=1e-10) "
-         "burned ~5.4x more time for byte-identical residual accuracy on this workload -- real mocap "
-         "data never gets close enough to trigger the tighter tolerance, so it was pure wasted "
-         "iteration, not extra precision. The free-floating thorax root uses TranslationXYZ + "
-         "EulerZYX in series, not RBDL's native JointTypeFloatingBase: that quaternion joint type "
-         "crashes InverseKinematicsConstraintSet in this RBDL version (its Newton step mixes up "
-         "q_size vs qdot_size once q_size > qdot_size), confirmed with a minimal repro -- this looks "
-         "like a genuine upstream bug, not a modeling error. All 30 leg keypoints (not just the 6 "
-         "claws) are fit jointly in one solve, same as fastik's whole-tree solve. Accuracy: synthetic "
+         "for a fair comparison -- RBDL's own tighter defaults (max_steps=300, step_tol=1e-10) burn "
+         "far more iterations on this workload without improving residual accuracy, since real mocap "
+         "data never gets close enough to trigger the tighter tolerance. The free-floating thorax "
+         "root uses TranslationXYZ + EulerZYX in series, not RBDL's native JointTypeFloatingBase: "
+         "that quaternion joint type crashes InverseKinematicsConstraintSet in this RBDL version "
+         "(its Newton step mixes up q_size vs qdot_size once q_size > qdot_size) -- this looks like "
+         "a genuine upstream bug, not a modeling error. All 30 leg keypoints (not just the 6 claws) "
+         "are fit jointly in one solve, same as fastik's whole-tree solve. Accuracy: synthetic "
          "(exact-fit) frames converge to residual rms ~1e-4-1e-5 model units in 4-5 steps; real "
          "native_rate_frames converge to a real, tuning-independent residual floor of rms ~0.076 "
-         "model units (identical to 4 significant figures across the whole step_tol sweep, 1e-10 to "
-         "1e-2), since real mocap data doesn't exactly satisfy this rigid rotation-axis model. "
+         "model units, since real mocap data doesn't exactly satisfy this rigid rotation-axis model. "
          "multi_thread_throughput_fps uses simple "
          "contiguous chunking (8 independent, internally-warm-started, externally-cold-started "
          "chunks, each with its own Model instance), not fastik's overlap-stitched segmented solve, "
@@ -435,52 +428,69 @@ void write_results_json(double single_frame_latency_us, double single_frame_late
       << "}\n";
 }
 
+// One body to benchmark: its body plan and matching fixtures file.
+struct BodyConfig {
+  const char *name;
+  const char *body_plan;
+  const char *fixtures;
+};
+
+constexpr BodyConfig kBodies[] = {
+    {"neuromechfly", "neuromechfly_ypr_legs.json", "fixtures.json"},
+    {"g1", "g1_body_plan.json", "fixtures_g1.json"},
+};
+
 }  // namespace
 
 int main() {
   const std::filesystem::path assets_dir = std::filesystem::path(__FILE__).parent_path() / "../../assets";
 
-  BodyPlan plan = load_body_plan((assets_dir / "neuromechfly_ypr_legs.json").string());
-  std::vector<double> neutral_angles = load_neutral_angles((assets_dir / "neuromechfly_ypr_legs.json").string());
-  Json fixtures = parse_json_file((assets_dir / "fixtures.json").string());
+  for (const auto &body : kBodies) {
+    std::printf("\n########## body: %s ##########\n\n", body.name);
 
-  RbdlModel m = build_model(plan);
-  std::printf("RBDL model: %u bodies, q_size=%u dofs (%u floating-base + %zu real)\n\n",
-              static_cast<unsigned int>(m.model.mBodies.size()) - 1, m.model.q_size, 6u, m.dof_q_index.size());
+    BodyPlan plan = load_body_plan((assets_dir / body.body_plan).string());
+    std::vector<double> neutral_angles = load_neutral_angles((assets_dir / body.body_plan).string());
+    Json fixtures = parse_json_file((assets_dir / body.fixtures).string());
 
-  rmath::VectorNd q_neutral = neutral_q(m, neutral_angles);
+    RbdlModel m = build_model(plan);
+    std::printf("RBDL model: %u bodies, q_size=%u dofs (%u floating-base + %zu real)\n\n",
+                static_cast<unsigned int>(m.model.mBodies.size()) - 1, m.model.q_size, 6u, m.dof_q_index.size());
 
-  run_correctness(m, q_neutral, fixtures);
+    rmath::VectorNd q_neutral = neutral_q(m, neutral_angles);
 
-  // Same fixture-derived target used by the Rust/Python/C++ benchmarks.
-  auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
+    run_correctness(m, q_neutral, fixtures);
 
-  std::printf("-- single-frame time (latency) --\n");
-  double single_frame_latency_us =
-      summarize("InverseKinematics() (cold)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000));
+    // Same fixture-derived target used by the Rust/Python/C++ benchmarks.
+    auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
 
-  // step_tol=0 disables early stopping, forcing every solve to run the full
-  // max_steps -- the worst case if a frame never converges early.
-  std::printf("\n-- single-frame time (latency), early stop disabled (%u steps) --\n", kMaxSteps);
-  double single_frame_latency_max_us = summarize(
-      "InverseKinematics() (forced max steps)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000, 0.0));
+    std::printf("-- single-frame time (latency) --\n");
+    double single_frame_latency_us =
+        summarize("InverseKinematics() (cold)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000));
 
-  std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
-  std::vector<std::vector<Vec3>> native_frames;
-  for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_vec3s(f["target_ego"]));
-  double single_thread_mean_us =
-      summarize("InverseKinematics() (warm)", bench_sequence(m, q_neutral, native_frames));
+    // step_tol=0 disables early stopping, forcing every solve to run the full
+    // max_steps -- the worst case if a frame never converges early.
+    std::printf("\n-- single-frame time (latency), early stop disabled (%u steps) --\n", kMaxSteps);
+    double single_frame_latency_max_us = summarize(
+        "InverseKinematics() (forced max steps)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000, 0.0));
 
-  std::printf("\n-- multi-thread sequence throughput (%zu contiguous chunks, %zu threads) --\n", kNThreads,
-              kNThreads);
-  std::vector<std::vector<Vec3>> sequence = tiled_sequence(fixtures, kTiledLen);
-  run_multithread_once(plan, neutral_angles, sequence);  // warmup
-  double elapsed_s = run_multithread_once(plan, neutral_angles, sequence);
-  double multithread_fps = sequence.size() / elapsed_s;
-  std::printf("n_frames=%-6zu elapsed=%9.3fs  throughput=%10.1f frames/s\n", sequence.size(), elapsed_s,
-              multithread_fps);
+    std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
+    std::vector<std::vector<Vec3>> native_frames;
+    for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_vec3s(f["target_ego"]));
+    double single_thread_mean_us =
+        summarize("InverseKinematics() (warm)", bench_sequence(m, q_neutral, native_frames));
 
-  write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps);
-  std::printf("\nWrote ../../plot/results/rbdl.json\n");
+    std::printf("\n-- multi-thread sequence throughput (%zu contiguous chunks, %zu threads) --\n", kNThreads,
+                kNThreads);
+    std::vector<std::vector<Vec3>> sequence = tiled_sequence(fixtures, kTiledLen);
+    run_multithread_once(plan, neutral_angles, sequence);  // warmup
+    double elapsed_s = run_multithread_once(plan, neutral_angles, sequence);
+    double multithread_fps = sequence.size() / elapsed_s;
+    std::printf("n_frames=%-6zu elapsed=%9.3fs  throughput=%10.1f frames/s\n", sequence.size(), elapsed_s,
+                multithread_fps);
+
+    write_results_json(body.name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us,
+                        multithread_fps);
+    std::printf("\nWrote ../../plot/results/rbdl-%s.json\n", body.name);
+  }
   return 0;
 }

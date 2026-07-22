@@ -1,29 +1,10 @@
-// Native C++ throughput/latency benchmark for Pinocchio, mirroring
-// ../rbdl/bench_rbdl.cpp's exact methodology so the two are directly
-// comparable. See ../../plot/results/pinocchio.json / bench_pinocchio.py's
-// README.md section for why this file exists.
-//
-// -----------------------------------------------------------------------
-// Why this file exists (the RBDL-vs-Pinocchio discrepancy investigation):
-//
-// bench_pinocchio.py benchmarks a hand-written Gauss-Newton/LM loop where
-// Pinocchio's own C++ core (computeJointJacobians/updateFramePlacements/
-// getFrameJacobian) is called from Python, but ALL the outer-loop linear
-// algebra (building the 42x42 normal-equations matrix in a Python `for`
-// loop, np.linalg.solve, LM damping, the neutral-pose prior, pin.integrate)
-// runs in pure Python/numpy. A diagnostic instrumenting that loop found
-// Pinocchio's actual C++ calls take ~17.8us/iteration while the surrounding
-// Python/numpy bookkeeping takes ~145us -- i.e. ~92% of the measured time is
-// Python overhead, not Pinocchio's own speed. That made the Python
-// benchmark's ~1179us/626fps/3277fps numbers look bad next to RBDL's pure
-// C++ ~309us/2364fps/15710fps, contradicting Carpentier et al. (IROS 2019),
-// which reports Pinocchio's core algorithms are competitive with or faster
-// than RBDL's when both are benchmarked natively in C++.
-//
-// This file ports bench_pinocchio.py's `build_full_model`/`solve_ik` line
-// for line to Pinocchio's C++ API (same Model/Frame construction, same
-// Gauss-Newton/LM math), with the outer loop implemented in Eigen instead of
-// numpy, to measure Pinocchio's real C++ speed on this workload.
+// Native C++ port of bench_pinocchio.py, mirroring ../rbdl/bench_rbdl.cpp's
+// exact methodology so the two are directly comparable: same Model/Frame
+// construction and Gauss-Newton/LM math, but with the outer loop implemented
+// in Eigen instead of numpy, so Pinocchio's own C++ speed on this workload
+// can be measured without Python/numpy overhead. See
+// ../../plot/results/pinocchio.json / bench_pinocchio.py's README.md section
+// for the Python numbers and this file's README.md section for the C++ ones.
 //
 // Modeling notes (identical to bench_pinocchio.py -- see its README.md
 // section for the full write-up):
@@ -167,11 +148,11 @@ FullModel build_full_model(const std::vector<JointNode> &nodes) {
   FullModel fm;
   pin::Model &model = fm.model;
 
-  pin::JointIndex thorax_id = model.addJoint(0, pin::JointModelFreeFlyer(), pin::SE3::Identity(), "thorax");
-  model.appendBodyToJoint(thorax_id, pin::Inertia::Zero(), pin::SE3::Identity());
+  pin::JointIndex root_id = model.addJoint(0, pin::JointModelFreeFlyer(), pin::SE3::Identity(), nodes[0].name);
+  model.appendBodyToJoint(root_id, pin::Inertia::Zero(), pin::SE3::Identity());
 
   std::vector<pin::JointIndex> parent_joint_id(nodes.size());
-  parent_joint_id[0] = thorax_id;  // nodes[0] is the thorax itself
+  parent_joint_id[0] = root_id;  // nodes[0] is the root itself
 
   std::vector<double> dof_neutral_json;
 
@@ -262,6 +243,9 @@ Eigen::VectorXd solve_ik(const pin::Model &model, pin::Data &data, const std::ve
       pin::FrameIndex fid = keypoint_frame_ids[k];
       Eigen::Vector3d residual = target[k] - data.oMf[fid].translation();
       s.J.setZero();
+      // This per-frame extraction dominates the loop's cost (see README.md's
+      // "Native C++ benchmark" section) -- more than the rest of the
+      // iteration (Eigen bookkeeping + QR solve) combined.
       pin::getFrameJacobian(model, data, fid, pin::LOCAL_WORLD_ALIGNED, s.J);
       auto jac_pos = s.J.topRows<3>();
       s.jtj.noalias() += jac_pos.transpose() * jac_pos;
@@ -419,13 +403,14 @@ double run_multithread_once(const pin::Model &model, const std::vector<pin::Fram
   return elapsed_us(t0) / 1e6;  // seconds
 }
 
-void write_results_json(double single_frame_latency_us, double single_frame_latency_max_us,
+void write_results_json(const std::string &body, double single_frame_latency_us, double single_frame_latency_max_us,
                          double single_thread_throughput_fps, double multi_thread_throughput_fps) {
   std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../../plot/results";
   std::filesystem::create_directories(out_dir);
-  std::ofstream out(out_dir / "pinocchio-cpp.json");
+  std::ofstream out(out_dir / ("pinocchio-cpp-" + body + ".json"));
   out << "{\n"
       << "  \"name\": \"pinocchio-cpp\",\n"
+      << "  \"body\": \"" << body << "\",\n"
       << "  \"language\": \"cpp\",\n"
       << "  \"formulation\": \"whole-tree\",\n"
       << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
@@ -433,87 +418,86 @@ void write_results_json(double single_frame_latency_us, double single_frame_late
       << "  \"single_thread_throughput_fps\": " << single_thread_throughput_fps << ",\n"
       << "  \"multi_thread_throughput_fps\": " << multi_thread_throughput_fps << ",\n"
       << "  \"multi_thread_n_threads\": " << kNThreads << ",\n"
-      << "  \"notes\": \"Native C++ re-implementation of pinocchio.json's benchmark, built to get a "
-         "fair C++-vs-C++ comparison against RBDL: the Python version (pinocchio.json) calls "
-         "Pinocchio's real C++ core (computeJointJacobians/getFrameJacobian) through pybind11, but "
-         "runs its ENTIRE Gauss-Newton outer loop (building the 42x42 normal-equations matrix, "
-         "np.linalg.solve, LM damping, the neutral-pose prior, pin.integrate) in pure Python/numpy. "
-         "This file ports build_full_model/solve_ik line for line to Pinocchio's C++ API with the "
-         "same outer-loop math done in Eigen (colPivHouseholderQr, preallocated jtj/jtr/J buffers, no "
-         "per-iteration heap allocation). Same model (thorax JointModelFreeFlyer + 6 legs x 7 DOFs, "
-         "all 30 leg keypoints fit jointly via OP_FRAME operational frames) and same fastik "
-         "SolverConfig::default() tuning as pinocchio.json and rbdl.json. Going native did help a lot "
-         "(single_frame_latency_us ~1179 -> ~765, single_thread_throughput_fps ~626 -> ~940-980, "
-         "multi_thread_throughput_fps ~3277 -> ~5400-6900, some run-to-run variance on the multi-"
-         "thread number) but Pinocchio C++ is still well behind RBDL's "
-         "native C++ numbers (308.7us / 2363.9fps / 15709.7fps) on this workload -- an in-process "
-         "profiling breakdown (instrumenting solve_ik with std::chrono around each stage, over the "
-         "~105k Gauss-Newton iterations executed in the single_frame_latency run) found the outer "
-         "Eigen/numpy-style bookkeeping was NOT the dominant cost here as it was in Python: per "
-         "iteration, computeJointJacobians+updateFramePlacements takes ~5.3us, the Eigen jtj/jtr "
-         "accumulation over 30 keypoints takes ~38.6us, and colPivHouseholderQr's 48x48 solve takes "
-         "~26.7us (~65us combined) -- but the 30 getFrameJacobian(...) calls (one per tracked "
-         "keypoint, each extracting a 6x48 Jacobian block from data.J) alone take ~83.4us, i.e. more "
-         "than the rest of the iteration combined. So even with the outer loop moved into native "
-         "Eigen, Pinocchio's own per-frame Jacobian-extraction API is the single biggest cost on this "
-         "many-keypoints-per-solve workload -- a real property of Pinocchio's API surface for this "
-         "problem shape (30 separate getFrameJacobian calls per iteration), not a Python-vs-C++ "
-         "artifact. RBDL's InverseKinematicsConstraintSet avoids this entirely by computing all point "
-         "constraints' Jacobians in one internal pass rather than exposing a per-frame extraction "
-         "call. multi_thread_throughput_fps uses the same simple contiguous-chunking scheme as "
-         "bench_rbdl.cpp (8 std::thread workers, each with its own Data, warm-started within its "
-         "chunk and cold at the chunk's start, sharing one read-only Model), not an in-process thread "
-         "pool -- comparable in spirit to rbdl.json's multi-thread metric, unlike pinocchio.json's "
-         "multiprocessing-based one.\"\n"
+      << "  \"notes\": \"Native C++ re-implementation of pinocchio.json's benchmark: same model "
+         "(thorax JointModelFreeFlyer + 6 legs x 7 DOFs, all 30 leg keypoints fit jointly via "
+         "OP_FRAME operational frames) and same fastik SolverConfig::default() tuning as "
+         "pinocchio.json and rbdl.json, but with the Gauss-Newton outer loop (building the "
+         "normal-equations matrix, the linear solve, LM damping, the neutral-pose prior, "
+         "pin.integrate) done in Eigen instead of Python/numpy, to measure Pinocchio's own C++ speed "
+         "without Python overhead. Still slower than RBDL's native C++ numbers on this workload -- "
+         "most of the gap is Pinocchio's per-frame getFrameJacobian API cost (30 separate extractions "
+         "per iteration, one per tracked keypoint), not a Python-vs-C++ artifact; see README.md's "
+         "Native C++ benchmark section. multi_thread_throughput_fps uses the same simple "
+         "contiguous-chunking scheme as bench_rbdl.cpp (8 std::thread workers, each with its own "
+         "Data, warm-started within its chunk and cold at the chunk's start, sharing one read-only "
+         "Model), not an in-process thread pool -- comparable in spirit to rbdl.json's multi-thread "
+         "metric, unlike pinocchio.json's multiprocessing-based one.\"\n"
       << "}\n";
 }
+
+// One body to benchmark: its body plan and matching fixtures file.
+struct BodyConfig {
+  const char *name;
+  const char *body_plan;
+  const char *fixtures;
+};
+
+constexpr BodyConfig kBodies[] = {
+    {"neuromechfly", "neuromechfly_ypr_legs.json", "fixtures.json"},
+    {"g1", "g1_body_plan.json", "fixtures_g1.json"},
+};
 
 }  // namespace
 
 int main() {
   const std::filesystem::path assets_dir = std::filesystem::path(__FILE__).parent_path() / "../../assets";
 
-  std::vector<JointNode> nodes = load_joint_nodes((assets_dir / "neuromechfly_ypr_legs.json").string());
-  Json fixtures = parse_json_file((assets_dir / "fixtures.json").string());
+  for (const auto &body : kBodies) {
+    std::printf("\n########## body: %s ##########\n\n", body.name);
 
-  FullModel fm = build_full_model(nodes);
-  pin::Data data(fm.model);
-  Scratch scratch(fm.model.nv);
+    std::vector<JointNode> nodes = load_joint_nodes((assets_dir / body.body_plan).string());
+    Json fixtures = parse_json_file((assets_dir / body.fixtures).string());
 
-  std::printf("Pinocchio C++ benchmark (nq=%d, nv=%d)\n\n", fm.model.nq, fm.model.nv);
+    FullModel fm = build_full_model(nodes);
+    pin::Data data(fm.model);
+    Scratch scratch(fm.model.nv);
 
-  run_correctness(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, scratch, fixtures);
+    std::printf("Pinocchio C++ benchmark (nq=%d, nv=%d)\n\n", fm.model.nq, fm.model.nv);
 
-  // Same fixture-derived target used by the Rust/Python/C++ fastik benchmarks and RBDL.
-  auto target = to_targets(fixtures["synthetic_frames"][0]["target_ego"]);
+    run_correctness(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, scratch, fixtures);
 
-  std::printf("-- single-frame time (latency), no warm start --\n");
-  double single_frame_latency_us = summarize(
-      "solve_ik() (cold)", bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target,
-                                                        scratch, 20000, 1000));
+    // Same fixture-derived target used by the Rust/Python/C++ fastik benchmarks and RBDL.
+    auto target = to_targets(fixtures["synthetic_frames"][0]["target_ego"]);
 
-  // Early stop disabled, so every call runs the full kNIterations -- the
-  // worst case if a frame never converges early.
-  std::printf("\n-- single-frame time (latency), early stop disabled (%d iterations) --\n", kNIterations);
-  double single_frame_latency_max_us = summarize(
-      "solve_ik() (forced max iterations)",
-      bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target, scratch, 20000, 1000,
-                                  /*disable_early_stop=*/true));
+    std::printf("-- single-frame time (latency), no warm start --\n");
+    double single_frame_latency_us = summarize(
+        "solve_ik() (cold)", bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target,
+                                                          scratch, 20000, 1000));
 
-  std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
-  std::vector<std::vector<Eigen::Vector3d>> native_frames;
-  for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_targets(f["target_ego"]));
-  double single_thread_mean_us =
-      summarize("solve_ik() (warm)", bench_sequence(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, native_frames, scratch));
+    // Early stop disabled, so every call runs the full kNIterations -- the
+    // worst case if a frame never converges early.
+    std::printf("\n-- single-frame time (latency), early stop disabled (%d iterations) --\n", kNIterations);
+    double single_frame_latency_max_us = summarize(
+        "solve_ik() (forced max iterations)",
+        bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target, scratch, 20000, 1000,
+                                    /*disable_early_stop=*/true));
 
-  std::printf("\n-- multi-thread sequence throughput (%zu contiguous chunks, %zu threads) --\n", kNThreads, kNThreads);
-  std::vector<std::vector<Eigen::Vector3d>> sequence = tiled_sequence(fixtures, kTiledLen);
-  run_multithread_once(fm.model, fm.keypoint_frame_ids, fm.q_neutral, sequence);  // warmup
-  double elapsed_s = run_multithread_once(fm.model, fm.keypoint_frame_ids, fm.q_neutral, sequence);
-  double multithread_fps = static_cast<double>(sequence.size()) / elapsed_s;
-  std::printf("n_frames=%-6zu elapsed=%9.3fs  throughput=%10.1f frames/s\n", sequence.size(), elapsed_s, multithread_fps);
+    std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
+    std::vector<std::vector<Eigen::Vector3d>> native_frames;
+    for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_targets(f["target_ego"]));
+    double single_thread_mean_us =
+        summarize("solve_ik() (warm)", bench_sequence(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, native_frames, scratch));
 
-  write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps);
-  std::printf("\nWrote ../../plot/results/pinocchio-cpp.json\n");
+    std::printf("\n-- multi-thread sequence throughput (%zu contiguous chunks, %zu threads) --\n", kNThreads, kNThreads);
+    std::vector<std::vector<Eigen::Vector3d>> sequence = tiled_sequence(fixtures, kTiledLen);
+    run_multithread_once(fm.model, fm.keypoint_frame_ids, fm.q_neutral, sequence);  // warmup
+    double elapsed_s = run_multithread_once(fm.model, fm.keypoint_frame_ids, fm.q_neutral, sequence);
+    double multithread_fps = static_cast<double>(sequence.size()) / elapsed_s;
+    std::printf("n_frames=%-6zu elapsed=%9.3fs  throughput=%10.1f frames/s\n", sequence.size(), elapsed_s, multithread_fps);
+
+    write_results_json(body.name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us,
+                        multithread_fps);
+    std::printf("\nWrote ../../plot/results/pinocchio-cpp-%s.json\n", body.name);
+  }
   return 0;
 }

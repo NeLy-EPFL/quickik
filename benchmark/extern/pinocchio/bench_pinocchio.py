@@ -21,6 +21,9 @@ Run with the dedicated Python 3.12 venv (Pinocchio's wheels don't support
     cd /path/to/fastik/benchmark/extern/pinocchio
     .venv312/bin/python bench_pinocchio.py
 
+Runs against every body in `BODIES` below (currently the neuromechfly fly and
+a Unitree G1 humanoid) and writes one results file per body.
+
 See README.md for modeling compromises (mirrored-leg axis handling,
 multiprocessing standing in for fastik's in-process thread pool) and the
 numbers from the last run.
@@ -37,8 +40,12 @@ import pinocchio as pin
 HERE = Path(__file__).resolve().parent
 BENCHMARK_DIR = HERE.parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
-MODEL_JSON = ASSETS_DIR / "neuromechfly_ypr_legs.json"
-FIXTURES_JSON = ASSETS_DIR / "fixtures.json"
+
+# One body to benchmark: its body plan and matching fixtures file.
+BODIES = [
+    {"name": "neuromechfly", "body_plan": "neuromechfly_ypr_legs.json", "fixtures": "fixtures.json"},
+    {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
+]
 
 # Gauss-Newton/LM config, matching fastik's SolverConfig::default() exactly
 # (src/solver.rs) for a fair comparison.
@@ -65,8 +72,7 @@ def _axis_to_joint(axis):
     R(-n, -t) = R(n, t). So a mirrored-leg DOF with axis [-1, 0, 0] and
     JSON angle `theta` is reproduced exactly by a `JointModelRX` driven with
     angle `-theta` -- no extra rotation needs to be baked into the joint
-    placement. Verified against a finite-difference Jacobian check (see
-    README.md).
+    placement.
     """
     axis = np.asarray(axis, dtype=float)
     idx = int(np.argmax(np.abs(axis)))
@@ -74,20 +80,23 @@ def _axis_to_joint(axis):
     return _AXIS_JOINTS[idx](), sign
 
 
-def build_full_model(body_plan_path=MODEL_JSON):
-    """Builds the full thorax + 6-leg Pinocchio model from the JSON body plan.
+def build_full_model(body_plan_path):
+    """Builds the full root + limb-chain Pinocchio model from the JSON body
+    plan (a free-flyer root plus one chain of single-DOF revolute joints per
+    named JSON node, generalizing poc_one_leg.py to an arbitrary body plan --
+    e.g. the fly's thorax + 6 legs or the G1 humanoid's pelvis + 29 DOFs).
 
     Returns:
         model: the `pin.Model`.
-        keypoint_frame_ids: list of 30 operational-frame ids, one per leg
-            joint node (thorax excluded), in the same order as
-            `fixtures.json`'s `leg_joint_names` / `target_ego` -- verified by
-            an assertion below.
+        keypoint_frame_ids: list of operational-frame ids, one per non-root
+            body-plan joint node, in the same order as the matching fixtures
+            file's `leg_joint_names` / `target_ego` -- verified by an
+            assertion in the caller.
         q_neutral: `model.nq`-sized neutral configuration (root at the
             origin/identity orientation, each DOF at its own JSON
             `neutral_angle`, sign-adjusted per `_axis_to_joint`).
-        dof_signs: length-42 array of +-1, one per DOF, in JSON DOF-flatten
-            order (matches `state.dof_angles` / `ground_truth_dof_angles_per_leg`
+        dof_signs: array of +-1, one per DOF, in JSON DOF-flatten order
+            (matches `state.dof_angles` / `ground_truth_dof_angles_per_leg`
             convention used by fastik's own benchmarks) -- needed to convert
             a solved Pinocchio angle back to the JSON's signed-axis
             convention for cross-checks.
@@ -96,24 +105,23 @@ def build_full_model(body_plan_path=MODEL_JSON):
     with open(body_plan_path) as f:
         body_plan = json.load(f)
     joints = body_plan["joints"]
+    root_name = joints[0]["name"]
 
     model = pin.Model()
-    thorax_id = model.addJoint(
-        0, pin.JointModelFreeFlyer(), pin.SE3.Identity(), "thorax"
+    root_id = model.addJoint(
+        0, pin.JointModelFreeFlyer(), pin.SE3.Identity(), root_name
     )
-    model.appendBodyToJoint(thorax_id, pin.Inertia.Zero(), pin.SE3.Identity())
+    model.appendBodyToJoint(root_id, pin.Inertia.Zero(), pin.SE3.Identity())
 
-    parent_joint_id = {"thorax": thorax_id}
+    parent_joint_id = {root_name: root_id}
     keypoint_frame_ids = []
     keypoint_names = []
     dof_signs = []
     dof_neutral_json = []
     dof_names = []
 
-    for node in joints:
+    for node in joints[1:]:
         name = node["name"]
-        if name == "thorax":
-            continue
         parent_id = parent_joint_id[node["parent"]]
         qw, qx, qy, qz = node["offset_quat"]
         offset = pin.SE3(
@@ -153,12 +161,6 @@ def build_full_model(body_plan_path=MODEL_JSON):
         frame = pin.Frame(name, last_joint_id, 0, pin.SE3.Identity(), pin.FrameType.OP_FRAME)
         keypoint_frame_ids.append(model.addFrame(frame))
         keypoint_names.append(name)
-
-    fixtures = json.loads(FIXTURES_JSON.read_text())
-    assert keypoint_names == fixtures["leg_joint_names"], (
-        "keypoint order must match fixtures.json's leg_joint_names for "
-        "target_ego indexing to line up"
-    )
 
     dof_signs = np.array(dof_signs)
     dof_neutral_pin = dof_signs * np.array(dof_neutral_json)
@@ -236,7 +238,12 @@ def run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtu
     print(f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18}")
     for i, frame in enumerate(fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
-        ground_truth = np.array(frame["ground_truth_dof_angles_per_leg"]).flatten()
+        # Groups (e.g. one per fly leg, or per G1 limb) may have differing
+        # lengths, so concatenate rather than np.array(...).flatten() (which
+        # errors on a ragged list of lists).
+        ground_truth = np.concatenate(
+            [np.asarray(group, dtype=float) for group in frame["ground_truth_dof_angles_per_leg"]]
+        )
 
         q = solve_ik(model, data, keypoint_frame_ids, target, q_neutral, q_neutral)
         pin.forwardKinematics(model, data, q)
@@ -253,9 +260,9 @@ def run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtu
             f"{angle_err_deg:>18.4f}"
         )
     print(
-        "(kpt rms/max: 3D distance to target, model units. angle err: max abs "
-        "error over all 42 DOFs, degrees, mod 2*pi, converted back to the "
-        "JSON's signed-axis convention via dof_signs.)\n"
+        f"(kpt rms/max: 3D distance to target, model units. angle err: max abs "
+        f"error over all {len(dof_signs)} DOFs, degrees, mod 2*pi, converted "
+        f"back to the JSON's signed-axis convention via dof_signs.)\n"
     )
 
 
@@ -316,8 +323,8 @@ CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
 _worker_state = {}
 
 
-def _init_worker():
-    model, keypoint_frame_ids, q_neutral, _, _ = build_full_model()
+def _init_worker(body_plan_path):
+    model, keypoint_frame_ids, q_neutral, _, _ = build_full_model(body_plan_path)
     _worker_state["model"] = model
     _worker_state["data"] = model.createData()
     _worker_state["keypoint_frame_ids"] = keypoint_frame_ids
@@ -335,11 +342,13 @@ def _solve_chunk(chunk_targets):
     return None
 
 
-def bench_multithread_sequence_throughput(chunks):
+def bench_multithread_sequence_throughput(chunks, body_plan_path):
     """Solves `len(chunks)` chunks in parallel processes, each warm-started
     within itself but cold at its own start. Measures wall-clock time from
     dispatch to all chunks done."""
-    with multiprocessing.Pool(MULTITHREAD_N_PROCESSES, initializer=_init_worker) as pool:
+    with multiprocessing.Pool(
+        MULTITHREAD_N_PROCESSES, initializer=_init_worker, initargs=(body_plan_path,)
+    ) as pool:
         pool.map(_solve_chunk, chunks)  # warm up (spawns + JITs numpy, etc.)
         t0 = time.perf_counter()
         pool.map(_solve_chunk, chunks)
@@ -348,10 +357,15 @@ def bench_multithread_sequence_throughput(chunks):
 
 
 def write_results_json(
-    single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
+    body,
+    single_frame_latency_us,
+    single_frame_latency_max_us,
+    single_thread_throughput_fps,
+    multi_thread_throughput_fps,
 ):
     results = {
         "name": "pinocchio",
+        "body": body,
         "language": "python",
         "formulation": "whole-tree",
         "single_frame_latency_us": single_frame_latency_us,
@@ -373,10 +387,10 @@ def write_results_json(
     }
     out_dir = BENCHMARK_DIR / "plot" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "pinocchio.json").write_text(json.dumps(results, indent=2))
+    (out_dir / f"pinocchio-{body}.json").write_text(json.dumps(results, indent=2))
 
 
-def run_performance(model, data, keypoint_frame_ids, q_neutral, fixtures):
+def run_performance(body_name, body_plan_path, model, data, keypoint_frame_ids, q_neutral, fixtures):
     print(f"Pinocchio benchmark (nq={model.nq}, nv={model.nv})\n")
 
     target = np.array(fixtures["synthetic_frames"][0]["target_ego"])
@@ -410,24 +424,33 @@ def run_performance(model, data, keypoint_frame_ids, q_neutral, fixtures):
         for p in range(MULTITHREAD_N_PROCESSES)
     ]
     total_frames = sum(len(c) for c in chunks)
-    elapsed = bench_multithread_sequence_throughput(chunks)
+    elapsed = bench_multithread_sequence_throughput(chunks, body_plan_path)
     multithread_fps = total_frames / elapsed
     print(
         f"solve (multiprocess)                n_frames={total_frames:<6} elapsed={elapsed * 1e3:>9.3f}ms  "
         f"throughput={multithread_fps:>10.1f} frames/s"
     )
 
-    write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps)
-
-
-def main():
-    fixtures = json.loads(FIXTURES_JSON.read_text())
-    model, keypoint_frame_ids, q_neutral, dof_signs, dof_names = build_full_model()
-    data = model.createData()
-
-    run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtures)
-    run_performance(model, data, keypoint_frame_ids, q_neutral, fixtures)
+    write_results_json(
+        body_name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
+    )
+    print(f"\nWrote ../../plot/results/pinocchio-{body_name}.json")
 
 
 if __name__ == "__main__":
-    main()
+    for body in BODIES:
+        print(f"\n########## body: {body['name']} ##########\n")
+
+        body_plan_path = ASSETS_DIR / body["body_plan"]
+        fixtures_path = ASSETS_DIR / body["fixtures"]
+
+        fixtures = json.loads(fixtures_path.read_text())
+        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][1:] == fixtures[
+            "leg_joint_names"
+        ], f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+
+        model, keypoint_frame_ids, q_neutral, dof_signs, dof_names = build_full_model(body_plan_path)
+        data = model.createData()
+
+        run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtures)
+        run_performance(body["name"], body_plan_path, model, data, keypoint_frame_ids, q_neutral, fixtures)

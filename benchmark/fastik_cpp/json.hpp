@@ -29,6 +29,12 @@ struct Json {
   const std::string &as_string() const { return string_value; }
   const std::vector<Json> &as_array() const { return array_value; }
 
+  bool has(const std::string &key) const {
+    for (auto &[k, v] : object_value) {
+      if (k == key) return true;
+    }
+    return false;
+  }
   const Json &at(const std::string &key) const {
     for (auto &[k, v] : object_value) {
       if (k == key) return v;

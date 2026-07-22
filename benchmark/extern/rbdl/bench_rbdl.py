@@ -7,21 +7,22 @@ Unlike `bench_pinocchio.py` (which hand-writes a Gauss-Newton loop because
 Pinocchio has no built-in IK solver), this benchmarks RBDL's own
 `InverseKinematicsConstraintSet` solver -- the exact same solver
 `bench_rbdl.cpp` benchmarks -- called through RBDL's Cython wrapper
-(`rbdl-src/python/rbdl-wrapper.pyx`), which was never built upstream and had
-to be built from source here. See `README.md`'s "Python bindings" section for
-the exact build commands and where the compiled `rbdl.so` module lives.
+(`rbdl-src/python/rbdl-wrapper.pyx`), which is not built by default upstream
+and had to be built from source for this benchmark. See `README.md`'s
+"Python bindings" section for the exact build commands and where the
+compiled `rbdl.so` module lives.
 
 Model construction (`build_model` below) is a line-for-line port of
 `bench_rbdl.cpp`'s `build_model`/`neutral_q`, including the same modeling
 compromise: RBDL's native `JointTypeFloatingBase` (quaternion joint) crashes
-`InverseKinematicsConstraintSet` (confirmed upstream bug, see
-`bench_rbdl.cpp`'s header comment), so the free-floating thorax root is built
-as `JointTypeTranslationXYZ` + `JointTypeEulerZYX` in series instead. Solver
+`InverseKinematicsConstraintSet` (an upstream bug, see `bench_rbdl.cpp`'s
+header comment), so the free-floating thorax root is built as
+`JointTypeTranslationXYZ` + `JointTypeEulerZYX` in series instead. Solver
 tuning (`lambda=1e-6, max_steps=10, step_tol=1e-3`) is copied verbatim from
-`bench_rbdl.cpp` -- literally fastik's own `SolverConfig::default()` values,
-chosen there after a sweep showed RBDL's own tighter defaults
-(`max_steps=300, step_tol=1e-10`) burn ~5.4x more time for byte-identical
-accuracy on real (imperfectly-fittable) mocap data.
+`bench_rbdl.cpp` -- literally fastik's own `SolverConfig::default()` values.
+RBDL's own defaults (`max_steps=300, step_tol=1e-10`) are far tighter than
+this problem needs and burn far more time for the same accuracy on real,
+imperfectly-fittable mocap data.
 
 Run with the dedicated Python 3.12 venv built for the RBDL Cython wrapper
 (see README.md):
@@ -39,8 +40,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BENCHMARK_DIR = HERE.parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
-MODEL_JSON = ASSETS_DIR / "neuromechfly_ypr_legs.json"
-FIXTURES_JSON = ASSETS_DIR / "fixtures.json"
+
+# One body to benchmark: its body plan and matching fixtures file.
+BODIES = [
+    {"name": "neuromechfly", "body_plan": "neuromechfly_ypr_legs.json", "fixtures": "fixtures.json"},
+    {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
+]
 
 # The Cython wrapper is built (via RBDL's own CMake, RBDL_BUILD_PYTHON_WRAPPER=ON)
 # into rbdl-src/build-python/python/rbdl.so -- not pip-installed, so it must be
@@ -53,8 +58,7 @@ import rbdl  # noqa: E402
 
 # Damped Levenberg-Marquardt tuning for InverseKinematicsConstraintSet --
 # copied verbatim from bench_rbdl.cpp (see that file's header comment and
-# README.md for the sweep showing this loses zero accuracy vs. RBDL's own,
-# much slower, defaults).
+# README.md for why).
 LAMBDA = 1e-6
 MAX_STEPS = 10
 STEP_TOL = 1e-3
@@ -66,7 +70,7 @@ STEP_TOL = 1e-3
 # 1-dof JointTypeRevolute bodies -- a line-for-line port of bench_rbdl.cpp's
 # build_model/neutral_q.
 # -----------------------------------------------------------------------------
-def build_model(body_plan_path=MODEL_JSON):
+def build_model(body_plan_path):
     """Builds the thorax + 6-leg RBDL model from the JSON body plan.
 
     Returns:
@@ -301,8 +305,8 @@ CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
 _worker_state = {}
 
 
-def _init_worker():
-    model, keypoint_body, keypoint_point, q_neutral = build_model()
+def _init_worker(body_plan_path):
+    model, keypoint_body, keypoint_point, q_neutral = build_model(body_plan_path)
     _worker_state["model"] = model
     _worker_state["keypoint_body"] = keypoint_body
     _worker_state["keypoint_point"] = keypoint_point
@@ -325,11 +329,13 @@ def _solve_chunk(chunk_targets):
     return None
 
 
-def bench_multithread_sequence_throughput(chunks):
+def bench_multithread_sequence_throughput(chunks, body_plan_path):
     """Solves `len(chunks)` chunks in parallel processes, each warm-started
     within itself but cold at its own start. Measures wall-clock time from
     dispatch to all chunks done."""
-    with multiprocessing.Pool(MULTITHREAD_N_PROCESSES, initializer=_init_worker) as pool:
+    with multiprocessing.Pool(
+        MULTITHREAD_N_PROCESSES, initializer=_init_worker, initargs=(body_plan_path,)
+    ) as pool:
         pool.map(_solve_chunk, chunks)  # warm up (spawns processes, builds models)
         t0 = time.perf_counter()
         pool.map(_solve_chunk, chunks)
@@ -338,10 +344,11 @@ def bench_multithread_sequence_throughput(chunks):
 
 
 def write_results_json(
-    single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
+    body, single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
 ):
     results = {
         "name": "rbdl-python",
+        "body": body,
         "language": "python",
         "formulation": "whole-tree",
         "single_frame_latency_us": single_frame_latency_us,
@@ -358,7 +365,7 @@ def write_results_json(
             "section for the exact CMake invocation. Model construction "
             "(TranslationXYZ + EulerZYX in series for the floating thorax root, "
             "instead of RBDL's native JointTypeFloatingBase, which crashes "
-            "InverseKinematicsConstraintSet -- a confirmed upstream bug) and "
+            "InverseKinematicsConstraintSet -- an upstream bug) and "
             "solver tuning (lambda=1e-6, max_steps=10, step_tol=1e-3, literally "
             "fastik's own SolverConfig::default() values) are copied verbatim "
             "from bench_rbdl.cpp for an apples-to-apples Python-vs-C++ "
@@ -379,10 +386,10 @@ def write_results_json(
     }
     out_dir = BENCHMARK_DIR / "plot" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "rbdl-python.json").write_text(json.dumps(results, indent=2))
+    (out_dir / f"rbdl-python-{body}.json").write_text(json.dumps(results, indent=2))
 
 
-def run_performance(model, keypoint_body, keypoint_point, q_neutral, fixtures):
+def run_performance(body_name, body_plan_path, model, keypoint_body, keypoint_point, q_neutral, fixtures):
     n_dofs = model.q_size - 6
     print(f"RBDL model (Python/Cython bindings): q_size={model.q_size} (6 floating-base + {n_dofs} leg dofs)\n")
 
@@ -417,28 +424,32 @@ def run_performance(model, keypoint_body, keypoint_point, q_neutral, fixtures):
         for p in range(MULTITHREAD_N_PROCESSES)
     ]
     total_frames = sum(len(c) for c in chunks)
-    elapsed = bench_multithread_sequence_throughput(chunks)
+    elapsed = bench_multithread_sequence_throughput(chunks, body_plan_path)
     multithread_fps = total_frames / elapsed
     print(
         f"solve (multiprocess)                 n_frames={total_frames:<6} elapsed={elapsed * 1e3:>9.3f}ms  "
         f"throughput={multithread_fps:>10.1f} frames/s"
     )
 
-    write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps)
-    print("\nWrote ../../plot/results/rbdl-python.json")
-
-
-def main():
-    fixtures = json.loads(FIXTURES_JSON.read_text())
-    assert [j["name"] for j in json.loads(MODEL_JSON.read_text())["joints"]][1:] == fixtures["leg_joint_names"], (
-        "joint order must match fixtures.json's leg_joint_names for target_ego indexing to line up"
+    write_results_json(
+        body_name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
     )
-
-    model, keypoint_body, keypoint_point, q_neutral = build_model()
-
-    run_correctness(model, keypoint_body, keypoint_point, q_neutral, fixtures)
-    run_performance(model, keypoint_body, keypoint_point, q_neutral, fixtures)
+    print(f"\nWrote ../../plot/results/rbdl-python-{body_name}.json")
 
 
 if __name__ == "__main__":
-    main()
+    for body in BODIES:
+        print(f"\n########## body: {body['name']} ##########\n")
+
+        body_plan_path = ASSETS_DIR / body["body_plan"]
+        fixtures_path = ASSETS_DIR / body["fixtures"]
+
+        fixtures = json.loads(fixtures_path.read_text())
+        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][1:] == fixtures[
+            "leg_joint_names"
+        ], f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+
+        model, keypoint_body, keypoint_point, q_neutral = build_model(body_plan_path)
+
+        run_correctness(model, keypoint_body, keypoint_point, q_neutral, fixtures)
+        run_performance(body["name"], body_plan_path, model, keypoint_body, keypoint_point, q_neutral, fixtures)

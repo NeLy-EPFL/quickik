@@ -22,6 +22,14 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+// One body to benchmark: a name (used for the results filename and printed
+// headers) plus the paths to its body plan and fixtures.
+struct BodySpec {
+  std::string name;
+  std::string body_plan_path;
+  std::string fixtures_path;
+};
+
 std::vector<Vec3> to_vec3s(const Json &target_ego) {
   std::vector<Vec3> out;
   for (auto &p : target_ego.as_array()) {
@@ -117,8 +125,9 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<fasti
   }
   std::printf(
       "(kpt rms/max: 3D distance to target, via an independent from-JSON FK replica, model "
-      "units. angle err: max abs error over all 42 DOFs, degrees, mod 2*pi. \"w=0\" = "
-      "neutral_pose_weight=0.)\n\n");
+      "units. angle err: max abs error over all %zu DOFs, degrees, mod 2*pi. \"w=0\" = "
+      "neutral_pose_weight=0.)\n\n",
+      tree->n_dofs());
 
   std::printf("== Real mocap frames (cross-solver vs. flygym.ik) ==\n");
   auto seq = fastik::new_sequence_solver(*tree, fastik::default_solver_config(), fastik::no_mapper());
@@ -134,10 +143,14 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<fasti
     fastik_rms.push_back(rms);
     fastik_max.push_back(max);
 
-    auto cross_target = to_vec3s(frame["flygym_ik_reconstructed_ego"]);
-    auto [crms, cmax] = residual_stats(solved_pts, cross_target);
-    cross_rms.push_back(crms);
-    cross_max.push_back(cmax);
+    // Not every body has an independent reference solver to cross-check
+    // against (e.g. G1's real frames have no flygym.ik reconstruction).
+    if (frame.has("flygym_ik_reconstructed_ego")) {
+      auto cross_target = to_vec3s(frame["flygym_ik_reconstructed_ego"]);
+      auto [crms, cmax] = residual_stats(solved_pts, cross_target);
+      cross_rms.push_back(crms);
+      cross_max.push_back(cmax);
+    }
   }
   auto mean = [](const std::vector<float> &v) { return std::accumulate(v.begin(), v.end(), 0.0f) / v.size(); };
   auto rms_of = [](const std::vector<float> &v) {
@@ -149,8 +162,12 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<fasti
   std::printf("over %zu frames:\n", real_frames.size());
   std::printf("  fastik fit residual to target:      rms=%.5f  mean=%.5f  max=%.5f\n", rms_of(fastik_rms),
               mean(fastik_rms), max_of(fastik_max));
-  std::printf("  cross-solver agreement (vs flygym.ik): rms=%.5f  mean=%.5f  max=%.5f\n\n", rms_of(cross_rms),
-              mean(cross_rms), max_of(cross_max));
+  if (!cross_rms.empty()) {
+    std::printf("  cross-solver agreement (vs flygym.ik): rms=%.5f  mean=%.5f  max=%.5f\n\n", rms_of(cross_rms),
+                mean(cross_rms), max_of(cross_max));
+  } else {
+    std::printf("  cross-solver agreement (vs flygym.ik): n/a (no reference solver output for this body)\n\n");
+  }
 }
 
 // =============================================================================
@@ -259,16 +276,17 @@ double bench_multithread_sequence_throughput(rust::Box<fastik::KinematicTree> &t
   return elapsed_ms;
 }
 
-// Writes ../plot/results/fastik-cpp.json for ../plot/plot_comparison.py to
-// pick up. Hand-written (not using json.hpp, which is read-only) since this
-// is the only place this binary needs to produce JSON.
-void write_results_json(double single_frame_latency_us, double single_frame_latency_max_us,
+// Writes ../plot/results/fastik-cpp-<body>.json for ../plot/plot_comparison.py
+// to pick up. Hand-written (not using json.hpp, which is read-only) since
+// this is the only place this binary needs to produce JSON.
+void write_results_json(const std::string &body, double single_frame_latency_us, double single_frame_latency_max_us,
                          double single_thread_throughput_fps, double multi_thread_throughput_fps) {
   std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../plot/results";
   std::filesystem::create_directories(out_dir);
-  std::ofstream out(out_dir / "fastik-cpp.json");
+  std::ofstream out(out_dir / ("fastik-cpp-" + body + ".json"));
   out << "{\n"
       << "  \"name\": \"fastik-cpp\",\n"
+      << "  \"body\": \"" << body << "\",\n"
       << "  \"language\": \"cpp\",\n"
       << "  \"formulation\": \"whole-tree\",\n"
       << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
@@ -280,7 +298,7 @@ void write_results_json(double single_frame_latency_us, double single_frame_late
       << "}\n";
 }
 
-void run_performance(rust::Box<fastik::KinematicTree> &tree, const Json &fixtures) {
+void run_performance(const std::string &body, rust::Box<fastik::KinematicTree> &tree, const Json &fixtures) {
   std::printf("fastik C++-bindings benchmark (state_dim=%zu)\n\n", tree->n_dofs() + 6);
 
   // Same fixture-derived target used by the Rust and Python benchmarks, so
@@ -315,7 +333,8 @@ void run_performance(rust::Box<fastik::KinematicTree> &tree, const Json &fixture
   std::printf("solve_sequence_segmented_parallel   n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n",
               sequence.size(), elapsed_ms, multithread_fps);
 
-  write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps);
+  write_results_json(body, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us,
+                      multithread_fps);
 }
 
 }  // namespace
@@ -326,14 +345,25 @@ int main() {
 #endif
   const std::string assets_dir = FASTIK_ASSETS_DIR;
 
-  auto tree = fastik::kinematic_tree_from_json_file(assets_dir + "/neuromechfly_ypr_legs.json");
-  BodyPlan plan = load_body_plan(assets_dir + "/neuromechfly_ypr_legs.json");
-  Json fixtures = parse_json_file(assets_dir + "/fixtures.json");
+  const std::vector<BodySpec> bodies = {
+      {"neuromechfly", assets_dir + "/neuromechfly_ypr_legs.json", assets_dir + "/fixtures.json"},
+      {"g1", assets_dir + "/g1_body_plan.json", assets_dir + "/fixtures_g1.json"},
+  };
 
-  std::printf("Loaded body plan: %zu joints, %zu dofs, state_dim=%zu\n\n", tree->n_joints(), tree->n_dofs(),
-              tree->n_dofs() + 6);
+  for (auto &body : bodies) {
+    std::printf("======================================================================\n");
+    std::printf("Body: %s\n", body.name.c_str());
+    std::printf("======================================================================\n\n");
 
-  run_correctness(plan, fixtures, tree);
-  run_performance(tree, fixtures);
+    auto tree = fastik::kinematic_tree_from_json_file(body.body_plan_path);
+    BodyPlan plan = load_body_plan(body.body_plan_path);
+    Json fixtures = parse_json_file(body.fixtures_path);
+
+    std::printf("Loaded body plan: %zu joints, %zu dofs, state_dim=%zu\n\n", tree->n_joints(), tree->n_dofs(),
+                tree->n_dofs() + 6);
+
+    run_correctness(plan, fixtures, tree);
+    run_performance(body.name, tree, fixtures);
+  }
   return 0;
 }

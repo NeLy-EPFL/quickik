@@ -1,0 +1,854 @@
+{
+  "metadata": {
+    "name": "g1_29dof"
+  },
+  "joints": [
+    {
+      "name": "pelvis",
+      "parent": null,
+      "offset_pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": []
+    },
+    {
+      "name": "left_hip_pitch",
+      "parent": "pelvis",
+      "offset_pos": [
+        0.0,
+        0.064452,
+        -0.1027
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_hip_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.119781,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_hip_roll",
+      "parent": "left_hip_pitch",
+      "offset_pos": [
+        0.0,
+        0.052,
+        -0.030465
+      ],
+      "offset_quat": [
+        0.9961786849744957,
+        0.0,
+        -0.08733858026373247,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_hip_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 0.045812,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_hip_yaw",
+      "parent": "left_hip_roll",
+      "offset_pos": [
+        0.025001,
+        0.0,
+        -0.12412
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_hip_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": 0.051567,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_knee",
+      "parent": "left_hip_yaw",
+      "offset_pos": [
+        -0.078273,
+        0.0021489,
+        -0.17734
+      ],
+      "offset_quat": [
+        0.9961786849744957,
+        0.0,
+        0.08733858026373247,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_knee_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 0.283111,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_ankle_pitch",
+      "parent": "left_knee",
+      "offset_pos": [
+        0.0,
+        -9.4445e-05,
+        -0.30001
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_ankle_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.137652,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_ankle_roll",
+      "parent": "left_ankle_pitch",
+      "offset_pos": [
+        0.0,
+        0.0,
+        -0.017558
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_ankle_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": -0.030908,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_hip_pitch",
+      "parent": "pelvis",
+      "offset_pos": [
+        0.0,
+        -0.064452,
+        -0.1027
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_hip_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.078973,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_hip_roll",
+      "parent": "right_hip_pitch",
+      "offset_pos": [
+        0.0,
+        -0.052,
+        -0.030465
+      ],
+      "offset_quat": [
+        0.9961786849744957,
+        0.0,
+        -0.08733858026373247,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_hip_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": -0.066817,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_hip_yaw",
+      "parent": "right_hip_roll",
+      "offset_pos": [
+        0.025001,
+        0.0,
+        -0.12412
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_hip_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": -0.237199,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_knee",
+      "parent": "right_hip_yaw",
+      "offset_pos": [
+        -0.078273,
+        -0.0021489,
+        -0.17734
+      ],
+      "offset_quat": [
+        0.9961786849744957,
+        0.0,
+        0.08733858026373247,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_knee_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 0.264636,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_ankle_pitch",
+      "parent": "right_knee",
+      "offset_pos": [
+        0.0,
+        9.4445e-05,
+        -0.30001
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_ankle_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.167496,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_ankle_roll",
+      "parent": "right_ankle_pitch",
+      "offset_pos": [
+        0.0,
+        0.0,
+        -0.017558
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_ankle_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 0.033785,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "waist_yaw",
+      "parent": "pelvis",
+      "offset_pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "waist_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": 0.021512,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "waist_roll",
+      "parent": "waist_yaw",
+      "offset_pos": [
+        -0.0039635,
+        0.0,
+        0.035
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "waist_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 0.003775,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "waist_pitch",
+      "parent": "waist_roll",
+      "offset_pos": [
+        0.0,
+        0.0,
+        0.019
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "waist_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.017551,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_shoulder_pitch",
+      "parent": "waist_pitch",
+      "offset_pos": [
+        0.0039563,
+        0.10022,
+        0.23778
+      ],
+      "offset_quat": [
+        0.9902640743722195,
+        0.13920148374281427,
+        1.3872204401988457e-05,
+        -9.868683842420437e-05
+      ],
+      "dofs": [
+        {
+          "name": "left_shoulder_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": -0.028931,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_shoulder_roll",
+      "parent": "left_shoulder_pitch",
+      "offset_pos": [
+        0.0,
+        0.038,
+        -0.013831
+      ],
+      "offset_quat": [
+        0.9902682552548409,
+        -0.1391717738427347,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_shoulder_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 1.667765,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_shoulder_yaw",
+      "parent": "left_shoulder_roll",
+      "offset_pos": [
+        0.0,
+        0.00624,
+        -0.1032
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_shoulder_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": -0.055076,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_elbow",
+      "parent": "left_shoulder_yaw",
+      "offset_pos": [
+        0.015783,
+        0.0,
+        -0.080518
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_elbow_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 1.405656,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_wrist_roll",
+      "parent": "left_elbow",
+      "offset_pos": [
+        0.1,
+        0.00188791,
+        -0.01
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_wrist_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 0.068494,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_wrist_pitch",
+      "parent": "left_wrist_roll",
+      "offset_pos": [
+        0.038,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_wrist_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 0.181915,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "left_wrist_yaw",
+      "parent": "left_wrist_pitch",
+      "offset_pos": [
+        0.046,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "left_wrist_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": 0.018075,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_shoulder_pitch",
+      "parent": "waist_pitch",
+      "offset_pos": [
+        0.0039563,
+        -0.10021,
+        0.23778
+      ],
+      "offset_quat": [
+        0.9902640743722195,
+        -0.13920148374281427,
+        1.3872204401988457e-05,
+        9.868683842420437e-05
+      ],
+      "dofs": [
+        {
+          "name": "right_shoulder_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 0.048623,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_shoulder_roll",
+      "parent": "right_shoulder_pitch",
+      "offset_pos": [
+        0.0,
+        -0.038,
+        -0.013831
+      ],
+      "offset_quat": [
+        0.9902682552548409,
+        0.1391717738427347,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_shoulder_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": -1.620647,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_shoulder_yaw",
+      "parent": "right_shoulder_roll",
+      "offset_pos": [
+        0.0,
+        -0.00624,
+        -0.1032
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_shoulder_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": -0.08494,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_elbow",
+      "parent": "right_shoulder_yaw",
+      "offset_pos": [
+        0.015783,
+        0.0,
+        -0.080518
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_elbow_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 1.499361,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_wrist_roll",
+      "parent": "right_elbow",
+      "offset_pos": [
+        0.1,
+        -0.00188791,
+        -0.01
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_wrist_roll_joint",
+          "axis": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "neutral_angle": 0.098212,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_wrist_pitch",
+      "parent": "right_wrist_roll",
+      "offset_pos": [
+        0.038,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_wrist_pitch_joint",
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "neutral_angle": 0.173991,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "right_wrist_yaw",
+      "parent": "right_wrist_pitch",
+      "offset_pos": [
+        0.046,
+        0.0,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": [
+        {
+          "name": "right_wrist_yaw_joint",
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "neutral_angle": -0.29095,
+          "limits": null
+        }
+      ]
+    },
+    {
+      "name": "head",
+      "parent": "waist_pitch",
+      "offset_pos": [
+        0.0039635,
+        0.0,
+        -0.054
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": []
+    },
+    {
+      "name": "left_hand",
+      "parent": "left_wrist_yaw",
+      "offset_pos": [
+        0.0415,
+        0.003,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": []
+    },
+    {
+      "name": "right_hand",
+      "parent": "right_wrist_yaw",
+      "offset_pos": [
+        0.0415,
+        -0.003,
+        0.0
+      ],
+      "offset_quat": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dofs": []
+    }
+  ]
+}

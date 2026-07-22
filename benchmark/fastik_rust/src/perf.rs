@@ -150,7 +150,7 @@ pub fn bench_multithread_sequence_throughput(tree: &Arc<KinematicTree>, sequence
     elapsed
 }
 
-pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
+pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!("fastik Rust benchmark (state_dim={})\n", tree.state_dim());
 
     // Same fixture-derived target used by the Python and C++ benchmarks, so
@@ -195,6 +195,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
     );
 
     write_results_json(
+        body,
         single_frame_latency.as_secs_f64() * 1e6,
         single_frame_latency_max.as_secs_f64() * 1e6,
         1.0 / single_thread_mean.as_secs_f64(),
@@ -202,9 +203,10 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
     );
 }
 
-/// Writes `../plot/results/fastik-rust.json` for `../plot/plot_comparison.py`
-/// to pick up.
+/// Writes `../plot/results/fastik-rust-<body>.json` for
+/// `../plot/plot_comparison.py` to pick up.
 fn write_results_json(
+    body: &str,
     single_frame_latency_us: f64,
     single_frame_latency_max_us: f64,
     single_thread_throughput_fps: f64,
@@ -212,6 +214,7 @@ fn write_results_json(
 ) {
     let results = serde_json::json!({
         "name": "fastik-rust",
+        "body": body,
         "language": "rust",
         "formulation": "whole-tree",
         "single_frame_latency_us": single_frame_latency_us,
@@ -223,9 +226,7 @@ fn write_results_json(
     });
     let out_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plot/results");
     std::fs::create_dir_all(&out_dir).expect("failed to create ../plot/results");
-    std::fs::write(
-        out_dir.join("fastik-rust.json"),
-        serde_json::to_string_pretty(&results).unwrap(),
-    )
-    .expect("failed to write ../plot/results/fastik-rust.json");
+    let out_path = out_dir.join(format!("fastik-rust-{body}.json"));
+    std::fs::write(&out_path, serde_json::to_string_pretty(&results).unwrap())
+        .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_path.display()));
 }

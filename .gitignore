@@ -178,8 +178,18 @@ target/
 # cxx-generated header, copied out of OUT_DIR by cpp/build.rs
 cpp/include/
 
-# generated benchmark results/charts (regenerate via benchmark/plot/plot_results.py / plot_scaling.py)
+# generated benchmark results/charts (regenerate via benchmark/plot/plot_comparison.py / plot_scaling.py)
 benchmark/plot/results/
+
+# raw third-party inputs fetched by benchmark/preprocessing/ -- see its
+# README.md for the exact fetch commands; g1_body_plan.json/fixtures_g1.json
+# (the *generated* outputs) are committed, same as the fly's own
+# neuromechfly_ypr_legs.json/fixtures.json
+benchmark/assets/g1_raw/
+
+# Open Sans TTFs used by plot_comparison.py, fetched on demand (see its own
+# fetch-if-missing logic) -- not vendored, same reasoning as g1_raw/ above.
+benchmark/plot/fonts/
 
 # benchmark/extern/: cloned dependency sources, local install prefixes, build
 # output, and venvs -- see each library's README.md for exact rebuild steps
@@ -194,7 +204,6 @@ benchmark/extern/kdl/bench_kdl
 benchmark/extern/kdl/kdl_leg_fk_test
 benchmark/extern/rbdl/bench_rbdl
 benchmark/extern/rbdl/leg_poc
-benchmark/extern/fabrik/bench_fabrik
 benchmark/extern/pinocchio/bench_pinocchio_cpp
 
 # Jupyter Notebook

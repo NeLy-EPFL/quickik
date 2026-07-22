@@ -1,26 +1,24 @@
-"""Aggregates every benchmark's results/<name>.json (see RESULTS_SCHEMA.md)
-into a markdown comparison table (always) and a bar chart (if matplotlib is
-available).
+"""Aggregates every benchmark's results/<name>-<body>.json into a markdown
+comparison table (always) and a bar chart (if matplotlib is available), one
+of each per body -- currently `neuromechfly` (a fly) and `g1` (a Unitree G1
+humanoid; see ../preprocessing/README.md for how its assets are generated).
+Every result JSON carries a `"body"` field; this script groups by it and
+writes `comparison_<body>.png` for each body found.
 
 Only `formulation: "whole-tree"` results are compared here -- results
-solving fastik's actual problem (floating base + all 6 legs + all 30
-keypoints, jointly). "fixed-base-per-leg" libraries (currently TRAC-IK and
-FABRIK) are excluded entirely, not just visually de-emphasized: neither can
-be reformulated to solve the whole-tree problem (TRAC-IK's solver takes
-exactly one chain and one end-effector target per call, by its own public
-API; FABRIK is defined around a fixed-base single chain reaching one tip --
-extending either to a floating base + multi-keypoint branching tree would
-mean writing a different, non-standard algorithm). Their benchmarks and
-results still exist under ../extern/{trac_ik,fabrik}/ as standalone
-reference implementations of that different problem -- just not compared
-here. See RESULTS_SCHEMA.md.
+solving the body's actual problem (floating base + every limb/keypoint,
+jointly). Any result with a different `formulation` (e.g. a fixed-base,
+single-chain-only library that can't be reformulated to solve the whole-tree
+problem) is excluded entirely, not just visually de-emphasized, and listed
+separately in the printed table.
 
 Usage:
 
-    python plot_results.py
+    python plot_comparison.py
 """
 
 import json
+import math
 from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -31,29 +29,68 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 # (see extern/kdl/README.md).
 MAX_ITERATIONS_PER_SOLVE = 10
 
+# Padding past the widest bar's tip, as a fraction of that bar's value.
+XLIM_PAD = 1.15
+
+# 2x2 grid: latency in column 0 (mean-with-early-stop above, fixed-iteration
+# worst-case below), throughput in column 1 (single-thread above, multi-
+# thread below). "scale" converts the raw JSON units (us, fps) to the
+# panel's own axis unit (ms, kFPS); a bar under 1 (in that unit) instead
+# displays its label in "small_unit" (us, FPS) -- see format_value --
+# without changing the bar's own length, which always stays in the panel's
+# one fixed axis unit.
 METRICS = [
     {
         "key": "single_frame_latency_us",
-        "max_key": "single_frame_latency_max_us",
-        "title": f"Mean and max single-frame latency (≤{MAX_ITERATIONS_PER_SOLVE} iters/solve)",
-        "xlabel": "Latency (μs)",
-        "unit": "μs",
+        "title": "Mean single-frame latency (with early stopping)",
+        "xlabel": "Latency (ms)",
+        "unit": "ms",
+        "small_unit": "μs",
+        "scale": 1e-3,
+        "row": 0,
+        "col": 0,
     },
     {
         "key": "single_thread_throughput_fps",
-        "max_key": None,
         "title": "Throughput (sequential frames, single thread)",
-        "xlabel": "Throughput (frames/s)",
-        "unit": "fps",
+        "xlabel": "Throughput (kFPS)",
+        "unit": "kFPS",
+        "small_unit": "FPS",
+        "scale": 1e-3,
+        "row": 0,
+        "col": 1,
+    },
+    {
+        "key": "single_frame_latency_max_us",
+        "title": f"Single-frame latency (fixed {MAX_ITERATIONS_PER_SOLVE} iters)",
+        "xlabel": "Latency (ms)",
+        "unit": "ms",
+        "small_unit": "μs",
+        "scale": 1e-3,
+        "row": 1,
+        "col": 0,
     },
     {
         "key": "multi_thread_throughput_fps",
-        "max_key": None,
         "title": "Throughput (sequential frames, 8 threads)",
-        "xlabel": "Throughput (frames/s)",
-        "unit": "fps",
+        "xlabel": "Throughput (kFPS)",
+        "unit": "kFPS",
+        "small_unit": "FPS",
+        "scale": 1e-3,
+        "row": 1,
+        "col": 1,
     },
 ]
+
+# (body, metric key) -> the bar's *display* name (matched against
+# `bar_names`, not the JSON "name" field -- see DISPLAY_NAMES) that should be
+# drawn capped at CAP_MULTIPLE-x the next-highest bar's value instead of
+# running out to its true value, which would flatten every other bar down
+# near zero on a linear axis -- see `draw_bars`. Only KDL's g1 mean-latency
+# result is extreme enough (~60x the next-highest bar) to need this;
+# everywhere else a plain, uncapped bar is clearer.
+CAPPED_BARS = {("g1", "single_frame_latency_us"): "KDL"}
+CAP_MULTIPLE = 3
 
 # Explicit display order (not alphabetical): language variants of the same
 # library grouped together, fastest-per-library first.
@@ -80,9 +117,19 @@ DISPLAY_NAMES = {
 FASTIK_COLOR = "tab:orange"
 OTHER_COLOR = "#888888"
 TEXT_NUMBER_FONTSIZE = 8
-# DejaVu Sans is the only open-source sans-serif shipped inside matplotlib
-# itself (also its default) -- "Open Sans" is not bundled with matplotlib.
-FONT_FAMILY = "DejaVu Sans"
+# Open Sans isn't bundled with matplotlib (unlike DejaVu Sans, its default);
+# fetched on demand into fonts/ (gitignored, not vendored) rather than
+# assumed installed system-wide -- see register_fonts().
+FONT_FAMILY = "Open Sans"
+FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+
+# Every result JSON has a "body" field (see ../preprocessing/README.md for
+# g1, ../scripts/generate_fixtures.py for neuromechfly); this is just the
+# figure suptitle for each.
+BODY_TITLES = {
+    "neuromechfly": "NeuroMechFly (42 limb DOFs)",
+    "g1": "Unitree G1 (29-DOF humanoid)",
+}
 
 
 def load_results():
@@ -97,6 +144,13 @@ def load_results():
     excluded = [r for r in all_results if r not in included]
     included.sort(key=lambda r: ORDER.index(r["name"]) if r["name"] in ORDER else len(ORDER))
     return included, excluded
+
+
+def group_by_body(results):
+    groups = {}
+    for r in results:
+        groups.setdefault(r.get("body", "neuromechfly"), []).append(r)
+    return groups
 
 
 def print_table(results, excluded):
@@ -134,88 +188,175 @@ def print_table(results, excluded):
             print(f"  {name}: {note}")
 
 
-def format_value(value, unit=None):
-    """Fixed-point, never scientific -- e.g. '6,301 μs' or '147.2 μs', never '1.06e+06'."""
-    text = f"{value:,.0f}" if value >= 100 else f"{value:,.1f}"
+def round_sig(value, sig=3):
+    """Rounds to `sig` significant digits -- e.g. round_sig(6405, 3) == 6410,
+    round_sig(0.1498, 3) == 0.15."""
+    if value == 0:
+        return 0.0
+    exponent = math.floor(math.log10(abs(value)))
+    decimals = sig - 1 - exponent
+    factor = 10**decimals
+    return round(value * factor) / factor
+
+
+def format_value(value, unit=None, small_unit=None, sig=3):
+    """Fixed-point, never scientific, no thousand separator, no parens,
+    rounded to `sig` significant digits -- e.g. '6.41 ms' or '32.9 kFPS',
+    never '1.06e+04' or '6,405.2'.
+
+    If `small_unit` is given and `value` is under 1 (in `unit`), displays in
+    `small_unit` instead (x1000) -- e.g. '110 μs' rather than '0.110 ms' --
+    purely a label readability choice; the bar's own length stays in `unit`
+    regardless."""
+    if small_unit and unit and abs(value) < 1:
+        value, unit = value * 1000, small_unit
+    rounded = round_sig(value, sig)
+    if rounded == 0:
+        text = "0"
+    else:
+        decimals = max(0, sig - 1 - math.floor(math.log10(abs(rounded))))
+        text = f"{rounded:.{decimals}f}"
     return f"{text} {unit}" if unit else text
 
 
-def despine(ax):
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+def despine(ax, hidden=("top", "right")):
+    for side in hidden:
+        ax.spines[side].set_visible(False)
 
 
-def plot_chart(results):
+def register_fonts():
+    """Registers the locally-fetched Open Sans TTFs with matplotlib's font
+    manager, if present; falls back to DejaVu Sans (matplotlib's own
+    bundled default) otherwise, rather than silently rendering with
+    whatever matplotlib happens to fall back to. Not vendored -- fetch
+    once with:
+
+        mkdir -p fonts
+        curl -sL -o fonts/OpenSans-Regular.ttf \\
+            "https://fonts.gstatic.com/s/opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0C4n.ttf"
+        curl -sL -o fonts/OpenSans-Bold.ttf \\
+            "https://fonts.gstatic.com/s/opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsg-1y4n.ttf"
+    """
+    import matplotlib.font_manager as fm
+
+    ttfs = list(FONTS_DIR.glob("OpenSans-*.ttf"))
+    if not ttfs:
+        print(f"({FONT_FAMILY} not found under {FONTS_DIR} -- falling back to DejaVu Sans; see register_fonts()'s docstring to fetch it)")
+        return "DejaVu Sans"
+    for ttf in ttfs:
+        fm.fontManager.addfont(str(ttf))
+    return FONT_FAMILY
+
+
+def draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_name=None):
+    """Draws one horizontal-bar panel on `ax` and annotates each bar with its
+    value (see `format_value`) just past its tip -- plain "xxx unit", no
+    parens.
+
+    If `cap_name` names one of `bar_names`, that bar is instead drawn at a
+    shortened length -- `CAP_MULTIPLE`x the next-highest bar's value -- since
+    running it out to its true value would flatten every other bar down near
+    zero on a linear axis. Only that one bar's label is different: its true
+    value followed by "(capped in chart)", e.g. "66.7 ms (capped in
+    chart)" -- every other bar keeps the plain format. The caller is
+    expected to set this panel's x-axis limit to exactly this bar's
+    (truncated) length, so the bar runs flush to the plot's right edge
+    rather than stopping short of it -- the visual cue that it's cut off,
+    not actually that short.
+
+    Returns `(bars, widest)`, where `widest` is the widest x-extent actually
+    drawn (unpadded, so the caller decides how much room to leave past it).
+    """
+    display_values = list(bar_values)
+    cap_idx = bar_names.index(cap_name) if cap_name in bar_names else None
+    if cap_idx is not None:
+        display_values[cap_idx] = max(v for i, v in enumerate(bar_values) if i != cap_idx) * CAP_MULTIPLE
+
+    bars = ax.barh(bar_names, display_values, color=bar_colors, height=0.55)
+    for i, bar in enumerate(bars):
+        text = format_value(bar_values[i], unit, small_unit)
+        if i == cap_idx:
+            # Inside the bar, right-justified against its (truncated) tip,
+            # in white for contrast against the fill -- not past the tip
+            # like every other bar's label, since the bar itself is already
+            # marked as truncated via "(capped in chart)".
+            ax.annotate(
+                f"{text} (capped in chart)",
+                (bar.get_width(), bar.get_y() + bar.get_height() / 2),
+                xytext=(-4, 0),
+                fontsize=TEXT_NUMBER_FONTSIZE,
+                textcoords="offset points",
+                color="white",
+                ha="right",
+                va="center",
+            )
+            continue
+        ax.annotate(
+            text,
+            (bar.get_width(), bar.get_y() + bar.get_height() / 2),
+            xytext=(4, 0),
+            fontsize=TEXT_NUMBER_FONTSIZE,
+            textcoords="offset points",
+            ha="left",
+            va="center",
+        )
+    return bars, max(display_values)
+
+
+def plot_chart(results, body):
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("\n(matplotlib not installed -- skipping chart; the table above is still complete)")
         return
 
-    plt.rcParams["font.family"] = FONT_FAMILY
+    plt.rcParams["font.family"] = register_fonts()
 
     # results is already in ORDER; reversed for barh so it reads top-to-bottom.
     ordered = list(reversed(results))
     names = [DISPLAY_NAMES.get(r["name"], r["name"]) for r in ordered]
     colors = [FASTIK_COLOR if r["name"].startswith("fastik-") else OTHER_COLOR for r in ordered]
 
-    # Figure is 50% larger than a "natural" size, saved at a correspondingly
-    # lower dpi -- output pixel dimensions stay about the same, but every
-    # font (all at their absolute point-size defaults) occupies a smaller
-    # fraction of the figure, so the rendered image reads less oversized.
-    fig, axes = plt.subplots(len(METRICS), 1, figsize=(7, 9))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 7))
+    # Manually tuned for this 2x2 layout: top=0.84 leaves room for the
+    # suptitle; hspace=0.49 and wspace=0.35 keep panel titles/labels from
+    # overlapping their neighbors.
+    fig.subplots_adjust(hspace=0.49, wspace=0.35, left=0.09, right=0.97, top=0.84, bottom=0.08)
 
-    for ax, metric in zip(axes, METRICS):
-        key, max_key, title, xlabel, unit = metric["key"], metric["max_key"], metric["title"], metric["xlabel"], metric["unit"]
+    for metric in METRICS:
+        ax = axes[metric["row"], metric["col"]]
+        key, title, xlabel, unit, small_unit = metric["key"], metric["title"], metric["xlabel"], metric["unit"], metric["small_unit"]
         values = [r.get(key) for r in ordered]
-        max_values = [r.get(max_key) if max_key else None for r in ordered]
         bar_names = [n for n, v in zip(names, values) if v is not None]
-        bar_values = [v for v in values if v is not None]
-        bar_max_values = [mv for v, mv in zip(values, max_values) if v is not None]
+        bar_values = [v * metric["scale"] for v in values if v is not None]
         bar_colors = [c for c, v in zip(colors, values) if v is not None]
+
         if not bar_values:
             ax.set_title(f"{title}\n(no data)")
             continue
 
-        bars = ax.barh(bar_names, bar_values, color=bar_colors, height=0.55)
+        cap_name = CAPPED_BARS.get((body, key))
+        _, widest = draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit, cap_name=cap_name)
         ax.set_title(title)
         ax.set_xlabel(xlabel)
         despine(ax)
-        widest = max(mv if mv is not None else v for v, mv in zip(bar_values, bar_max_values))
-        ax.set_xlim(0, widest * 1.3)
-        for bar, value, max_value, color in zip(bars, bar_values, bar_max_values, bar_colors):
-            y = bar.get_y() + bar.get_height() / 2
-            if max_value is None:
-                ax.annotate(
-                    format_value(value, unit),
-                    (bar.get_width(), y),
-                    xytext=(4, 0),
-                    fontsize=TEXT_NUMBER_FONTSIZE,
-                    textcoords="offset points",
-                    ha="left",
-                    va="center",
-                )
-                continue
-            ax.plot([bar.get_width(), max_value], [y, y], color=color, linewidth=1, zorder=2)
-            ax.plot(max_value, y, marker="o", color=color, markersize=3, zorder=3)
-            ax.annotate(
-                f"{format_value(value, unit)} (max {format_value(max_value, unit)})",
-                (max_value, y),
-                xytext=(4, 0),
-                fontsize=TEXT_NUMBER_FONTSIZE,
-                textcoords="offset points",
-                ha="left",
-                va="center",
-            )
+        # No padding past a capped bar's tip: running the axis flush to its
+        # (truncated) length is what visually shows it's cut off rather than
+        # actually that short, instead of adding a triangle or other marker.
+        is_capped = cap_name in bar_names
+        ax.set_xlim(0, widest if is_capped else widest * XLIM_PAD)
 
-    fig.suptitle("NeuroMechFly (42 limb DOFs)", fontsize=14, fontweight="bold")
-    fig.tight_layout(rect=(0, 0, 1, 0.98), h_pad=2.5)
-    out_path = RESULTS_DIR / "comparison.png"
+    fig.suptitle(BODY_TITLES.get(body, body), fontsize=14, fontweight="bold")
+    out_path = RESULTS_DIR / f"comparison_{body}.png"
     fig.savefig(out_path, dpi=100, bbox_inches="tight")
     print(f"\nWrote chart to {out_path}")
 
 
 if __name__ == "__main__":
     results, excluded = load_results()
-    print_table(results, excluded)
-    plot_chart(results)
+    results_by_body = group_by_body(results)
+    excluded_by_body = group_by_body(excluded)
+    for body, body_results in results_by_body.items():
+        print(f"\n=== {BODY_TITLES.get(body, body)} ===")
+        print_table(body_results, excluded_by_body.get(body, []))
+        plot_chart(body_results, body)
