@@ -14,7 +14,7 @@ the Rust benchmark (see `generate_fixtures.py`). Requires:
 Run with flygym's own venv:
 
     cd /path/to/flygym && source .venv/bin/activate
-    python /path/to/fastik/benchmark/scripts/bench_python.py
+    python /path/to/fastik/benchmark/fastik_python/bench.py
 
 One thing the Rust benchmark can do that this one can't, since it's not
 exposed to Python: forward kinematics on its own (`fastik::forward` isn't
@@ -28,7 +28,6 @@ exactly, for a fair cross-language comparison.
 """
 
 import json
-import os
 import time
 from pathlib import Path
 
@@ -165,6 +164,9 @@ def run_correctness():
 # Performance (mirrors perf.rs)
 # -----------------------------------------------------------------------------
 def summarize(label, samples_sec):
+    """Prints the usual latency/throughput summary and returns the mean in
+    microseconds, for callers that also want the number for
+    results/fastik-python.json."""
     samples_us = np.sort(np.array(samples_sec) * 1e6)
     n = len(samples_us)
     mean = samples_us.mean()
@@ -174,13 +176,13 @@ def summarize(label, samples_sec):
         f"min={samples_us.min():>9.3f}us  max={samples_us.max():>9.3f}us  "
         f"throughput={1e6 / mean:>10.1f} calls/s"
     )
+    return mean
 
 
-def bench_single_frame_latency(tree, target, n_calls):
+def bench_single_frame_latency(tree, target, n_calls, config):
     """Single-frame latency: a fresh State.neutral_pose() solved against a
-    fixed real target every call (no warm start), default config -- the same
-    fixture-derived target used by the Rust and C++ benchmarks."""
-    config = fastik.SolverConfig()
+    fixed real target every call (no warm start) -- the same fixture-derived
+    target used by the Rust and C++ benchmarks."""
     solver = fastik.Solver(tree, config)
     obs = build_observations(target)
     for _ in range(1000):
@@ -214,6 +216,9 @@ def bench_solve_sequence(tree, all_obs, config):
 # `n_segments`-thread run gets exactly one segment per thread).
 SEGMENT_LEN = 200
 OVERLAP_LEN = 20
+# Thread count for the main "multi-thread sequence throughput" metric --
+# fixed rather than detected, matching perf.rs (see its comment).
+MULTITHREAD_N_THREADS = 8
 
 
 def frames_for_n_segments(n_segments):
@@ -234,6 +239,27 @@ def bench_multithread_sequence_throughput(tree, sequence):
     return time.perf_counter() - t0
 
 
+def write_results_json(
+    single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
+):
+    """Writes plot/results/fastik-python.json for plot/plot_comparison.py to
+    pick up."""
+    results = {
+        "name": "fastik-python",
+        "language": "python",
+        "formulation": "whole-tree",
+        "single_frame_latency_us": single_frame_latency_us,
+        "single_frame_latency_max_us": single_frame_latency_max_us,
+        "single_thread_throughput_fps": single_thread_throughput_fps,
+        "multi_thread_throughput_fps": multi_thread_throughput_fps,
+        "multi_thread_n_threads": MULTITHREAD_N_THREADS,
+        "notes": None,
+    }
+    out_dir = BENCHMARK_DIR / "plot" / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "fastik-python.json").write_text(json.dumps(results, indent=2))
+
+
 def run_performance(tree):
     print(f"fastik Python-bindings benchmark (state_dim={tree.n_dofs + 6})\n")
 
@@ -241,26 +267,38 @@ def run_performance(tree):
     # this number is directly comparable across all three.
     target = np.array(fixtures["synthetic_frames"][0]["target_ego"])
     print("-- single-frame time (latency), default config (adaptive early stop) --")
-    summarize("solve()", bench_single_frame_latency(tree, target, 20_000))
+    single_frame_latency_us = summarize(
+        "solve()", bench_single_frame_latency(tree, target, 20_000, fastik.SolverConfig())
+    )
+
+    # Early stop disabled (tolerances = 0), so every call runs the full
+    # n_iterations -- the worst case if a frame never converges early.
+    max_iterations_config = fastik.SolverConfig(position_tolerance=0.0, angle_tolerance=0.0)
+    print(f"\n-- single-frame time (latency), early stop disabled ({max_iterations_config.n_iterations} iterations) --")
+    single_frame_latency_max_us = summarize(
+        "solve() (forced max iterations)", bench_single_frame_latency(tree, target, 20_000, max_iterations_config)
+    )
 
     print("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --")
     native_obs = [build_observations(f["target_ego"]) for f in fixtures["native_rate_frames"]]
-    summarize(
+    single_thread_mean_us = summarize(
         "SequenceSolver.solve_frame",
         bench_solve_sequence(tree, native_obs, fastik.SolverConfig()),
     )
 
-    print("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop) --")
-    try:
-        n_threads = len(os.sched_getaffinity(0))
-    except AttributeError:
-        n_threads = os.cpu_count() or 1
-    sequence = tiled_native_rate_sequence(frames_for_n_segments(n_threads))
+    print(
+        f"\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, "
+        f"{MULTITHREAD_N_THREADS} threads) --"
+    )
+    sequence = tiled_native_rate_sequence(frames_for_n_segments(MULTITHREAD_N_THREADS))
     elapsed = bench_multithread_sequence_throughput(tree, sequence)
+    multithread_fps = len(sequence) / elapsed
     print(
         f"solve_sequence_segmented_parallel   n_frames={len(sequence):<6} elapsed={elapsed * 1e3:>9.3f}ms  "
-        f"throughput={len(sequence) / elapsed:>10.1f} frames/s"
+        f"throughput={multithread_fps:>10.1f} frames/s"
     )
+
+    write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps)
 
 
 if __name__ == "__main__":

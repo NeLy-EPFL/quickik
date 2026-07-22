@@ -210,4 +210,6 @@ Rust's `Solver<M>` is generic over the mapper type at compile time; neither Pyth
 See [`benchmark/`](benchmark/) for a correctness cross-check and
 throughput/latency benchmark against
 [flygym.ik](https://github.com/NeLy-EPFL/flygym) on the NeuroMechFly fly
-model, covering the Rust API and the Python and C++ bindings.
+model, covering the Rust API, the Python and C++ bindings, and (for
+throughput/latency only) KDL, TRAC-IK, Pinocchio, RBDL, and a from-scratch
+FABRIK reference.

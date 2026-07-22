@@ -1,0 +1,15 @@
+[package]
+name = "fastik-scaling"
+description = "Weak-scaling sweep (1/2/4/8/16 threads, via taskset) for fastik's solve_sequence_segmented_parallel"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "fastik-scaling"
+path = "src/main.rs"
+
+[dependencies]
+fastik = { path = "../.." }
+fastik-benchmark = { path = "../fastik_rust" }
+serde_json = "1.0"

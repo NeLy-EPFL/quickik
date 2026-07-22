@@ -2,9 +2,9 @@
 //! frame latency, single-thread sequence throughput, and multi-thread
 //! sequence throughput -- all at the default config (early stopping via
 //! `position_tolerance`/`angle_tolerance` enabled, i.e. `n_iterations` acts as
-//! a ceiling rather than a fixed cost). Also a weak-scaling sweep (Rust
-//! only): see `run_weak_scaling_point`'s docs and README.md for how to sweep
-//! thread counts via `taskset`.
+//! a ceiling rather than a fixed cost). The weak-scaling sweep lives in
+//! `../../fastik_scaling`, reusing this module's tiling/multi-thread-
+//! throughput helpers (`pub` below for that reason).
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -20,16 +20,23 @@ use crate::correctness::build_observations;
 use crate::fixtures::{Fixtures, NativeRateFrame};
 
 /// Frames per segment/thread for both the multi-thread throughput benchmark
-/// and the weak-scaling sweep.
-const SEGMENT_LEN: usize = 200;
-const OVERLAP_LEN: usize = 20;
+/// and `fastik_scaling`'s weak-scaling sweep.
+pub const SEGMENT_LEN: usize = 200;
+pub const OVERLAP_LEN: usize = 20;
+/// Thread count for the main "multi-thread sequence throughput" metric --
+/// fixed rather than detected, so the number is reproducible regardless of
+/// the machine/taskset state (sizing the sequence to exactly this many
+/// segments also naturally caps `solve_sequence_segmented_parallel`'s own
+/// thread spawning at this count, via its `available_parallelism().min(n_segments)`).
+/// See `../../fastik_scaling` for the separate 1/2/4/8/16 sweep.
+const MULTITHREAD_N_THREADS: usize = 8;
 
 /// Total frame count that `solve_sequence_segmented_parallel`'s own
 /// `segment_bounds` splits into exactly `n_segments` segments of
 /// `SEGMENT_LEN` frames each (stride `SEGMENT_LEN - OVERLAP_LEN` between
 /// segment starts) -- so a `n_segments`-thread run gets exactly one segment
 /// per thread, rather than some threads getting two while others idle.
-fn frames_for_n_segments(n_segments: usize) -> usize {
+pub fn frames_for_n_segments(n_segments: usize) -> usize {
     SEGMENT_LEN + n_segments.saturating_sub(1) * (SEGMENT_LEN - OVERLAP_LEN)
 }
 
@@ -38,7 +45,9 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
     sorted[idx]
 }
 
-fn summarize(label: &str, mut samples: Vec<Duration>) {
+/// Prints the usual latency/throughput summary and returns the mean, for
+/// callers that also want the number for `results/fastik-rust.json`.
+fn summarize(label: &str, mut samples: Vec<Duration>) -> Duration {
     samples.sort();
     let n = samples.len();
     let mean = samples.iter().sum::<Duration>() / n as u32;
@@ -53,6 +62,7 @@ fn summarize(label: &str, mut samples: Vec<Duration>) {
         samples[n - 1],
         1.0 / mean.as_secs_f64(),
     );
+    mean
 }
 
 /// Builds one `Missing` (root) + `Position3D` (per leg joint) observation
@@ -66,15 +76,20 @@ fn observations_from_target_egos<'a>(
 /// Tiles the native-rate fixture (real, contiguous frame-to-frame motion) up
 /// to `len` frames, for benchmarks that need more frames than the 300-frame
 /// fixture has (e.g. to occupy many threads).
-fn tiled_native_rate_sequence(native_rate_frames: &[NativeRateFrame], len: usize) -> Vec<Vec<KeypointObservation>> {
+pub fn tiled_native_rate_sequence(native_rate_frames: &[NativeRateFrame], len: usize) -> Vec<Vec<KeypointObservation>> {
     let base = observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
     (0..len).map(|i| base[i % base.len()].clone()).collect()
 }
 
 /// Single-frame latency: a fresh `State::neutral_pose()` solved against a
-/// fixed real target every call (no warm start), default config.
-fn bench_single_frame_latency(tree: &Arc<KinematicTree>, target_obs: &[KeypointObservation], n_calls: usize) -> Vec<Duration> {
-    let mut solver: Solver = Solver::new(tree, SolverConfig::default());
+/// fixed real target every call (no warm start).
+fn bench_single_frame_latency(
+    tree: &Arc<KinematicTree>,
+    target_obs: &[KeypointObservation],
+    n_calls: usize,
+    config: SolverConfig,
+) -> Vec<Duration> {
+    let mut solver: Solver = Solver::new(tree, config);
     for _ in 0..1000 {
         let mut state = State::neutral_pose(tree.clone());
         solver.solve(&mut state, black_box(target_obs));
@@ -120,7 +135,7 @@ fn bench_single_thread_sequence_throughput(tree: &Arc<KinematicTree>, native_rat
 /// a longer tiled sequence, using however many threads
 /// [`std::thread::available_parallelism`] reports (the full machine, unless
 /// constrained via `taskset`). Warms up once, then times a second run.
-fn bench_multithread_sequence_throughput(tree: &Arc<KinematicTree>, sequence: &[Vec<KeypointObservation>]) -> Duration {
+pub fn bench_multithread_sequence_throughput(tree: &Arc<KinematicTree>, sequence: &[Vec<KeypointObservation>]) -> Duration {
     let config: SolverConfig = SolverConfig::default();
     let segmented_config = SegmentedSolveConfig {
         segment_len: SEGMENT_LEN,
@@ -135,26 +150,6 @@ fn bench_multithread_sequence_throughput(tree: &Arc<KinematicTree>, sequence: &[
     elapsed
 }
 
-/// One weak-scaling data point: fixes frames-per-thread at [`SEGMENT_LEN`]
-/// (one segment per thread, via [`frames_for_n_segments`]) and scales total
-/// frames with however many threads `available_parallelism` currently
-/// reports, so the amount of work per thread stays constant as thread count
-/// grows. Ideal weak scaling keeps `elapsed` constant across thread counts.
-/// Run this binary repeatedly under `taskset -c 0`, `-c 0-1`, `-c 0-3`,
-/// `-c 0-7`, `-c 0-15` to sweep 1/2/4/8/16 threads -- see README.md.
-fn run_weak_scaling_point(tree: &Arc<KinematicTree>, native_rate_frames: &[NativeRateFrame]) {
-    let n_threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let total_frames = frames_for_n_segments(n_threads);
-    let sequence = tiled_native_rate_sequence(native_rate_frames, total_frames);
-
-    let elapsed = bench_multithread_sequence_throughput(tree, &sequence);
-    println!(
-        "n_threads={n_threads:<3} total_frames={total_frames:<6} elapsed={elapsed:>9.3?}  \
-         throughput={:>10.1} frames/s",
-        total_frames as f64 / elapsed.as_secs_f64(),
-    );
-}
-
 pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
     println!("fastik Rust benchmark (state_dim={})\n", tree.state_dim());
 
@@ -162,26 +157,75 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
     // this number is directly comparable across all three.
     let target_obs = build_observations(&fixtures.synthetic_frames[0].target_ego);
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
-    summarize("solve()", bench_single_frame_latency(tree, &target_obs, 20_000));
+    let single_frame_latency = summarize(
+        "solve()",
+        bench_single_frame_latency(tree, &target_obs, 20_000, SolverConfig::default()),
+    );
+
+    // Early stop disabled (tolerances = 0), so every call runs the full
+    // `n_iterations` -- the worst case if a frame never converges early.
+    let max_iterations_config: SolverConfig = SolverConfig {
+        position_tolerance: 0.0,
+        angle_tolerance: 0.0,
+        ..SolverConfig::default()
+    };
+    println!(
+        "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
+        max_iterations_config.n_iterations
+    );
+    let single_frame_latency_max = summarize(
+        "solve() (forced max iterations)",
+        bench_single_frame_latency(tree, &target_obs, 20_000, max_iterations_config),
+    );
 
     println!("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --");
-    summarize(
+    let single_thread_mean = summarize(
         "SequenceSolver.solve_frame",
         bench_single_thread_sequence_throughput(tree, &fixtures.native_rate_frames),
     );
 
-    println!("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop) --");
-    let n_threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let sequence = tiled_native_rate_sequence(&fixtures.native_rate_frames, frames_for_n_segments(n_threads));
+    println!("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, {MULTITHREAD_N_THREADS} threads) --");
+    let sequence = tiled_native_rate_sequence(&fixtures.native_rate_frames, frames_for_n_segments(MULTITHREAD_N_THREADS));
     let elapsed = bench_multithread_sequence_throughput(tree, &sequence);
+    let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(
         "solve_sequence_segmented_parallel   n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s",
         sequence.len(),
-        sequence.len() as f64 / elapsed.as_secs_f64(),
+        multithread_fps,
     );
 
-    println!(
-        "\n-- weak scaling (this run's available_parallelism; sweep via taskset -c, see README) --"
+    write_results_json(
+        single_frame_latency.as_secs_f64() * 1e6,
+        single_frame_latency_max.as_secs_f64() * 1e6,
+        1.0 / single_thread_mean.as_secs_f64(),
+        multithread_fps,
     );
-    run_weak_scaling_point(tree, &fixtures.native_rate_frames);
+}
+
+/// Writes `../plot/results/fastik-rust.json` for `../plot/plot_comparison.py`
+/// to pick up.
+fn write_results_json(
+    single_frame_latency_us: f64,
+    single_frame_latency_max_us: f64,
+    single_thread_throughput_fps: f64,
+    multi_thread_throughput_fps: f64,
+) {
+    let results = serde_json::json!({
+        "name": "fastik-rust",
+        "language": "rust",
+        "formulation": "whole-tree",
+        "single_frame_latency_us": single_frame_latency_us,
+        "single_frame_latency_max_us": single_frame_latency_max_us,
+        "single_thread_throughput_fps": single_thread_throughput_fps,
+        "multi_thread_throughput_fps": multi_thread_throughput_fps,
+        "multi_thread_n_threads": MULTITHREAD_N_THREADS,
+        "notes": serde_json::Value::Null,
+    });
+    let out_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plot/results");
+    std::fs::create_dir_all(&out_dir).expect("failed to create ../plot/results");
+    std::fs::write(
+        out_dir.join("fastik-rust.json"),
+        serde_json::to_string_pretty(&results).unwrap(),
+    )
+    .expect("failed to write ../plot/results/fastik-rust.json");
 }

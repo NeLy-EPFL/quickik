@@ -1,16 +1,17 @@
 // Correctness cross-check and throughput/latency benchmark for fastik's C++
-// bindings, mirroring benchmark/src/{correctness,perf}.rs and
-// benchmark/scripts/bench_python.py so all three are directly comparable.
-// See that Python script's own header comment for why an independent FK
-// replica is used here too (FK isn't exposed to C++, same as Python).
+// bindings, mirroring ../fastik_rust/src/{correctness,perf}.rs and
+// ../fastik_python/bench.py so all three are directly comparable. See that
+// Python script's own header comment for why an independent FK replica is
+// used here too (FK isn't exposed to C++, same as Python).
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <numeric>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "fastik.h"
@@ -156,7 +157,10 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<fasti
 //  Performance (mirrors perf.rs / bench_python.py's run_performance)
 // =============================================================================
 
-void summarize(const std::string &label, std::vector<double> samples_us) {
+// Prints the usual latency/throughput summary and returns the mean in
+// microseconds, for callers that also want the number for
+// ../plot/results/fastik-cpp.json.
+double summarize(const std::string &label, std::vector<double> samples_us) {
   std::sort(samples_us.begin(), samples_us.end());
   size_t n = samples_us.size();
   double mean = std::accumulate(samples_us.begin(), samples_us.end(), 0.0) / n;
@@ -165,6 +169,7 @@ void summarize(const std::string &label, std::vector<double> samples_us) {
       "%-42s n=%-7zu mean=%9.3fus  median=%9.3fus  p95=%9.3fus  p99=%9.3fus  min=%9.3fus  "
       "max=%9.3fus  throughput=%10.1f calls/s\n",
       label.c_str(), n, mean, pct(0.50), pct(0.95), pct(0.99), samples_us.front(), samples_us.back(), 1e6 / mean);
+  return mean;
 }
 
 double elapsed_us(Clock::time_point t0) {
@@ -172,10 +177,10 @@ double elapsed_us(Clock::time_point t0) {
 }
 
 // Single-frame latency: a fresh State::neutral_pose() solved against a fixed
-// real target every call (no warm start), default config.
+// real target every call (no warm start).
 std::vector<double> bench_single_frame_latency(rust::Box<fastik::KinematicTree> &tree,
-                                                const std::vector<fastik::KeypointObservation> &obs, int n_calls) {
-  fastik::SolverConfig config = fastik::default_solver_config();
+                                                const std::vector<fastik::KeypointObservation> &obs, int n_calls,
+                                                fastik::SolverConfig config) {
   auto solver = fastik::new_solver(*tree, config, fastik::no_mapper());
   for (int i = 0; i < 1000; i++) {
     auto state = fastik::state_neutral_pose(*tree);
@@ -213,6 +218,9 @@ std::vector<double> bench_solve_sequence(rust::Box<fastik::KinematicTree> &tree,
 // `n_segments`-thread run gets exactly one segment per thread).
 constexpr size_t kSegmentLen = 200;
 constexpr size_t kOverlapLen = 20;
+// Thread count for the main "multi-thread sequence throughput" metric --
+// fixed rather than detected, matching perf.rs (see its comment).
+constexpr size_t kMultithreadNThreads = 8;
 
 size_t frames_for_n_segments(size_t n_segments) {
   return kSegmentLen + (n_segments > 0 ? n_segments - 1 : 0) * (kSegmentLen - kOverlapLen);
@@ -251,6 +259,27 @@ double bench_multithread_sequence_throughput(rust::Box<fastik::KinematicTree> &t
   return elapsed_ms;
 }
 
+// Writes ../plot/results/fastik-cpp.json for ../plot/plot_comparison.py to
+// pick up. Hand-written (not using json.hpp, which is read-only) since this
+// is the only place this binary needs to produce JSON.
+void write_results_json(double single_frame_latency_us, double single_frame_latency_max_us,
+                         double single_thread_throughput_fps, double multi_thread_throughput_fps) {
+  std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../plot/results";
+  std::filesystem::create_directories(out_dir);
+  std::ofstream out(out_dir / "fastik-cpp.json");
+  out << "{\n"
+      << "  \"name\": \"fastik-cpp\",\n"
+      << "  \"language\": \"cpp\",\n"
+      << "  \"formulation\": \"whole-tree\",\n"
+      << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
+      << "  \"single_frame_latency_max_us\": " << single_frame_latency_max_us << ",\n"
+      << "  \"single_thread_throughput_fps\": " << single_thread_throughput_fps << ",\n"
+      << "  \"multi_thread_throughput_fps\": " << multi_thread_throughput_fps << ",\n"
+      << "  \"multi_thread_n_threads\": " << kMultithreadNThreads << ",\n"
+      << "  \"notes\": null\n"
+      << "}\n";
+}
+
 void run_performance(rust::Box<fastik::KinematicTree> &tree, const Json &fixtures) {
   std::printf("fastik C++-bindings benchmark (state_dim=%zu)\n\n", tree->n_dofs() + 6);
 
@@ -259,19 +288,34 @@ void run_performance(rust::Box<fastik::KinematicTree> &tree, const Json &fixture
   auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
   auto obs = build_observations(target);
   std::printf("-- single-frame time (latency), default config (adaptive early stop) --\n");
-  summarize("solve()", bench_single_frame_latency(tree, obs, 20000));
+  double single_frame_latency_us =
+      summarize("solve()", bench_single_frame_latency(tree, obs, 20000, fastik::default_solver_config()));
+
+  // Early stop disabled (tolerances = 0), so every call runs the full
+  // n_iterations -- the worst case if a frame never converges early.
+  fastik::SolverConfig max_iterations_config = fastik::default_solver_config();
+  max_iterations_config.position_tolerance = 0.0f;
+  max_iterations_config.angle_tolerance = 0.0f;
+  std::printf("\n-- single-frame time (latency), early stop disabled (%zu iterations) --\n",
+              max_iterations_config.n_iterations);
+  double single_frame_latency_max_us =
+      summarize("solve() (forced max iterations)", bench_single_frame_latency(tree, obs, 20000, max_iterations_config));
 
   std::printf("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --\n");
   std::vector<std::vector<fastik::KeypointObservation>> native_obs;
   for (auto &f : fixtures["native_rate_frames"].as_array()) native_obs.push_back(build_observations(to_vec3s(f["target_ego"])));
-  summarize("SequenceSolver.solve_frame", bench_solve_sequence(tree, native_obs, fastik::default_solver_config()));
+  double single_thread_mean_us =
+      summarize("SequenceSolver.solve_frame", bench_solve_sequence(tree, native_obs, fastik::default_solver_config()));
 
-  std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop) --\n");
-  unsigned n_threads = std::max(1u, std::thread::hardware_concurrency());
-  auto sequence = tiled_native_rate_sequence(fixtures, frames_for_n_segments(n_threads));
+  std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, %zu threads) --\n",
+              kMultithreadNThreads);
+  auto sequence = tiled_native_rate_sequence(fixtures, frames_for_n_segments(kMultithreadNThreads));
   double elapsed_ms = bench_multithread_sequence_throughput(tree, sequence);
+  double multithread_fps = sequence.size() / (elapsed_ms / 1e3);
   std::printf("solve_sequence_segmented_parallel   n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n",
-              sequence.size(), elapsed_ms, sequence.size() / (elapsed_ms / 1e3));
+              sequence.size(), elapsed_ms, multithread_fps);
+
+  write_results_json(single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps);
 }
 
 }  // namespace

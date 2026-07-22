@@ -57,7 +57,7 @@ target_link_libraries(
 
 # Correctness cross-check and throughput/latency benchmark against
 # flygym.ik -- see ../benchmark/README.md.
-add_executable(fastik_cpp_benchmark ../benchmark/cpp/bench_cpp.cpp)
+add_executable(fastik_cpp_benchmark ../benchmark/fastik_cpp/bench_cpp.cpp)
 target_include_directories(fastik_cpp_benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_definitions(fastik_cpp_benchmark PRIVATE FASTIK_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/assets")
 target_compile_options(fastik_cpp_benchmark PRIVATE -O3)

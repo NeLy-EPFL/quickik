@@ -178,6 +178,25 @@ target/
 # cxx-generated header, copied out of OUT_DIR by cpp/build.rs
 cpp/include/
 
+# generated benchmark results/charts (regenerate via benchmark/plot/plot_results.py / plot_scaling.py)
+benchmark/plot/results/
+
+# benchmark/extern/: cloned dependency sources, local install prefixes, build
+# output, and venvs -- see each library's README.md for exact rebuild steps
+benchmark/extern/*/eigen-src/
+benchmark/extern/*/okd-src/
+benchmark/extern/*/rbdl-src/
+benchmark/extern/*/install/
+benchmark/extern/*/build/
+benchmark/extern/*/.venv*/
+benchmark/extern/*/__pycache__/
+benchmark/extern/kdl/bench_kdl
+benchmark/extern/kdl/kdl_leg_fk_test
+benchmark/extern/rbdl/bench_rbdl
+benchmark/extern/rbdl/leg_poc
+benchmark/extern/fabrik/bench_fabrik
+benchmark/extern/pinocchio/bench_pinocchio_cpp
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

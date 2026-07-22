@@ -2,9 +2,11 @@
 
 Correctness cross-check and throughput/latency benchmark for fastik, using
 the NeuroMechFly leg body plan and real recorded fly kinematics, against
-[flygym.ik](https://github.com/NeLy-EPFL/flygym)'s MuJoCo-based solver.
-Covers the Rust API (`src/`, `cargo run`), the Python bindings
-(`scripts/bench_python.py`), and the C++ bindings (`cpp/bench_cpp.cpp`).
+[flygym.ik](https://github.com/NeLy-EPFL/flygym)'s MuJoCo-based solver and
+(where feasible in this environment) other IK/kinematics libraries: KDL,
+TRAC-IK, Pinocchio, RBDL, and a from-scratch FABRIK reference. Covers
+fastik's Rust API (`fastik_rust/`), Python bindings (`fastik_python/`), and
+C++ bindings (`fastik_cpp/`).
 
 ## Layout
 
@@ -19,8 +21,8 @@ Covers the Rust API (`src/`, `cargo run`), the Python bindings
     own forward kinematics (MuJoCo) on *real* recorded ground-truth joint
     angles -- exactly reachable by construction, so the solver has no excuse
     not to recover them. `synthetic_frames[0]`'s target also doubles as the
-    fixed target for the single-frame-latency benchmark, across all three
-    bindings.
+    fixed target for the single-frame-latency benchmark, across every
+    library benchmarked here.
   - **real**: real (noisy) mocap keypoints from a recorded fly (flygym_demo's
     bundled Spotlight clip), rigidly (Kabsch) aligned into this model's own
     frame convention, plus flygym.ik's own solved reconstruction on the same
@@ -31,15 +33,27 @@ Covers the Rust API (`src/`, `cargo run`), the Python bindings
     no gaps -- for benchmarking sequence throughput under the frame-to-frame
     motion continuous tracking would actually see (tiled to whatever length a
     given benchmark needs). Performance-only, no flygym.ik reconstruction.
-- `src/`: the Rust benchmark binary (`fastik-benchmark`).
-- `scripts/bench_python.py`: the same correctness/performance checks against
-  fastik's Python bindings instead of the Rust API, for direct comparison.
-- `cpp/bench_cpp.cpp` (built via `../cpp/CMakeLists.txt`, target
+- `fastik_rust/`: the Rust benchmark (`cargo run --release -p fastik-benchmark`
+  from the repo root), also a library (`fastik_benchmark`) reused by
+  `fastik_scaling/`.
+- `fastik_scaling/`: the weak-scaling sweep (`fastik-scaling` binary +
+  `run_sweep.sh`), Rust only -- see "Weak scaling" below.
+- `fastik_python/bench.py`: the same correctness/performance checks against
+  fastik's Python bindings instead of the Rust API.
+- `fastik_cpp/bench_cpp.cpp` (built via `../cpp/CMakeLists.txt`, target
   `fastik_cpp_benchmark`): the same checks again, against fastik's C++
-  bindings. `cpp/json.hpp` and `cpp/forward_kinematics.hpp` are this
-  executable's own dependency-free JSON reader and from-JSON forward-
-  kinematics replica (mirroring `bench_python.py`'s, since FK isn't exposed
-  to C++ either -- see those files' docs).
+  bindings. `json.hpp` and `forward_kinematics.hpp` are this executable's own
+  dependency-free JSON reader and from-JSON forward-kinematics replica
+  (mirroring `bench.py`'s, since FK isn't exposed to C++ either).
+- `extern/{kdl,trac_ik,pinocchio,rbdl,fabrik}/`: one subdirectory per external
+  library, each with its own model-conversion code, benchmark harness, and
+  README noting install/build steps and any modeling caveats specific to
+  that library (e.g. chain-only vs. branching-tree IK support). See each
+  subdirectory for details and current status.
+- `plot/`: `plot_results.py` aggregates every benchmark's results (a common
+  JSON output format, one file per library) into a comparison chart/table;
+  `plot_scaling.py` charts `fastik_scaling`'s weak-scaling sweep separately
+  (a different JSON shape -- see `RESULTS_SCHEMA.md`).
 
 ## Regenerating the fixtures
 
@@ -54,25 +68,15 @@ This re-runs `export_model_for_flyik.py` (so the body plan always matches
 the fixtures it was generated with) and overwrites both files under
 `assets/`.
 
-## Running
+## Running fastik's own benchmarks
 
 ```sh
 cargo run --release -p fastik-benchmark
 ```
 
 This reports single-frame latency, single-thread sequence throughput, and
-multi-thread sequence throughput (using every core available to the
-process), plus one weak-scaling data point sized to however many threads
-are currently available. To sweep the weak-scaling test across specific
-thread counts, run the same binary repeatedly under `taskset -c`, which
-constrains the CPU affinity mask that `std::thread::available_parallelism`
-reads:
-
-```sh
-for cpus in 0 0-1 0-3 0-7 0-15; do
-    taskset -c "$cpus" cargo run --release -p fastik-benchmark | tail -1
-done
-```
+multi-thread sequence throughput (fixed at 8 threads -- see "Performance"
+below).
 
 ### Python bindings
 
@@ -82,7 +86,7 @@ venv (for the flygym.ik cross-check):
 
 ```sh
 cd /path/to/flygym && source .venv/bin/activate
-python /path/to/fastik/benchmark/scripts/bench_python.py
+python /path/to/fastik/benchmark/fastik_python/bench.py
 ```
 
 It reuses the exact same `assets/fixtures.json` as the Rust benchmark, so
@@ -105,6 +109,46 @@ cmake --build ../cpp/build -j
 Same fixtures, same methodology (per-frame-then-aggregate stats, flattened
 `Missing` + `Position3D` observations) as the Rust and Python benchmarks, so
 all three are directly comparable.
+
+### Weak scaling (Rust only)
+
+```sh
+benchmark/fastik_scaling/run_sweep.sh
+```
+
+Builds `fastik-scaling` in release mode and runs it under `taskset -c 0`,
+`-c 0-1`, `-c 0-3`, `-c 0-7`, `-c 0-15` in turn (which constrains the CPU
+affinity mask `std::thread::available_parallelism` reads), printing one
+line per thread count. See "Weak scaling" under Results.
+
+## Running the external library benchmarks
+
+Each library under `extern/` builds standalone (its own README has exact
+commands) and writes its own `plot/results/<name>.json`:
+
+```sh
+(cd extern/kdl && g++ -O3 -std=c++17 -I install/include -I install/include/eigen3 -I install/include/kdl \
+    -DFASTIK_ASSETS_DIR='"../../assets"' -o bench_kdl bench_kdl.cpp -L install/lib -lorocos-kdl \
+    -Wl,-rpath,install/lib -pthread && ./bench_kdl)
+(cd extern/trac_ik && ./build/bench_trac_ik)               # see extern/trac_ik/README.md to rebuild
+(cd extern/rbdl && ./bench_rbdl)                           # see extern/rbdl/README.md to rebuild
+(cd extern/fabrik && g++ -O3 -std=c++17 -pthread -o bench_fabrik bench_fabrik.cpp && ./bench_fabrik)
+(cd extern/pinocchio && .venv312/bin/python bench_pinocchio.py)
+(cd extern/pinocchio && ./bench_pinocchio_cpp)               # native C++ version; see extern/pinocchio/README.md to rebuild
+```
+
+Then aggregate everything (fastik's 3 bindings plus whichever of the above
+you've run) into a table and chart:
+
+```sh
+python plot/plot_results.py
+```
+
+None of KDL/TRAC-IK/Pinocchio/RBDL/FABRIK could be installed via `apt`
+in this environment (no sudo) -- all were built from source into local
+prefixes under their own `extern/<name>/` directory instead (see each
+one's README for exact steps). Nothing further needs installing to
+reproduce the results below.
 
 ## Results (this machine: Intel i9-11900K, 8 physical cores / 16 logical threads via SMT)
 
@@ -137,9 +181,9 @@ ceiling, not a fixed cost) across all three bindings:
 
 | metric | Rust | Python | C++ |
 |---|---|---|---|
-| single-frame time (latency) | 155 us | 161 us | 159 us |
-| single-thread sequence throughput | 215 us/frame (4,650 fps) | 217 us/frame (4,600 fps) | 214 us/frame (4,680 fps) |
-| multi-thread sequence throughput (16 threads) | 34,800 fps | 31,000 fps | 32,200 fps |
+| single-frame time (latency) | 147 us | 160 us | 161 us |
+| single-thread sequence throughput | 4,964 fps | 4,603 fps | 4,690 fps |
+| multi-thread sequence throughput (8 threads) | 33,521 fps | 30,207 fps | 30,417 fps |
 
 - **single-frame time**: one `solve()` call from a fresh neutral pose against
   a fixed real target (`synthetic_frames[0]`), no warm start.
@@ -148,12 +192,180 @@ ceiling, not a fixed cost) across all three bindings:
   frame-to-frame motion).
 - **multi-thread sequence throughput**: `solve_sequence_segmented_parallel`
   on a longer sequence tiled from the native-rate fixture (segment_len=200,
-  sized to one segment per available thread), using all 16 logical cores.
+  sized to exactly 8 segments/threads -- fixed rather than "every available
+  core", so the number is reproducible regardless of machine/taskset state;
+  see the weak-scaling sweep below for the full 1-16 thread picture).
 
 All three bindings are at parity within run-to-run noise: Python (PyO3) and
 C++ (`cxx`) both call straight into the same compiled Rust solver with no
 meaningful marshaling overhead, so there's no separate "binding overhead"
 story to tell here.
+
+### External library comparison
+
+The same 3 metrics, same fixtures, against external libraries that can
+actually solve fastik's problem -- the floating 6-DOF thorax root plus all
+6 legs, fit jointly against all 30 leg keypoints in one solve per frame
+(`plot/plot_results.py` calls this the "whole-tree" formulation; regenerate
+via `python plot/plot_results.py` once you've run whichever of `extern/`'s
+benchmarks you want included -- a chart is written to `plot/results/comparison.png`):
+
+| library | single-frame latency (us) | single-thread throughput (fps) | multi-thread throughput (fps, 8 threads) |
+|---|---|---|---|
+| fastik-rust | 147 | 4,964 | 33,521 |
+| fastik-python | 160 | 4,603 | 30,207 |
+| fastik-cpp | 161 | 4,690 | 30,417 |
+| **rbdl** (native `InverseKinematicsConstraintSet`) | 335 | 2,165 | 12,937 |
+| **rbdl-python** (same solver, via RBDL's own Cython bindings) | 336 | 2,240 | 13,123 |
+| **pinocchio-cpp** (own hand-written Gauss-Newton loop, native C++) | 761 | 976 | 7,003 |
+| **pinocchio** (same loop, Python via pybind11) | 1,179 | 626 | 3,277 (multiprocessing) |
+| **kdl** (hand-written loop on `TreeIkSolverVel_wdls`, see below) | 6,301 | 125 | 869 |
+
+RBDL's two rows are medians of 3 back-to-back runs each -- this machine has
+substantial run-to-run variance (RBDL's multi-thread number alone ranged
+11,111-17,346 fps across those 6 runs, likely from other concurrent load),
+enough that a single-run comparison initially made RBDL's Python bindings
+look *faster* than its own C++ before re-measuring settled it: with medians,
+C++ and Python are statistically indistinguishable for latency and
+single-thread throughput here (see the "Python bindings" investigation
+below for why, and why that's a real, different result from Pinocchio's
+Python-vs-C++ story).
+
+Note the chart's single-frame-latency panel is linear-scale, so KDL's bar
+(~40x every other bar) dominates it -- every bar still has its value labeled
+directly, so this is a readability tradeoff, not lost information.
+
+**TRAC-IK and FABRIK are excluded entirely** -- both are still implemented
+and documented under `extern/trac_ik/` and `extern/fabrik/`, but neither can
+be reformulated to solve fastik's actual problem, so their numbers would
+measure something else, not "how fast is this library at the same task":
+- **TRAC-IK's solver takes exactly one chain and one end-effector target per
+  call** -- confirmed from its own public API, not a configuration choice.
+  There's no floating base, no branching tree, no fitting more than one
+  point per solve. The only way to use it here at all was to pin the thorax
+  fixed and run 6 independent per-leg solves, each fitting only that leg's
+  claw tip -- a strictly smaller, different problem.
+- **FABRIK is defined around a single fixed-base open chain reaching one tip
+  target.** Making it handle a floating base and multiple simultaneous
+  keypoints per leg would mean writing a different, non-standard algorithm,
+  not "FABRIK" -- out of scope here. Its from-scratch reference
+  implementation also enforces no rotation-axis limits at all (unconstrained
+  ball joints), unlike every library above, so even its accuracy isn't
+  comparable to this table, only usable as a standalone data point for the
+  fixed-base/tip-only problem it actually solves (see `extern/fabrik/README.md`).
+
+Two fairness bugs were found and fixed while building these benchmarks --
+both are worth calling out explicitly, since an unverified number from
+either library would have made fastik's advantage look far larger (KDL) or
+made a fine library look artificially uncompetitive (RBDL) for reasons that
+had nothing to do with the algorithms themselves:
+
+- **RBDL's `InverseKinematicsConstraintSet`** solves the *joint-space*
+  damped Levenberg-Marquardt normal equations `(J^T J + Wn) dq = J^T e` --
+  much closer in spirit to fastik's own Gauss-Newton than to RBDL's simpler
+  transpose/DLS `InverseKinematics()` free function. The first version of
+  this benchmark used RBDL's own tighter-than-necessary defaults
+  (`max_steps=300, step_tol=1e-10`); a sweep found this burned **~5.4x more
+  time for byte-identical residual accuracy** (real mocap data has a
+  genuine, tuning-independent residual floor around rms 0.076 that no
+  amount of extra iteration closes). Retuning to fastik's own defaults
+  (`max_steps=10, step_tol=1e-3`) recovered all of that time at zero
+  accuracy cost. Building it also surfaced what looks like a genuine
+  upstream RBDL bug: its native `JointTypeFloatingBase` (quaternion root)
+  crashes `InverseKinematicsConstraintSet` (a q_size/qdot_size mixup in the
+  Newton step, confirmed with a minimal repro); worked around with a
+  `TranslationXYZ` + `EulerZYX` root instead. See `extern/rbdl/README.md`.
+- **RBDL's Python (Cython) bindings** (`RBDL_BUILD_PYTHON_WRAPPER`, never
+  built upstream by default) call the *same* `InverseKinematicsConstraintSet`
+  solver as the C++ benchmark, one native call per frame -- a much smaller
+  binding surface than Pinocchio's hand-written Python loop, which pays
+  Python/pybind11 overhead 30 times per Gauss-Newton iteration (once per
+  tracked keypoint). Building it surfaced a second real bug, this time in
+  our own first attempt at the benchmark rather than upstream RBDL:
+  `InverseKinematicsConstraintSet.target_positions` is a getter-only Cython
+  wrapper property that reconstructs a fresh Python list on every access, so
+  `cs.target_positions[k] = new_value` silently writes into that throwaway
+  list and never reaches the underlying C++ object -- the warm-started
+  sequence benchmark's target updates were quietly no-ops past the first
+  frame. Fixed by fetching the list once and mutating each aliased `Vector3d`
+  element in place (`cs.target_positions[k][:] = target[k]`) instead of
+  reassigning it. Separately, an initial single-run comparison showed RBDL's
+  Python bindings *faster* than its own C++ on this machine -- before
+  concluding anything from that, both were re-run 3x back-to-back: this
+  machine has enough run-to-run variance (RBDL's multi-thread number alone
+  ranged 11,111-17,346 fps across the 6 combined runs, likely from other
+  concurrent load) that the first single-run comparison was pure noise.
+  With medians, Python and C++ are statistically indistinguishable for
+  latency and single-thread throughput -- a genuinely different result from
+  Pinocchio's Python-vs-C++ gap, and expected given how little Python-level
+  work this binding does per frame. See `extern/rbdl/README.md`'s "Python
+  bindings" section for the full build process (RBDL's Cython wrapper needed
+  three separate build-system fixes to compile at all) and numbers.
+- **KDL's `TreeIkSolverPos_NR_JL`** (the library's own convenience wrapper)
+  turned out to have a non-functional early-stop for this kind of data: its
+  only convergence check is a combined residual norm across all 30
+  endpoints, and that residual has the same ~0.08-0.13 real-data floor RBDL
+  found -- meaning the check can never trigger for any tolerance tight
+  enough to be meaningful, so every solve silently burned the entire
+  100-iteration cap regardless of warm start. This produced a wildly
+  misleading first measurement (~102ms/frame). Reimplementing the same
+  per-iteration math directly against `TreeIkSolverVel_wdls` and adding the
+  missing check (step-size, not residual, matching fastik's own tolerance)
+  fixed it: ~102ms -> ~6.3ms single-frame latency (~16x), ~9.85 -> ~125 fps
+  single-thread (~12.7x), ~70.5 -> ~869 fps multi-thread (~12.3x), all for
+  identical accuracy. Even after this fix, KDL remains ~20-40x slower than
+  RBDL/fastik -- traced to `TreeIkSolverVel_wdls` computing a dense SVD over
+  a 180x48 task-space Jacobian every iteration, vs. RBDL's 48x48
+  normal-equations QR solve -- a genuine algorithmic/implementation
+  difference this time, not a tuning artifact, which is included in the
+  table above (not fixed further) for that reason. See `extern/kdl/README.md`
+  for the full investigation, including the step_tol/iteration-count sweep
+  that separated the tuning bug from the real remaining gap.
+- **Pinocchio has no built-in general IK solver**, so `pinocchio.json`
+  benchmarks a hand-written Gauss-Newton loop on top of its FK/Jacobians
+  (same math shape as fastik's own, already using fastik's exact
+  tolerance/iteration-cap defaults from the start -- verified this wasn't
+  hiding a similar tuning bug via an iteration-count sweep, mean ~6.75
+  iterations, only 12% hitting the cap). That number (~1,179us/626fps/3,277fps)
+  raised a separate question: it made Pinocchio look far slower than RBDL,
+  contradicting a well-known peer-reviewed benchmark (Carpentier et al.,
+  IROS 2019) reporting Pinocchio's ABA/CRBA outperforming RBDL's -- but that
+  paper benchmarks raw dynamics algorithms in native C++ for both libraries,
+  not IK, and not through Python bindings, so it wasn't actually a fair
+  comparison to draw against. A quick diagnostic confirmed the likely cause
+  immediately: Pinocchio's own C++ calls took only ~17.8us/iteration while
+  the Python/numpy bookkeeping around them took ~145us -- ~92% Python
+  overhead. Porting the same loop to native C++ (`pinocchio-cpp.json`,
+  Eigen instead of numpy, preallocated buffers, `pin::getFrameJacobian`'s
+  non-allocating output-parameter overload) cut latency to ~761us and
+  roughly doubled both throughput numbers -- confirming Python overhead was
+  real -- but Pinocchio C++ *still* landed ~2.3x behind RBDL. A
+  `std::chrono` breakdown of the native loop found the reason: 30 separate
+  `getFrameJacobian` calls (one per tracked keypoint) cost ~83.4us/iteration
+  combined, *more than the rest of the iteration* (kinematics update + the
+  full 48x48 Eigen solve, ~65us together) -- confirmed not an allocation or
+  reference-frame-conversion artifact (a `LOCAL` vs. `LOCAL_WORLD_ALIGNED`
+  microbenchmark came back statistically identical, 87.0 vs. 85.6us). RBDL's
+  `InverseKinematicsConstraintSet` avoids this by computing every point
+  constraint's Jacobian in one internal pass rather than exposing a
+  per-frame extraction call the caller invokes repeatedly. So: the original
+  Python number *was* misleading (fixed, ~2x improvement), but the remaining
+  RBDL-vs-Pinocchio gap on this specific benchmark is real -- a genuine
+  difference in how well each library's public API fits a "many keypoints,
+  one solve" workload, not a contradiction of the paper (which measures a
+  different kind of operation). See `extern/pinocchio/README.md` for the
+  full breakdown table and both verification checks.
+- **fastik beats every other whole-tree library**, from roughly 2x (RBDL) to
+  ~40x (KDL) on single-frame latency, despite these being mature, real
+  libraries -- reflecting that fastik's Gauss-Newton solver (damping,
+  neutral-pose prior, early stopping) is purpose-built and tuned for exactly
+  this per-frame IK problem, while RBDL's/KDL's general tree-IK solvers and
+  Pinocchio's hand-written reference-implementation loop are not.
+- **None of the 5 libraries could be installed via `apt`** in this
+  environment (no root) -- all were built from source into local prefixes
+  under their own `extern/<name>/` directory. See each library's own
+  `README.md` for exact build steps and every modeling compromise made in
+  full detail (only summarized above).
 
 ### Weak scaling (Rust only)
 
@@ -178,3 +390,8 @@ has 8 physical cores with 2 SMT threads each, so 16 threads means using
 execution resources, so the second thread on each core doesn't add a full
 core's worth of throughput, and any other activity on the machine competes
 more visibly once every logical CPU is in use.
+
+Charted via `python plot/plot_scaling.py` (reads `plot/results/fastik-scaling.json`,
+written by each `fastik-scaling` run -- see `run_sweep.sh`): speedup
+(throughput(n)/throughput(1 thread)) vs. worker count, log2 on both axes, against
+a dashed 1:1 ideal-scaling reference line. Output: `plot/results/scaling.png`.
