@@ -1,0 +1,152 @@
+//! Correctness cross-check against flygym.ik, using fastik's Rust API only.
+
+use std::sync::Arc;
+
+use fastik::body_plan::KinematicTree;
+use fastik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use fastik::high_level::SequenceSolver;
+use fastik::observation::KeypointObservation;
+use fastik::solver::{Solver, SolverConfig};
+use fastik::state::State;
+use nalgebra::Vector3;
+
+use crate::fixtures::{Fixtures, RealFrame, SyntheticFrame};
+
+/// `target_ego` covers every joint but the free-floating root (which has no
+/// mocap keypoint of its own): prepend `Missing` for it.
+pub(crate) fn build_observations(target_ego: &[[f32; 3]]) -> Vec<KeypointObservation> {
+    let mut obs = Vec::with_capacity(target_ego.len() + 1);
+    obs.push(KeypointObservation::Missing);
+    obs.extend(target_ego.iter().map(|&[x, y, z]| KeypointObservation::Position3D {
+        obs_pos: Vector3::new(x, y, z),
+        weight: 1.0,
+    }));
+    obs
+}
+
+fn residual_stats(a: &[Vector3<f32>], b: &[[f32; 3]]) -> (f32, f32) {
+    // a has one entry per joint (root included); b covers only leg joints
+    // (root excluded), so compare a[1..] against b.
+    let dists: Vec<f32> = a[1..]
+        .iter()
+        .zip(b)
+        .map(|(p, &[x, y, z])| (p - Vector3::new(x, y, z)).norm())
+        .collect();
+    let rms = (dists.iter().map(|d| d * d).sum::<f32>() / dists.len() as f32).sqrt();
+    let max = dists.iter().cloned().fold(0.0f32, f32::max);
+    (rms, max)
+}
+
+fn angle_error_deg(solved: &[f32], ground_truth: &[f32]) -> f32 {
+    solved
+        .iter()
+        .zip(ground_truth)
+        .map(|(&s, &g)| {
+            let d = s - g;
+            let wrapped = (d + std::f32::consts::PI).rem_euclid(2.0 * std::f32::consts::PI)
+                - std::f32::consts::PI;
+            wrapped.abs().to_degrees()
+        })
+        .fold(0.0f32, f32::max)
+}
+
+/// Bug-hunt test: feed keypoint targets that are *exactly* reachable (they
+/// were generated from this same model's own forward kinematics, driven by
+/// real recorded ground-truth joint angles -- see
+/// `scripts/generate_fixtures.py`) and check that `Solver` both converges to
+/// near-zero residual and recovers the known angles.
+pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticFrame]) {
+    println!("== Synthetic exact-fit frames (bug hunt) ==");
+    println!(
+        "{:>6} {:>16} {:>16} {:>18} {:>18}",
+        "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)"
+    );
+
+    let mut workspace = ForwardKinematicsWorkspace::new(tree);
+    let mut default_solver: Solver = Solver::new(tree, SolverConfig::default());
+    let mut zero_reg_solver: Solver = Solver::new(
+        tree,
+        SolverConfig {
+            neutral_pose_weight: 0.0,
+            ..SolverConfig::default()
+        },
+    );
+
+    for (i, frame) in frames.iter().enumerate() {
+        let obs = build_observations(&frame.target_ego);
+        let ground_truth = frame.ground_truth_dof_angles_flat();
+
+        let mut state = State::neutral_pose(tree.clone());
+        default_solver.solve(&mut state, &obs);
+        evaluate_fwdkin(&mut workspace, &state);
+        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
+        let angle_err = angle_error_deg(&state.dof_angles, &ground_truth);
+
+        let mut state0 = State::neutral_pose(tree.clone());
+        zero_reg_solver.solve(&mut state0, &obs);
+        let angle_err0 = angle_error_deg(&state0.dof_angles, &ground_truth);
+
+        println!(
+            "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
+            i
+        );
+    }
+    println!(
+        "(kpt rms/max: 3D distance to target, model units. angle err: max abs error over all \
+         42 DOFs, degrees, mod 2*pi. \"w=0\" = neutral_pose_weight=0, isolating solver/FK \
+         correctness from the intentional regularization bias.)\n"
+    );
+}
+
+/// Real-data cross-solver test: feed real (noisy) mocap keypoints, warm
+/// started frame-to-frame like real usage, and compare fastik's fit quality
+/// and reconstructed keypoints against flygym.ik's on the same targets.
+pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
+    println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
+
+    let mut sequence_solver: SequenceSolver = SequenceSolver::new(tree.clone(), SolverConfig::default());
+    let mut workspace = ForwardKinematicsWorkspace::new(tree);
+
+    let mut fastik_rms_all = Vec::new();
+    let mut fastik_max_all = Vec::new();
+    let mut cross_rms_all = Vec::new();
+    let mut cross_max_all = Vec::new();
+
+    for frame in frames {
+        let obs = build_observations(&frame.target_ego);
+        let state = sequence_solver.solve_frame(&obs);
+        evaluate_fwdkin(&mut workspace, state);
+
+        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
+        fastik_rms_all.push(rms);
+        fastik_max_all.push(max);
+
+        let (cross_rms, cross_max) =
+            residual_stats(&workspace.kpt_positions, &frame.flygym_ik_reconstructed_ego);
+        cross_rms_all.push(cross_rms);
+        cross_max_all.push(cross_max);
+    }
+
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+    let rms_of = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
+    let max_of = |v: &[f32]| v.iter().cloned().fold(0.0f32, f32::max);
+
+    println!("over {} frames:", frames.len());
+    println!(
+        "  fastik fit residual to target:      rms={:.5}  mean={:.5}  max={:.5}",
+        rms_of(&fastik_rms_all),
+        mean(&fastik_rms_all),
+        max_of(&fastik_max_all)
+    );
+    println!(
+        "  cross-solver agreement (vs flygym.ik): rms={:.5}  mean={:.5}  max={:.5}\n",
+        rms_of(&cross_rms_all),
+        mean(&cross_rms_all),
+        max_of(&cross_max_all)
+    );
+}
+
+pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
+    run_synthetic_frame_tests(tree, &fixtures.synthetic_frames);
+    run_real_frame_tests(tree, &fixtures.real_frames);
+}
