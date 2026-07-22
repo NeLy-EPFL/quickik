@@ -49,9 +49,9 @@ fn parses_joints_parents_and_dof_offsets() {
     assert_eq!(tree.joints[2].dofs[0].neutral_angle, 0.1);
     assert_eq!(tree.joints[2].dofs[0].limits, Some([-0.5, 0.5]));
 
-    assert_eq!(tree.children_indices(0), vec![1]);
-    assert_eq!(tree.children_indices(1), vec![2]);
-    assert_eq!(tree.children_indices(2), Vec::<usize>::new());
+    assert_eq!(tree.children_indices(0), &[1]);
+    assert_eq!(tree.children_indices(1), &[2]);
+    assert_eq!(tree.children_indices(2), &[] as &[usize]);
 }
 
 #[test]

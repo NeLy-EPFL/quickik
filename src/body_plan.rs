@@ -42,6 +42,9 @@ pub struct Joint {
     /// root joint, which is attached to an imaginary floating base
     /// (i.e. connected to the world with a free joint).
     pub parent: Option<usize>,
+    /// Indices of this joint's direct children. Populated by
+    // `KinematicTree::new`. Redundant with `parent` but useful as a cache.
+    pub children: Vec<usize>,
     /// Index of this joint's 0th DOF in the flattened DOF vector of the
     /// kinematic tree.
     pub dof_offset: usize,
@@ -58,6 +61,17 @@ pub struct KinematicTree {
 }
 
 impl KinematicTree {
+    /// Construct a tree directly from parsed `joints` and a `root_idx`,
+    /// populating each joint's `children` from `parent`.
+    pub fn new(mut joints: Vec<Joint>, root_idx: usize) -> Self {
+        for i in 0..joints.len() {
+            if let Some(parent_idx) = joints[i].parent {
+                joints[parent_idx].children.push(i);
+            }
+        }
+        Self { joints, root_idx }
+    }
+
     pub fn n_joints(&self) -> usize {
         self.joints.len()
     }
@@ -72,18 +86,8 @@ impl KinematicTree {
     }
 
     /// Return indices of the direct children of the joint at the given index
-    pub fn children_indices(&self, joint_idx: usize) -> Vec<usize> {
-        self.joints
-            .iter()
-            .enumerate()
-            .filter_map(|(i, joint)| {
-                if joint.parent == Some(joint_idx) {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub fn children_indices(&self, joint_idx: usize) -> &[usize] {
+        &self.joints[joint_idx].children
     }
 
     fn from_bodyplan_spec(body: BodyPlanSpec) -> Self {
@@ -107,12 +111,13 @@ impl KinematicTree {
                 offset_quat: quat_from_wxyz(joint_spec.offset_quat),
                 dofs: dofs,
                 parent: parent_idx,
+                children: Vec::new(),
                 dof_offset: curr_dof_offset,
             };
             joints.push(joint);
             curr_dof_offset += n_dofs;
         }
-        Self { joints, root_idx }
+        Self::new(joints, root_idx)
     }
 
     pub fn from_json_str(json_str: &str) -> Self {

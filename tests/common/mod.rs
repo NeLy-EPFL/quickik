@@ -21,6 +21,7 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
         offset_quat: UnitQuaternion::identity(),
         dofs: vec![],
         parent: None,
+        children: Vec::new(),
         dof_offset: 0,
     };
     let joint1 = Joint {
@@ -33,6 +34,7 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
             limits: None,
         }],
         parent: Some(0),
+        children: Vec::new(),
         dof_offset: 0,
     };
     let joint2 = Joint {
@@ -45,6 +47,7 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
             limits: Some([-0.5, 0.5]),
         }],
         parent: Some(1),
+        children: Vec::new(),
         dof_offset: 1,
     };
     let tip = Joint {
@@ -53,10 +56,8 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
         offset_quat: UnitQuaternion::identity(),
         dofs: vec![],
         parent: Some(2),
+        children: Vec::new(),
         dof_offset: 2,
     };
-    Arc::new(KinematicTree {
-        joints: vec![root, joint1, joint2, tip],
-        root_idx: 0,
-    })
+    Arc::new(KinematicTree::new(vec![root, joint1, joint2, tip], 0))
 }

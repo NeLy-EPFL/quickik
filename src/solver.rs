@@ -65,6 +65,15 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     neutral_joint_angles: Vec<f32>,
     jtj: DMatrix<f32>,
     jtr: DVector<f32>,
+    /// Per-keypoint Jacobian slice, copied out of `workspace.kpt_jacobian`
+    /// (whose rows aren't contiguous) and reused across keypoints and
+    /// iterations to avoid allocating one on every call.
+    jacobian_buffer: DMatrix<f32>,
+    /// Buffers for accumulating `J^T*J`/`J^T*r` into `jtj`/`jtr` without
+    /// allocating a temporary for the transpose or the product.
+    jacobian_transpose_buffer: DMatrix<f32>, // state_dim x 3
+    jtj_buffer: DMatrix<f32>,                // state_dim x state_dim
+    jtr_buffer: DVector<f32>,                // state_dim
     pub config: SolverConfig<M>,
 }
 
@@ -85,6 +94,10 @@ impl<M: Mapper3Dto2D> Solver<M> {
             neutral_joint_angles,
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
+            jacobian_buffer: DMatrix::zeros(3, state_dim),
+            jacobian_transpose_buffer: DMatrix::zeros(state_dim, 3),
+            jtj_buffer: DMatrix::zeros(state_dim, state_dim),
+            jtr_buffer: DVector::zeros(state_dim),
             config,
         }
     }
@@ -101,20 +114,26 @@ impl<M: Mapper3Dto2D> Solver<M> {
         for _ in 0..self.config.n_iterations {
             evaluate_fwdkin(&mut self.workspace, state);
 
-            self.jtj.fill(0.0);
-            self.jtr.fill(0.0);
+            // See the matching comment in forward.rs: `Matrix::fill` is ~60x
+            // slower than filling the underlying contiguous storage directly.
+            self.jtj.as_mut_slice().fill(0.0);
+            self.jtr.as_mut_slice().fill(0.0);
             for (k, obs) in observations.iter().enumerate() {
                 if matches!(obs, KeypointObservation::Missing) {
                     continue;
                 }
-                let jacobian_3d = self.workspace.kpt_jacobian.rows(3 * k, 3).into_owned();
+                self.jacobian_buffer
+                    .copy_from(&self.workspace.kpt_jacobian.rows(3 * k, 3));
                 accumulate_keypoint_residual(
                     obs,
                     self.config.mapper.as_ref(),
                     &self.workspace.kpt_positions[k],
-                    &jacobian_3d,
+                    &self.jacobian_buffer,
                     &mut self.jtj,
                     &mut self.jtr,
+                    &mut self.jacobian_transpose_buffer,
+                    &mut self.jtj_buffer,
+                    &mut self.jtr_buffer,
                 );
             }
 
@@ -163,6 +182,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     obs: &KeypointObservation,
     mapper: Option<&M>,
@@ -170,15 +190,25 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     jacobian_3d: &DMatrix<f32>,
     jtj: &mut DMatrix<f32>,
     jtr: &mut DVector<f32>,
+    jacobian_transpose_buffer: &mut DMatrix<f32>,
+    jtj_buffer: &mut DMatrix<f32>,
+    jtr_buffer: &mut DVector<f32>,
 ) {
     match *obs {
         KeypointObservation::Missing => {}
         KeypointObservation::Position3D { obs_pos, weight } => {
             let residual = obs_pos - fwdkin_pos3d;
-            *jtj += jacobian_3d.transpose() * jacobian_3d * weight;
-            *jtr += jacobian_3d.transpose() * residual * weight;
+            // Writes into preallocated buffers instead of allocating a
+            // temporary for the transpose and the product.
+            jacobian_3d.transpose_to(jacobian_transpose_buffer);
+            jacobian_transpose_buffer.mul_to(jacobian_3d, jtj_buffer);
+            accumulate_scaled(jtj, jtj_buffer, weight);
+            jacobian_transpose_buffer.mul_to(&residual, jtr_buffer);
+            accumulate_scaled(jtr, jtr_buffer, weight);
         }
         KeypointObservation::Position2D { obs_pos, weight } => {
+            // The mapper always allocates its own Jacobian, so there's no
+            // allocation-free path here regardless.
             let mapper = mapper
                 .expect("Position2D observation given to a Solver constructed with mapper: None");
             let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
@@ -187,6 +217,20 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
             *jtr += jacobian_2d.transpose() * residual * weight;
         }
     }
+}
+
+/// `dst += src * scale`, without allocating (unlike `dst += src * scale`
+/// written as an expression, which would build an owned `src * scale`
+/// temporary first).
+fn accumulate_scaled<R: nalgebra::Dim, C: nalgebra::Dim, S, SB>(
+    dst: &mut nalgebra::Matrix<f32, R, C, S>,
+    src: &nalgebra::Matrix<f32, R, C, SB>,
+    scale: f32,
+) where
+    S: nalgebra::storage::StorageMut<f32, R, C>,
+    SB: nalgebra::storage::Storage<f32, R, C>,
+{
+    dst.zip_apply(src, |d, s| *d += s * scale);
 }
 
 fn accumulate_neutral_pose_prior(

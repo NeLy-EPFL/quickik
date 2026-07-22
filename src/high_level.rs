@@ -181,8 +181,8 @@ mod tests {
     use nalgebra::{UnitQuaternion, Vector3};
 
     fn minimal_tree() -> Arc<KinematicTree> {
-        Arc::new(KinematicTree {
-            joints: vec![Joint {
+        Arc::new(KinematicTree::new(
+            vec![Joint {
                 name: "root".to_string(),
                 offset_pos: Vector3::zeros(),
                 offset_quat: UnitQuaternion::identity(),
@@ -192,10 +192,11 @@ mod tests {
                     limits: None,
                 }],
                 parent: None,
+                children: Vec::new(),
                 dof_offset: 0,
             }],
-            root_idx: 0,
-        })
+            0,
+        ))
     }
 
     fn state_with_angle(tree: &Arc<KinematicTree>, angle: f32) -> State {

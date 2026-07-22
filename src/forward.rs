@@ -52,7 +52,10 @@ impl ForwardKinematicsWorkspace {
 pub fn evaluate_fwdkin(workspace: &mut ForwardKinematicsWorkspace, state: &State) {
     debug_assert_eq!(workspace.n_joints, state.kinematic_tree.n_joints());
 
-    workspace.kpt_jacobian.fill(0.0);
+    // Matrix::fill is a generic, unspecialized per-element loop and it's ~60x 
+    // slower than filling the underlying contiguous storage directly using
+    // matrix.as_mut_slice().fill.
+    workspace.kpt_jacobian.as_mut_slice().fill(0.0);
     workspace.dof_records.clear();
 
     let root_frame = Frame {
@@ -85,7 +88,7 @@ fn traverse_dfs(
         &workspace.dof_records[..n_records_before],
     );
 
-    for child_idx in state.kinematic_tree.children_indices(curr_joint_idx) {
+    for &child_idx in state.kinematic_tree.children_indices(curr_joint_idx) {
         traverse_dfs(workspace, state, child_idx, frame);
     }
     workspace.dof_records.truncate(n_records_before);
