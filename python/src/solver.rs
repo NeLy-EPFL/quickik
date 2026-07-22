@@ -38,7 +38,7 @@ impl SolverConfig {
 #[pymethods]
 impl SolverConfig {
     #[new]
-    #[pyo3(signature = (n_iterations=10, damping=1e-6, neutral_pose_weight=1e-3, position_tolerance=1e-5, angle_tolerance=1e-5))]
+    #[pyo3(signature = (n_iterations=10, damping=1e-6, neutral_pose_weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3))]
     fn new(
         n_iterations: usize,
         damping: f32,

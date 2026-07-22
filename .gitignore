@@ -175,6 +175,9 @@ docs/_build/
 .pybuilder/
 target/
 
+# cxx-generated header, copied out of OUT_DIR by cpp/build.rs
+cpp/include/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

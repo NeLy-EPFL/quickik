@@ -42,6 +42,19 @@ pip install maturin
 maturin develop --release
 ```
 
+### C++
+
+The C++ bindings (in `cpp/`) are a [`cxx`](https://cxx.rs) bridge over the Rust core, so they also build from source and require a Rust toolchain (plus CMake and a C++17 compiler). `cargo build -p fastik-cpp` compiles the Rust side and copies the generated header and bridge glue into `cpp/include/` and `cpp/lib/`; `cpp/CMakeLists.txt` drives that `cargo build` as a custom target and is also the reference example for consuming FastIK from an external CMake project:
+
+```bash
+git clone https://github.com/sibocw/fastik
+cmake -S fastik/cpp -B fastik/cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build fastik/cpp/build -j
+./fastik/cpp/build/fastik_cpp_tests   # runs the binding's own test suite
+```
+
+A consuming project needs `cpp/include/` on its include path and both `../target/release/libfastik_cpp.a` (the crate itself) and `cpp/lib/libfastik-cpp-bridge.a` (the cxx-generated glue) linked in -- see `cpp/CMakeLists.txt`'s `fastik_cpp`/`fastik_cpp_bridge` imported targets for the exact setup.
+
 
 ## Examples
 
@@ -101,7 +114,23 @@ solver.solve(state, observations)
 print(state.dof_angles)
 ```
 
-`SolverConfig` bundles the iteration count, damping, regularization weight, and convergence tolerance -- set via `Solver::new`/`Solver(...)`, though `solver.config` stays mutable for retuning between calls (Python: `solver.config` is the same object every time, so `solver.config.n_iterations = 5` takes effect on the next `solve`, just like Rust).
+```cpp
+#include "fastik.h"
+
+auto tree = fastik::kinematic_tree_from_json_file("body_plan.json");
+auto state = fastik::state_neutral_pose(*tree);
+auto solver = fastik::new_solver(*tree, fastik::default_solver_config(), fastik::no_mapper());
+
+std::vector<fastik::KeypointObservation> observations = {
+    fastik::keypoint_position_3d({0.0, 0.0, 0.0}, 1.0),
+    fastik::keypoint_position_3d({1.0, 0.0, 0.0}, 1.0),
+    fastik::keypoint_position_3d({1.0, 1.0, 0.0}, 1.0),
+};
+solver->solve(*state, rust::Slice<const fastik::KeypointObservation>(observations.data(), observations.size()));
+for (float angle : state->dof_angles()) { /* ... */ }
+```
+
+`SolverConfig` bundles the iteration count, damping, regularization weight, and convergence tolerance -- set via `Solver::new`/`Solver(...)`, though `solver.config` stays mutable for retuning between calls (Python: `solver.config` is the same object every time, so `solver.config.n_iterations = 5` takes effect on the next `solve`, just like Rust). C++'s `SolverConfig` is a plain value struct instead (no shared live handle): mutate a copy and call `solver->set_config(config)` to apply it.
 
 ### Sequences
 
@@ -115,6 +144,23 @@ for frame_observations in recording:
 segmented_config = fastik.SegmentedSolveConfig(segment_len=200, overlap_len=20, overlap_tolerance=0.05)
 poses = fastik.solve_sequence_segmented_parallel(kinematic_tree, fastik.SolverConfig(), long_recording, segmented_config)
 ```
+
+```cpp
+auto seq_solver = fastik::new_sequence_solver(*tree, fastik::default_solver_config(), fastik::no_mapper());
+for (auto &frame_observations : recording) {
+    auto pose = seq_solver->solve_frame(
+        rust::Slice<const fastik::KeypointObservation>(frame_observations.data(), frame_observations.size()));
+}
+
+// flattened_long_recording is n_joints * n_frames long -- see below.
+fastik::SegmentedSolveConfig segmented_config{200, 20, 0.05f};
+auto poses = fastik::solve_sequence_segmented_parallel(
+    *tree, fastik::default_solver_config(),
+    rust::Slice<const fastik::KeypointObservation>(flattened_long_recording.data(), flattened_long_recording.size()),
+    tree->n_joints(), segmented_config, fastik::no_mapper());
+```
+
+C++ has no nested-container binding across the FFI, so a "sequence" is one flat `observations` slice of length `n_joints * n_frames` (frame `i` spanning `[i * n_joints, (i + 1) * n_joints)`) rather than a list of lists, and `solve_sequence`/`solve_sequence_segmented_parallel` return a `StateList` handle (`len()`/`at(i)`) instead of a `Vec<State>`/`list[State]`. See `cpp/src/lib.rs`'s module docs.
 
 ### 2D observations
 
@@ -145,8 +191,23 @@ camera = fastik.Camera(
 solver = fastik.Solver(kinematic_tree, fastik.SolverConfig(), mapper=camera)
 ```
 
-Rust's `Solver<M>` is generic over the mapper type at compile time; Python has no equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper enum chosen at runtime -- pass `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument to `Solver`/`SequenceSolver`/`solve_sequence_segmented_parallel`. It's deliberately not part of `SolverConfig`: like Rust's `M`, it's fixed for the solver's lifetime (read-only `solver.mapper` property, no setter), whereas `SolverConfig`'s other fields stay freely mutable. Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) raise Python exceptions rather than crashing.
+```cpp
+fastik::Camera camera{};
+camera.fx = 800.0f;
+camera.fy = 800.0f;
+camera.cx = 320.0f;
+camera.cy = 240.0f;
+camera.world2cam_pos = {0.0f, 0.0f, 5.0f};
+camera.world2cam_rot_mat = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};  // row-major 3x3
+auto solver = fastik::new_solver(*tree, fastik::default_solver_config(), fastik::camera_mapper(camera));
+```
+
+Rust's `Solver<M>` is generic over the mapper type at compile time; neither Python nor C++ has an equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper value chosen at runtime instead -- Python takes `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument to `Solver`/`SequenceSolver`/`solve_sequence_segmented_parallel`; C++ takes a `fastik::Mapper` built via `no_mapper()`/`camera_mapper(camera)`/`xyview_mapper()` as an ordinary (non-optional) constructor argument in the same spots. It's deliberately not part of `SolverConfig` in either binding: like Rust's `M`, it's fixed for the solver's lifetime (read-only `mapper`/`solver.mapper` accessor, no setter), whereas `SolverConfig`'s other fields stay freely mutable. Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) raise a Python exception or a C++ exception (`rust::Error`) rather than crashing in either binding.
 
 
 ## Benchmarks
-TODO
+
+See [`benchmark/`](benchmark/) for a correctness cross-check and
+throughput/latency benchmark against
+[flygym.ik](https://github.com/NeLy-EPFL/flygym) on the NeuroMechFly fly
+model, covering the Rust API and the Python and C++ bindings.
