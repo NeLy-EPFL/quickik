@@ -9,16 +9,54 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
 ??? note "Body plan JSON schema"
     ```json
     {
-        "joints": [
-            {"name": "root", "parent": null, "offset_pos": [0.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []},
-            {"name": "elbow", "parent": "root", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-             "dofs": [{"axis": [0.0, 0.0, 1.0], "neutral_angle": 0.0, "limits": [-3.0, 3.0]}]},
-            {"name": "wrist", "parent": "elbow", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []}
-        ]
+      "joints": [
+        {
+          "name": "root",
+          "parent": null,
+          "offset_pos": [0.0, 0.0, 0.0],
+          "offset_quat": [1.0, 0.0, 0.0, 0.0],
+          "residual_weight": 1.0,
+          "dofs": []
+        },
+        {
+          "name": "elbow",
+          "parent": "root",
+          "offset_pos": [1.0, 0.0, 0.0],
+          "offset_quat": [1.0, 0.0, 0.0, 0.0],
+          "residual_weight": 1.0,
+          "dofs": [
+            {
+              "axis": [0.0, 0.0, 1.0],
+              "type": "hinge",
+              "neutral_angle": 0.0,
+              "neutral_weight": 1.0,
+              "limits": [-3.0, 3.0]
+            }
+          ]
+        },
+        {
+          "name": "wrist",
+          "parent": "elbow",
+          "offset_pos": [1.0, 0.0, 0.0],
+          "offset_quat": [1.0, 0.0, 0.0, 0.0],
+          "residual_weight": 1.0,
+          "dofs": []
+        }
+      ]
     }
     ```
 
-    `parent` is a joint name (`null` for the root). `offset_pos`/`offset_quat` place a joint relative to its parent, and `dofs` are its rotational degrees of freedom (axis, neutral angle, optional `[min, max]` limits). See the [API reference](api/rust/quickik/body_plan/index.html) for the full schema.
+    - `parent`: joint name, or `null` for the root.
+    - `offset_pos`/`offset_quat`: this joint's offset from its parent.
+    - `residual_weight`: multiplied together with each frame's `KeypointObservation`'s `weight_scale` for this joint's keypoint. Optional, defaults to `1.0`; only `1.0` is currently implemented.
+    - `dofs`: this joint's degrees of freedom, each with:
+        - `type`: `"hinge"` (rotational) or `"slide"` (translational). Only `"hinge"` is currently implemented.
+        - `axis`: rotation/translation axis in local frame.
+        - `neutral_angle`: neutral angle in radians.
+        - `limits`: optional `[min, max]` angle limits; unbounded if omitted or `null`.
+        - `neutral_weight`: scales this DOF's contribution to the deviation-from-neutral penalty. Optional, defaults to `1.0`; only `1.0` is currently implemented.
+
+    See the [API reference](api/rust/quickik/body_plan/index.html) for the full schema.
 
 ## Inverse kinematics on a single frame
 
@@ -39,9 +77,9 @@ QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObse
     let mut solver: Solver = Solver::new(&kinematic_tree, SolverConfig::default());
 
     let observations = vec![
-        KeypointObservation::Position3D { obs_pos: Vector3::new(0.0, 0.0, 0.0), weight: 1.0 },
-        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 0.0, 0.0), weight: 1.0 },
-        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 1.0, 0.0), weight: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(0.0, 0.0, 0.0), weight_scale: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 0.0, 0.0), weight_scale: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 1.0, 0.0), weight_scale: 1.0 },
     ];
     solver.solve(&mut state, &observations);
     println!("{:?}", state.dof_angles);

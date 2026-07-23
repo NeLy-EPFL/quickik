@@ -26,7 +26,7 @@ fn recovers_pose_from_3d_observations() {
         .iter()
         .map(|&obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight: 1.0,
+            weight_scale: 1.0,
         })
         .collect();
 
@@ -55,7 +55,7 @@ fn recovers_pose_from_xyview_observations() {
         .iter()
         .map(|pos| KeypointObservation::Position2D {
             obs_pos: nalgebra::Vector2::new(pos.x, pos.y),
-            weight: 1.0,
+            weight_scale: 1.0,
         })
         .collect();
 
@@ -96,7 +96,7 @@ fn recovers_pose_from_camera_observations() {
             let (obs_pos, _) = camera.project_3d_to_2d(pos, &jac_placeholder);
             KeypointObservation::Position2D {
                 obs_pos,
-                weight: 1.0,
+                weight_scale: 1.0,
             }
         })
         .collect();
@@ -161,15 +161,15 @@ fn solve_respects_joint_limits() {
         KeypointObservation::Missing,
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(1.0, 0.0, 0.0),
-            weight: 1.0,
+            weight_scale: 1.0,
         },
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(2.0, 0.0, 0.0),
-            weight: 1.0,
+            weight_scale: 1.0,
         },
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(2.3624, 0.9320, 0.0),
-            weight: 1.0,
+            weight_scale: 1.0,
         },
     ];
 
@@ -199,7 +199,7 @@ fn convergence_tolerance_stops_iterating_early() {
         .iter()
         .map(|&obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight: 1.0,
+            weight_scale: 1.0,
         })
         .collect();
 
@@ -248,7 +248,7 @@ fn position2d_observation_on_mapperless_solver_panics() {
     let mut observations = vec![KeypointObservation::Missing; tree.n_joints()];
     observations[1] = KeypointObservation::Position2D {
         obs_pos: nalgebra::Vector2::new(1.0, 0.0),
-        weight: 1.0,
+        weight_scale: 1.0,
     };
 
     let mut solver: Solver = Solver::new(&tree, SolverConfig::default());

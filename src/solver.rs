@@ -196,25 +196,31 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
 ) {
     match *obs {
         KeypointObservation::Missing => {}
-        KeypointObservation::Position3D { obs_pos, weight } => {
+        KeypointObservation::Position3D {
+            obs_pos,
+            weight_scale,
+        } => {
             let residual = obs_pos - fwdkin_pos3d;
             // Writes into preallocated buffers instead of allocating a
             // temporary for the transpose and the product.
             jacobian_3d.transpose_to(jacobian_transpose_buffer);
             jacobian_transpose_buffer.mul_to(jacobian_3d, jtj_buffer);
-            accumulate_scaled(jtj, jtj_buffer, weight);
+            accumulate_scaled(jtj, jtj_buffer, weight_scale);
             jacobian_transpose_buffer.mul_to(&residual, jtr_buffer);
-            accumulate_scaled(jtr, jtr_buffer, weight);
+            accumulate_scaled(jtr, jtr_buffer, weight_scale);
         }
-        KeypointObservation::Position2D { obs_pos, weight } => {
+        KeypointObservation::Position2D {
+            obs_pos,
+            weight_scale,
+        } => {
             // The mapper always allocates its own Jacobian, so there's no
             // allocation-free path here regardless.
             let mapper = mapper
                 .expect("Position2D observation given to a Solver constructed with mapper: None");
             let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
             let residual = obs_pos - fwdkin_pos2d;
-            *jtj += jacobian_2d.transpose() * &jacobian_2d * weight;
-            *jtr += jacobian_2d.transpose() * residual * weight;
+            *jtj += jacobian_2d.transpose() * &jacobian_2d * weight_scale;
+            *jtr += jacobian_2d.transpose() * residual * weight_scale;
         }
     }
 }

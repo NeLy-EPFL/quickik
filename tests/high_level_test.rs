@@ -23,7 +23,7 @@ fn observations_for(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<KeypointOb
         .into_iter()
         .map(|obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight: 1.0,
+            weight_scale: 1.0,
         })
         .collect()
 }

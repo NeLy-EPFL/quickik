@@ -22,7 +22,7 @@ pub(crate) fn build_observations(target_ego: &[[f32; 3]]) -> Vec<KeypointObserva
             .iter()
             .map(|&[x, y, z]| KeypointObservation::Position3D {
                 obs_pos: Vector3::new(x, y, z),
-                weight: 1.0,
+                weight_scale: 1.0,
             }),
     );
     obs

@@ -13,15 +13,37 @@ use crate::utils::quat_from_wxyz;
 
 pub const N_ROOT_DOFS: usize = 6; // 3 for root position, 3 for root rotation
 
-/// A single rotational degree of freedom (DOF) on the kinematic tree.
+/// Whether a [`Dof`] is a hinge (rotational) or slide (translational) DOF.
+///
+/// Only [`Hinge`](DofType::Hinge) is currently implemented -- constructing a
+/// body plan with a `Slide` DOF panics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DofType {
+    /// Rotates about `axis`.
+    Hinge,
+    /// Translates along `axis`. Not yet implemented.
+    Slide,
+}
+
+/// A single degree of freedom (DOF) on the kinematic tree.
 #[derive(Clone, Copy, Debug)]
 pub struct Dof {
-    /// Rotational axis in local frame (relative to the joint's `offset_quat`)
+    /// Rotational or translational axis in local frame (relative to the
+    /// joint's `offset_quat`)
     pub axis: Vector3<f32>,
+    /// Whether this is a hinge or slide DOF.
+    pub dof_type: DofType,
     /// Neutral angle of the DOF in radians
     pub neutral_angle: f32,
     /// Optional angle limits in [min, max]. Unbounded if `None`.
     pub limits: Option<[f32; 2]>,
+    /// Weight of this DOF's contribution to the deviation-from-neutral
+    /// penalty (see [`SolverConfig::neutral_pose_weight`]). Only `1.0` is
+    /// currently implemented.
+    ///
+    /// [`SolverConfig::neutral_pose_weight`]: crate::solver::SolverConfig::neutral_pose_weight
+    pub neutral_weight: f32,
 }
 
 /// An anatomical joint with up to three rotational DOF.
@@ -48,6 +70,12 @@ pub struct Joint {
     /// Index of this joint's 0th DOF in the flattened DOF vector of the
     /// kinematic tree.
     pub dof_offset: usize,
+    /// Weight of this joint's keypoint residual, multiplied together with
+    /// each frame's [`KeypointObservation`] weight for this keypoint. Only
+    /// `1.0` is currently implemented.
+    ///
+    /// [`KeypointObservation`]: crate::observation::KeypointObservation
+    pub residual_weight: f32,
 }
 
 /// A kinematic tree, i.e. body plan, or skeleton.
@@ -96,13 +124,37 @@ impl KinematicTree {
         let mut curr_dof_offset = 0;
         for (joint_spec, parent_idx) in body.joints.into_iter().zip(parent_idxs) {
             let n_dofs = joint_spec.dofs.len();
+            if joint_spec.residual_weight != 1.0 {
+                unimplemented!(
+                    "Joint::residual_weight other than 1.0 is not yet implemented \
+                     (joint '{}')",
+                    joint_spec.name
+                );
+            }
             let dofs = joint_spec
                 .dofs
                 .into_iter()
-                .map(|dof| Dof {
-                    axis: Vector3::from(dof.axis),
-                    neutral_angle: dof.neutral_angle,
-                    limits: dof.limits,
+                .map(|dof| {
+                    if dof.dof_type == DofType::Slide {
+                        unimplemented!(
+                            "Slide DOFs are not yet implemented (joint '{}')",
+                            joint_spec.name
+                        );
+                    }
+                    if dof.neutral_weight != 1.0 {
+                        unimplemented!(
+                            "Dof::neutral_weight other than 1.0 is not yet implemented \
+                             (joint '{}')",
+                            joint_spec.name
+                        );
+                    }
+                    Dof {
+                        axis: Vector3::from(dof.axis),
+                        dof_type: dof.dof_type,
+                        neutral_angle: dof.neutral_angle,
+                        limits: dof.limits,
+                        neutral_weight: dof.neutral_weight,
+                    }
                 })
                 .collect();
             let joint = Joint {
@@ -113,6 +165,7 @@ impl KinematicTree {
                 parent: parent_idx,
                 children: Vec::new(),
                 dof_offset: curr_dof_offset,
+                residual_weight: joint_spec.residual_weight,
             };
             joints.push(joint);
             curr_dof_offset += n_dofs;
@@ -156,14 +209,24 @@ struct JointSpec {
     parent: Option<String>,
     offset_pos: [f32; 3],
     offset_quat: [f32; 4],
+    #[serde(default = "default_weight")]
+    residual_weight: f32,
     dofs: Vec<DofSpec>,
 }
 
 #[derive(Deserialize)]
 struct DofSpec {
     axis: [f32; 3],
+    #[serde(rename = "type")]
+    dof_type: DofType,
     neutral_angle: f32,
     limits: Option<[f32; 2]>,
+    #[serde(default = "default_weight")]
+    neutral_weight: f32,
+}
+
+fn default_weight() -> f32 {
+    1.0
 }
 
 /// Resolve the parent indices for each joint in the order of `body.joints`

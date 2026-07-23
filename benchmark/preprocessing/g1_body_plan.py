@@ -188,6 +188,7 @@ def build_g1_body_plan(neutral_angles):
                     {
                         "name": joint_name,
                         "axis": j["axis"],
+                        "type": "hinge",
                         "neutral_angle": neutral_angle,
                         "limits": None,
                     }

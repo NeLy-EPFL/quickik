@@ -23,7 +23,7 @@ use quickik_core::observation::Mapper3Dto2D;
 mod ffi {
     /// Which kind of observation a `KeypointObservation` carries. cxx has no
     /// fielded enums, so the payload lives in `KeypointObservation`'s
-    /// `pos`/`weight` fields instead of enum variants like Rust's
+    /// `pos`/`weight_scale` fields instead of enum variants like Rust's
     /// `KeypointObservation`.
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum ObservationKind {
@@ -40,7 +40,7 @@ mod ffi {
     struct KeypointObservation {
         kind: ObservationKind,
         pos: [f32; 3],
-        weight: f32,
+        weight_scale: f32,
     }
 
     /// A pinhole camera for inverse kinematics from 2D keypoint observations.
@@ -105,10 +105,10 @@ mod ffi {
         fn keypoint_missing() -> KeypointObservation;
         /// A 3D world position, e.g. triangulated from multiple calibrated
         /// cameras.
-        fn keypoint_position_3d(pos: [f32; 3], weight: f32) -> KeypointObservation;
+        fn keypoint_position_3d(pos: [f32; 3], weight_scale: f32) -> KeypointObservation;
         /// A 2D pixel position from the camera (or other mapper) that the
         /// consuming `Solver`/`SequenceSolver` was constructed with.
-        fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> KeypointObservation;
+        fn keypoint_position_2d(pos: [f32; 2], weight_scale: f32) -> KeypointObservation;
 
         /// A `Mapper` for solvers that receive 3D keypoint observations only.
         fn no_mapper() -> Mapper;
@@ -236,23 +236,23 @@ fn keypoint_missing() -> ffi::KeypointObservation {
     ffi::KeypointObservation {
         kind: ffi::ObservationKind::Missing,
         pos: [0.0; 3],
-        weight: 0.0,
+        weight_scale: 0.0,
     }
 }
 
-fn keypoint_position_3d(pos: [f32; 3], weight: f32) -> ffi::KeypointObservation {
+fn keypoint_position_3d(pos: [f32; 3], weight_scale: f32) -> ffi::KeypointObservation {
     ffi::KeypointObservation {
         kind: ffi::ObservationKind::Position3D,
         pos,
-        weight,
+        weight_scale,
     }
 }
 
-fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> ffi::KeypointObservation {
+fn keypoint_position_2d(pos: [f32; 2], weight_scale: f32) -> ffi::KeypointObservation {
     ffi::KeypointObservation {
         kind: ffi::ObservationKind::Position2D,
         pos: [pos[0], pos[1], 0.0],
-        weight,
+        weight_scale,
     }
 }
 
@@ -264,13 +264,13 @@ fn to_core_observation(
         ffi::ObservationKind::Position3D => {
             quickik_core::observation::KeypointObservation::Position3D {
                 obs_pos: nalgebra::Vector3::new(obs.pos[0], obs.pos[1], obs.pos[2]),
-                weight: obs.weight,
+                weight_scale: obs.weight_scale,
             }
         }
         ffi::ObservationKind::Position2D => {
             quickik_core::observation::KeypointObservation::Position2D {
                 obs_pos: nalgebra::Vector2::new(obs.pos[0], obs.pos[1]),
-                weight: obs.weight,
+                weight_scale: obs.weight_scale,
             }
         }
         _ => unreachable!("unknown ObservationKind"),

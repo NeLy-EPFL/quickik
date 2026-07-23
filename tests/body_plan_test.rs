@@ -16,7 +16,7 @@ fn valid_body_json() -> &'static str {
                 "offset_pos": [1.0, 0.0, 0.0],
                 "offset_quat": [1.0, 0.0, 0.0, 0.0],
                 "dofs": [
-                    {"axis": [0.0, 0.0, 1.0], "neutral_angle": 0.0, "limits": null}
+                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.0, "limits": null}
                 ]
             },
             {
@@ -25,7 +25,7 @@ fn valid_body_json() -> &'static str {
                 "offset_pos": [1.0, 0.0, 0.0],
                 "offset_quat": [1.0, 0.0, 0.0, 0.0],
                 "dofs": [
-                    {"axis": [0.0, 0.0, 1.0], "neutral_angle": 0.1, "limits": [-0.5, 0.5]}
+                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.1, "limits": [-0.5, 0.5]}
                 ]
             }
         ]
@@ -97,6 +97,70 @@ fn rejects_unknown_parent_name() {
         "joints": [
             {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
             {"name": "a", "parent": "missing", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0], "dofs": []}
+        ]
+    }"#;
+    KinematicTree::from_json_str(json);
+}
+
+#[test]
+#[should_panic(expected = "Failed to parse body plan JSON")]
+fn rejects_dof_missing_type() {
+    let json = r#"{
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
+            {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
+             "dofs": [{"axis": [0,0,1], "neutral_angle": 0.0, "limits": null}]}
+        ]
+    }"#;
+    KinematicTree::from_json_str(json);
+}
+
+#[test]
+#[should_panic(expected = "Slide DOFs are not yet implemented")]
+fn rejects_slide_dofs() {
+    let json = r#"{
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
+            {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
+             "dofs": [{"axis": [0,0,1], "type": "slide", "neutral_angle": 0.0, "limits": null}]}
+        ]
+    }"#;
+    KinematicTree::from_json_str(json);
+}
+
+#[test]
+#[should_panic(expected = "Joint::residual_weight other than 1.0 is not yet implemented")]
+fn rejects_non_default_joint_residual_weight() {
+    let json = r#"{
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0],
+             "residual_weight": 0.5, "dofs": []}
+        ]
+    }"#;
+    KinematicTree::from_json_str(json);
+}
+
+#[test]
+#[should_panic(expected = "Dof::neutral_weight other than 1.0 is not yet implemented")]
+fn rejects_non_default_dof_neutral_weight() {
+    let json = r#"{
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
+            {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
+             "dofs": [{"axis": [0,0,1], "type": "hinge", "neutral_angle": 0.0, "neutral_weight": 0.5,
+                       "limits": null}]}
+        ]
+    }"#;
+    KinematicTree::from_json_str(json);
+}
+
+#[test]
+#[should_panic(expected = "invalid type")]
+fn rejects_explicit_null_residual_weight() {
+    let json = r#"{
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0],
+             "residual_weight": null, "dofs": []}
         ]
     }"#;
     KinematicTree::from_json_str(json);

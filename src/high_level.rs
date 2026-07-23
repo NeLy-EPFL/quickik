@@ -206,7 +206,7 @@ fn stitch_overlapping_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body_plan::{Dof, Joint};
+    use crate::body_plan::{Dof, DofType, Joint};
     use nalgebra::{UnitQuaternion, Vector3};
 
     fn minimal_tree() -> Arc<KinematicTree> {
@@ -217,12 +217,15 @@ mod tests {
                 offset_quat: UnitQuaternion::identity(),
                 dofs: vec![Dof {
                     axis: Vector3::z(),
+                    dof_type: DofType::Hinge,
                     neutral_angle: 0.0,
                     limits: None,
+                    neutral_weight: 1.0,
                 }],
                 parent: None,
                 children: Vec::new(),
                 dof_offset: 0,
+                residual_weight: 1.0,
             }],
             0,
         ))

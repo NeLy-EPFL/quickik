@@ -17,13 +17,28 @@ use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
 pub enum KeypointObservation {
     /// Not observed this frame (e.g. occluded).
     Missing,
-    /// A 3D world position, e.g. triangulated from multiple calibrated cameras.
-    Position3D { obs_pos: Vector3<f32>, weight: f32 },
+    /// A 3D world position, e.g. triangulated from multiple calibrated
+    /// cameras. `weight_scale` is multiplied together with the keypoint's
+    /// [`Joint::residual_weight`] to give this observation's overall weight
+    /// in the solve.
+    ///
+    /// [`Joint::residual_weight`]: crate::body_plan::Joint::residual_weight
+    Position3D {
+        obs_pos: Vector3<f32>,
+        weight_scale: f32,
+    },
     /// A 2D pixel position from the single calibrated camera (or other
     /// mapper) that the consuming [`Solver`] was constructed with.
+    /// `weight_scale` is multiplied together with the keypoint's
+    /// [`Joint::residual_weight`] to give this observation's overall weight
+    /// in the solve.
     ///
     /// [`Solver`]: crate::solver::Solver
-    Position2D { obs_pos: Vector2<f32>, weight: f32 },
+    /// [`Joint::residual_weight`]: crate::body_plan::Joint::residual_weight
+    Position2D {
+        obs_pos: Vector2<f32>,
+        weight_scale: f32,
+    },
 }
 
 /// Mapping 3D keypoint positions in world coordinates and their Jacobians to

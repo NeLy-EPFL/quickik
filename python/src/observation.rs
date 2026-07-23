@@ -165,8 +165,8 @@ impl XYView {
     }
 }
 
-/// Observation of a single keypoint: `missing()`, `position_3d(pos, weight)`,
-/// or `position_2d(pos, weight)`.
+/// Observation of a single keypoint: `missing()`,
+/// `position_3d(pos, weight_scale)`, or `position_2d(pos, weight_scale)`.
 #[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
 pub(crate) struct KeypointObservation {
@@ -187,11 +187,11 @@ impl KeypointObservation {
     /// cameras. Raises `ValueError` if `pos` doesn't have exactly 3
     /// elements.
     #[staticmethod]
-    fn position_3d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
+    fn position_3d(pos: Vec<f32>, weight_scale: f32) -> PyResult<Self> {
         Ok(KeypointObservation {
             inner: quickik_core::observation::KeypointObservation::Position3D {
                 obs_pos: nalgebra::Vector3::from(vec_to_array::<3>(&pos, "pos")?),
-                weight,
+                weight_scale,
             },
         })
     }
@@ -200,12 +200,12 @@ impl KeypointObservation {
     /// expects (e.g. camera pixel coordinates). Raises `ValueError` if `pos`
     /// doesn't have exactly 2 elements.
     #[staticmethod]
-    fn position_2d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
+    fn position_2d(pos: Vec<f32>, weight_scale: f32) -> PyResult<Self> {
         let [x, y] = vec_to_array::<2>(&pos, "pos")?;
         Ok(KeypointObservation {
             inner: quickik_core::observation::KeypointObservation::Position2D {
                 obs_pos: nalgebra::Vector2::new(x, y),
-                weight,
+                weight_scale,
             },
         })
     }
