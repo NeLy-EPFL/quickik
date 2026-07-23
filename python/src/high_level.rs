@@ -18,6 +18,8 @@ pub(crate) struct SequenceSolver {
 
 #[pymethods]
 impl SequenceSolver {
+    /// Starts a new sequence at the neutral pose. Raises `ValueError` if
+    /// `mapper` is not a `Camera`, an `XYView`, or `None`.
     #[new]
     #[pyo3(signature = (kinematic_tree, config, mapper=None))]
     fn new(
@@ -34,12 +36,17 @@ impl SequenceSolver {
         })
     }
 
+    /// Solves the next frame, warm-started from the current pose, and
+    /// returns the converged state (also available as `.state`).
     fn solve_frame(&mut self, py: Python<'_>, observations: Vec<PyRef<'_, KeypointObservation>>) -> State {
         self.sync_config(py);
         let state = self.inner.solve_frame(&extract_observations(observations));
         State { inner: state.clone() }
     }
 
+    /// Solves every frame in `sequence` (a list of per-frame observation
+    /// lists) in order, each warm-started from the previous one; returns
+    /// the converged pose after each frame.
     fn solve_sequence(&mut self, py: Python<'_>, sequence: Vec<Vec<PyRef<'_, KeypointObservation>>>) -> Vec<State> {
         self.sync_config(py);
         let sequence: Vec<Vec<_>> = sequence.into_iter().map(extract_observations).collect();
@@ -59,6 +66,8 @@ impl SequenceSolver {
         }
     }
 
+    /// The live config, shared with the underlying `Solver`; see `Solver`'s
+    /// docstring for mutation semantics.
     #[getter]
     fn config(&self, py: Python<'_>) -> Py<SolverConfig> {
         self.config.clone_ref(py)
@@ -91,6 +100,11 @@ pub(crate) struct SegmentedSolveConfig {
 
 #[pymethods]
 impl SegmentedSolveConfig {
+    /// `segment_len`: frames per segment, including overlap (must exceed
+    /// `overlap_len`). `overlap_len`: frames shared with the next segment,
+    /// for warm-starting and consistency checking. `overlap_tolerance`: max
+    /// per-DOF angle disagreement (radians) tolerated between neighboring
+    /// segments' overlapping frames before logging a warning.
     #[new]
     fn new(segment_len: usize, overlap_len: usize, overlap_tolerance: f32) -> Self {
         SegmentedSolveConfig {

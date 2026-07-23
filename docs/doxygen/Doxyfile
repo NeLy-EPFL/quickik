@@ -1,0 +1,14 @@
+# Run from the repo root: doxygen docs/doxygen/Doxyfile
+# (see docs/build.sh, which stages the input header first)
+PROJECT_NAME           = "FastIK"
+PROJECT_BRIEF          = "C++ bindings"
+OUTPUT_DIRECTORY       = docs/api/cpp
+INPUT                  = docs/api/cpp-staging
+FILE_PATTERNS          = *.h
+RECURSIVE              = NO
+EXTRACT_ALL            = YES
+EXCLUDE_SYMBOLS        = rust::*
+WARN_IF_UNDOCUMENTED   = NO
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+QUIET                  = YES

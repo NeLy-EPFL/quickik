@@ -11,6 +11,7 @@ pub(crate) struct State {
 
 #[pymethods]
 impl State {
+    /// Creates a new state at the neutral pose for `kinematic_tree`.
     #[staticmethod]
     fn neutral_pose(kinematic_tree: KinematicTree) -> Self {
         State {
@@ -18,11 +19,13 @@ impl State {
         }
     }
 
+    /// Angles of all joint DOFs, in body-plan order.
     #[getter]
     fn dof_angles(&self) -> Vec<f32> {
         self.inner.dof_angles.clone()
     }
 
+    /// Position of the root joint in world coordinates.
     #[getter]
     fn root_pos(&self) -> (f32, f32, f32) {
         let p = self.inner.root_pos;

@@ -1,6 +1,6 @@
 [package]
 name = "fastik"
-description = "Fast and minimalist inverse kinematics library written in Rust"
+description = "Fast inverse kinematics library"
 version = "0.1.0"
 edition = "2024"
 

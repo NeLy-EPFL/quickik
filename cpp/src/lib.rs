@@ -21,6 +21,10 @@ use fastik_core::observation::Mapper3Dto2D;
 
 #[cxx::bridge(namespace = "fastik")]
 mod ffi {
+    /// Which kind of observation a `KeypointObservation` carries. cxx has no
+    /// fielded enums, so the payload lives in `KeypointObservation`'s
+    /// `pos`/`weight` fields instead of enum variants like Rust's
+    /// `KeypointObservation`.
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum ObservationKind {
         Missing,
@@ -51,6 +55,8 @@ mod ffi {
         world2cam_rot_mat: [f32; 9],
     }
 
+    /// Which mapper a `Mapper` value holds: no mapper, a `Camera`, or an
+    /// X-Y view of world coordinates. See `Mapper`'s docs.
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum MapperKind {
         NoMapper,
@@ -89,42 +95,74 @@ mod ffi {
     }
 
     extern "Rust" {
+        /// A keypoint not observed this frame (e.g. occluded).
         fn keypoint_missing() -> KeypointObservation;
+        /// A 3D world position, e.g. triangulated from multiple calibrated
+        /// cameras.
         fn keypoint_position_3d(pos: [f32; 3], weight: f32) -> KeypointObservation;
+        /// A 2D pixel position from the camera (or other mapper) that the
+        /// consuming `Solver`/`SequenceSolver` was constructed with.
         fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> KeypointObservation;
 
+        /// A `Mapper` for solvers that receive 3D keypoint observations only.
         fn no_mapper() -> Mapper;
+        /// A `Mapper` that projects with the given pinhole `camera`.
         fn camera_mapper(camera: Camera) -> Mapper;
+        /// A `Mapper` that takes a 3D keypoint's world X/Y coordinates as its
+        /// 2D projection.
         fn xyview_mapper() -> Mapper;
 
+        /// A `SolverConfig` with reasonable defaults: 10 iterations, small
+        /// damping and neutral-pose weight, and tolerances of 1e-3.
         fn default_solver_config() -> SolverConfig;
 
+        /// A kinematic tree, i.e. body plan, or skeleton.
         type KinematicTree;
+        /// Parses a `KinematicTree` from a JSON body-plan string.
         fn kinematic_tree_from_json_str(json_str: &str) -> Result<Box<KinematicTree>>;
+        /// Parses a `KinematicTree` from a JSON body-plan file at `path`.
         fn kinematic_tree_from_json_file(path: &str) -> Result<Box<KinematicTree>>;
+        /// Number of joints in the tree.
         fn n_joints(self: &KinematicTree) -> usize;
+        /// Total number of rotational degrees of freedom across all joints.
         fn n_dofs(self: &KinematicTree) -> usize;
 
+        /// The pose being solved for.
         type State;
+        /// A `State` for `tree` at its neutral pose: every DOF at its
+        /// neutral angle, root at the origin with identity rotation.
         fn state_neutral_pose(tree: &KinematicTree) -> Box<State>;
+        /// Angles of all joint DOFs.
         fn dof_angles(self: &State) -> Vec<f32>;
+        /// Position of the root joint in world coordinates.
         fn root_pos(self: &State) -> [f32; 3];
+        /// Rotation of the root joint in world coordinates, as
         /// `(w, x, y, z)`.
         fn root_rot(self: &State) -> [f32; 4];
 
         /// A list of `State`s returned by `solve_sequence`/
         /// `solve_sequence_segmented_parallel`.
         type StateList;
+        /// Number of states in the list.
         fn len(self: &StateList) -> usize;
+        /// The state at index `i`.
         fn at(self: &StateList, i: usize) -> Box<State>;
 
+        /// The inverse kinematics solver, backed by a single `Mapper` fixed
+        /// at construction (see this module's top-level docs).
         type Solver;
+        /// Constructs a `Solver` for `tree` with the given `config` and
+        /// `mapper`.
         fn new_solver(tree: &KinematicTree, config: SolverConfig, mapper: Mapper) -> Box<Solver>;
+        /// Runs `config.n_iterations` Gauss-Newton steps in place on `state`,
+        /// given one observation per joint (some may be `Missing`).
         /// Panics from the underlying solve (e.g. a `Position2D` observation
         /// given to a mapper-less solver) are caught and raised as an
         /// exception rather than aborting the process.
         fn solve(self: &mut Solver, state: &mut State, observations: &[KeypointObservation]) -> Result<()>;
+        /// The solver's current configuration.
         fn config(self: &Solver) -> SolverConfig;
+        /// Replaces the solver's configuration in place.
         fn set_config(self: &mut Solver, config: SolverConfig);
         /// Fixed at construction; there is no setter.
         fn mapper(self: &Solver) -> Mapper;
@@ -132,15 +170,23 @@ mod ffi {
         /// Solves a continuous sequence of frames for a single tracked body,
         /// warm starting each frame from the previous frame's converged pose.
         type SequenceSolver;
+        /// Starts a new sequence at the neutral pose, for `tree`, with the
+        /// given `config` and `mapper`.
         fn new_sequence_solver(tree: &KinematicTree, config: SolverConfig, mapper: Mapper) -> Box<SequenceSolver>;
+        /// Solves the next frame in place, warm-started from the current
+        /// pose, and returns the converged state.
         /// See `Solver::solve`'s docs on panics being raised as exceptions.
         fn solve_frame(self: &mut SequenceSolver, observations: &[KeypointObservation]) -> Result<Box<State>>;
+        /// Solves every frame in order, each warm-started from the previous
+        /// one, returning the converged pose after each frame.
         /// `observations` is flattened: `n_joints * n_frames` long, frame `i`
         /// spanning `[i * n_joints, (i + 1) * n_joints)`.
         fn solve_sequence(self: &mut SequenceSolver, observations: &[KeypointObservation], n_joints: usize) -> Result<Box<StateList>>;
         /// The most recently converged pose (a snapshot).
         fn state(self: &SequenceSolver) -> Box<State>;
+        /// The solver's current configuration.
         fn config(self: &SequenceSolver) -> SolverConfig;
+        /// Replaces the solver's configuration in place.
         fn set_config(self: &mut SequenceSolver, config: SolverConfig);
         /// Fixed at construction; there is no setter.
         fn mapper(self: &SequenceSolver) -> Mapper;

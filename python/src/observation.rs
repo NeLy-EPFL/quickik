@@ -51,12 +51,16 @@ fn vec_to_array<const N: usize>(v: &[f32], name: &str) -> PyResult<[f32; N]> {
 #[pyclass(module = "fastik", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct Camera {
+    /// Focal length in pixels (x).
     #[pyo3(get, set)]
     fx: f32,
+    /// Focal length in pixels (y).
     #[pyo3(get, set)]
     fy: f32,
+    /// Principal point (x).
     #[pyo3(get, set)]
     cx: f32,
+    /// Principal point (y).
     #[pyo3(get, set)]
     cy: f32,
     world2cam_pos: [f32; 3],
@@ -91,6 +95,8 @@ impl Camera {
 
 #[pymethods]
 impl Camera {
+    /// `world2cam_pos` must have exactly 3 elements and `world2cam_rot_mat`
+    /// exactly 9 (row-major 3x3); raises `ValueError` otherwise.
     #[new]
     fn new(fx: f32, fy: f32, cx: f32, cy: f32, world2cam_pos: Vec<f32>, world2cam_rot_mat: Vec<f32>) -> PyResult<Self> {
         Ok(Camera {
@@ -103,6 +109,7 @@ impl Camera {
         })
     }
 
+    /// World-to-camera translation, as `(x, y, z)`.
     #[getter]
     fn world2cam_pos(&self) -> [f32; 3] {
         self.world2cam_pos
@@ -152,6 +159,7 @@ pub(crate) struct KeypointObservation {
 
 #[pymethods]
 impl KeypointObservation {
+    /// Not observed this frame, e.g. occluded.
     #[staticmethod]
     fn missing() -> Self {
         KeypointObservation {
@@ -159,6 +167,9 @@ impl KeypointObservation {
         }
     }
 
+    /// A 3D world position, e.g. triangulated from multiple calibrated
+    /// cameras. Raises `ValueError` if `pos` doesn't have exactly 3
+    /// elements.
     #[staticmethod]
     fn position_3d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
         Ok(KeypointObservation {
@@ -169,6 +180,9 @@ impl KeypointObservation {
         })
     }
 
+    /// A 2D position in whatever space the consuming `Solver`'s `mapper`
+    /// expects (e.g. camera pixel coordinates). Raises `ValueError` if `pos`
+    /// doesn't have exactly 2 elements.
     #[staticmethod]
     fn position_2d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
         let [x, y] = vec_to_array::<2>(&pos, "pos")?;

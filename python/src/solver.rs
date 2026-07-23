@@ -10,14 +10,24 @@ use crate::state::State;
 #[pyclass(module = "fastik", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct SolverConfig {
+    /// Number of Gauss-Newton steps per `solve` call. Also the cap on early
+    /// termination -- see `position_tolerance`/`angle_tolerance`.
     #[pyo3(get, set)]
     n_iterations: usize,
+    /// Levenberg-Marquardt damping added to the normal equations' diagonal,
+    /// for numerical stability only; keep it very small (e.g. 1e-6).
     #[pyo3(get, set)]
     damping: f32,
+    /// Weight pulling every joint angle toward the neutral pose. Improves
+    /// robustness to missing/noisy keypoints, at the cost of some bias.
     #[pyo3(get, set)]
     neutral_pose_weight: f32,
+    /// Stop iterating early once an update step's largest root-position
+    /// component drops below this value, and the largest angle update drops
+    /// below `angle_tolerance`. 0 disables early termination.
     #[pyo3(get, set)]
     position_tolerance: f32,
+    /// Angle-space counterpart to `position_tolerance`, in radians.
     #[pyo3(get, set)]
     angle_tolerance: f32,
 }
@@ -37,6 +47,8 @@ impl SolverConfig {
 
 #[pymethods]
 impl SolverConfig {
+    /// All arguments are optional; see the attributes above for their
+    /// defaults and meaning.
     #[new]
     #[pyo3(signature = (n_iterations=10, damping=1e-6, neutral_pose_weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3))]
     fn new(
@@ -78,6 +90,9 @@ pub(crate) struct Solver {
 
 #[pymethods]
 impl Solver {
+    /// `config` is copied in (see the `config` property to retune it
+    /// afterward). Raises `ValueError` if `mapper` is not a `Camera`, an
+    /// `XYView`, or `None`.
     #[new]
     #[pyo3(signature = (kinematic_tree, config, mapper=None))]
     fn new(
@@ -94,11 +109,16 @@ impl Solver {
         })
     }
 
+    /// Runs up to `config.n_iterations` Gauss-Newton steps in place on
+    /// `state`, given one `KeypointObservation` per joint (in
+    /// `kinematic_tree.joints` order; use `KeypointObservation.missing()`
+    /// for keypoints not observed this frame).
     fn solve(&mut self, py: Python<'_>, mut state: PyRefMut<'_, State>, observations: Vec<PyRef<'_, KeypointObservation>>) {
         self.sync_config(py);
         self.inner.solve(&mut state.inner, &extract_observations(observations));
     }
 
+    /// The live config; see the class docstring for mutation semantics.
     #[getter]
     fn config(&self, py: Python<'_>) -> Py<SolverConfig> {
         self.config.clone_ref(py)
