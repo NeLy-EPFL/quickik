@@ -72,6 +72,8 @@ BODIES = {
         "playback_speed": 0.1,
         "padding": 1.02,
         "up_reference": None,
+        "missing_keypoints": [],
+        "neutral_pose_weight": None,  # library default (SolverConfig's own)
     },
     "g1": {
         "body_plan": "g1_body_plan.json",
@@ -92,6 +94,44 @@ BODIES = {
         # keypoints used to empirically measure "up" (head above the ankles'
         # midpoint), see `up_alignment_rotation`.
         "up_reference": {"head": "head", "ankles": ["left_ankle_roll", "right_ankle_roll"]},
+        # LAFAN1 has one raw mocap landmark per hand ("LeftHand"/"RightHand"),
+        # but G1 splits the wrist into 3 single-axis DOFs plus the hand
+        # keypoint itself -- all 4 get that same single target position (see
+        # g1_fixtures.py's BVH_TO_G1), even though they're a few cm apart in
+        # the body plan's own real geometry. Solving all 4 as independent
+        # observations fights itself two ways: the 3 wrist DOFs can't
+        # actually be distinguished by one shared point (many equally
+        # "valid" angle decompositions, so the fit jumps between them frame
+        # to frame), and every one of them competes with the hand -- the
+        # true end effector -- for the exact same target, degrading its own
+        # fit for no benefit (wrist_roll/pitch/yaw have no keypoint of their
+        # own worth matching; only the hand's position is real signal).
+        # Marking the wrist DOFs' own keypoints Missing leaves the hand as
+        # the sole target for this whole sub-chain, letting it actually
+        # reach that target instead of splitting the difference, while the
+        # neutral-pose prior picks a single stable wrist angle instead of
+        # chasing noise.
+        "missing_keypoints": [
+            "left_wrist_roll",
+            "left_wrist_pitch",
+            "left_wrist_yaw",
+            "right_wrist_roll",
+            "right_wrist_pitch",
+            "right_wrist_yaw",
+        ],
+        # With the wrist DOFs unobserved, they're still indirectly driven by
+        # the hand's own position residual (they're its ancestors in the
+        # chain), and the whole shoulder+elbow+wrist assembly is a redundant
+        # manipulator for that single 3D target -- with only
+        # SolverConfig::default()'s weak 1e-3 weight pulling toward neutral,
+        # the solver was consistently using the wrist as free self-motion to
+        # (partly) compensate for the arm's coarse rescale mismatch, landing
+        # on a stable but visually wrong ~50-degree wrist bend every frame.
+        # 10x the default weight was enough to mostly stop that trade --
+        # empirically it also *improves* every other keypoint's fit
+        # (including two 30+cm outlier residuals on the unweighted default),
+        # so this isn't accuracy traded away for looks.
+        "neutral_pose_weight": 0.01,
     },
 }
 
@@ -156,18 +196,38 @@ def forward_kinematics_full(joints, dof_offsets, dof_angles, root_pos, root_rot_
     return world_pos
 
 
-def build_observations(target_ego):
+def build_observations(target_ego, missing_indices=frozenset()):
     obs = [quickik.KeypointObservation.missing()]
-    obs += [quickik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
+    for i, p in enumerate(target_ego):
+        obs.append(
+            quickik.KeypointObservation.missing()
+            if i in missing_indices
+            else quickik.KeypointObservation.position_3d(list(p), 1.0)
+        )
     return obs
 
 
-def solve_sequence(tree, fixtures):
+def solve_sequence(tree, fixtures, missing_keypoints=(), neutral_pose_weight=None):
     """Warm-started solve over `native_rate_frames`, exactly like the
     throughput benchmark (see `../quickik_python/bench.py`'s
-    `bench_solve_sequence`) -- returns one solved `State` per frame."""
-    seq = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    return [seq.solve_frame(build_observations(f["target_ego"])) for f in fixtures["native_rate_frames"]]
+    `bench_solve_sequence`) -- returns one solved `State` per frame.
+    `missing_keypoints` (body-plan joint names) are given a `Missing`
+    observation instead of their fixture target every frame; see `BODIES`'
+    own `missing_keypoints` comment for why G1 needs this. `neutral_pose_weight`
+    overrides `SolverConfig`'s own default when given; see `BODIES`' own
+    comment for why G1 needs a stronger one."""
+    leg_joint_names = fixtures["leg_joint_names"]
+    missing_indices = {leg_joint_names.index(name) for name in missing_keypoints}
+    config = (
+        quickik.SolverConfig()
+        if neutral_pose_weight is None
+        else quickik.SolverConfig(neutral_pose_weight=neutral_pose_weight)
+    )
+    seq = quickik.SequenceSolver(tree, config)
+    return [
+        seq.solve_frame(build_observations(f["target_ego"], missing_indices))
+        for f in fixtures["native_rate_frames"]
+    ]
 
 
 def up_alignment_rotation(fitted_frames, full_name_idx, up_reference):
@@ -199,7 +259,7 @@ def prepare_body(name):
     the fitted root every frame) and, for G1, up-realigned (see
     `up_alignment_rotation`)."""
     cfg, joints, dof_offsets, tree, fixtures, edges = load_body(name)
-    states = solve_sequence(tree, fixtures)
+    states = solve_sequence(tree, fixtures, cfg["missing_keypoints"], cfg["neutral_pose_weight"])
     native_frames = fixtures["native_rate_frames"]
     full_names = [j["name"] for j in joints]
     full_name_idx = {n: i for i, n in enumerate(full_names)}
@@ -234,6 +294,17 @@ def prepare_body(name):
         fitted_bones = [align.apply(b.reshape(-1, 3)).reshape(b.shape) for b in fitted_bones]
 
     lo, hi = axis_limits(mocap_frames, fitted_frames, padding=cfg["padding"])
+
+    # Don't render mocap markers for keypoints the solver was told to
+    # ignore (see `missing_keypoints`): their target is a redundant
+    # duplicate of another keypoint's, not a real observation, so plotting
+    # it next to a QuickIK fit that correctly ignores it just looks like an
+    # unexplained extra bend sprouting from a single mocap dot.
+    if cfg["missing_keypoints"]:
+        missing_idx = [fixtures["leg_joint_names"].index(name) for name in cfg["missing_keypoints"]]
+        for frame in mocap_frames:
+            frame[missing_idx] = np.nan
+
     display_fps = cfg["fps"] * cfg["playback_speed"]
     return {
         "cfg": cfg,
