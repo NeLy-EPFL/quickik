@@ -109,24 +109,35 @@ impl SequenceSolver {
 /// Configuration for [`solve_sequence_segmented_parallel`].
 #[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
-pub(crate) struct SegmentedSolveConfig {
-    inner: quickik_core::high_level::SegmentedSolveConfig,
+pub(crate) struct ParallelSolveConfig {
+    inner: quickik_core::high_level::ParallelSolveConfig,
 }
 
 #[pymethods]
-impl SegmentedSolveConfig {
+impl ParallelSolveConfig {
     /// `segment_len`: frames per segment, including overlap (must exceed
     /// `overlap_len`). `overlap_len`: frames shared with the next segment,
     /// for warm-starting and consistency checking. `overlap_tolerance`: max
     /// per-DOF angle disagreement (radians) tolerated between neighboring
-    /// segments' overlapping frames before logging a warning.
+    /// segments' overlapping frames before logging a warning. `n_workers`:
+    /// number of worker threads. A positive value is used directly, unless it
+    /// exceeds the number of available cores -- in that case it's clipped to
+    /// that count and a warning is logged. A negative value counts backward
+    /// from all available cores: `-1` uses all, `-2` uses all but one, etc.
+    /// `0` is invalid.
     #[new]
-    fn new(segment_len: usize, overlap_len: usize, overlap_tolerance: f32) -> Self {
-        SegmentedSolveConfig {
-            inner: quickik_core::high_level::SegmentedSolveConfig {
+    fn new(
+        segment_len: usize,
+        overlap_len: usize,
+        overlap_tolerance: f32,
+        n_workers: isize,
+    ) -> Self {
+        ParallelSolveConfig {
+            inner: quickik_core::high_level::ParallelSolveConfig {
                 segment_len,
                 overlap_len,
                 overlap_tolerance,
+                n_workers,
             },
         }
     }
@@ -136,13 +147,13 @@ impl SegmentedSolveConfig {
 /// overlapping segments, each solved on its own thread. `mapper` is a
 /// `Camera`, an `XYView`, or `None` -- see [`Solver`](crate::solver::Solver).
 #[pyfunction]
-#[pyo3(signature = (kinematic_tree, config, sequence, segmented_config, mapper=None))]
+#[pyo3(signature = (kinematic_tree, config, sequence, parallel_config, mapper=None))]
 pub(crate) fn solve_sequence_segmented_parallel(
     py: Python<'_>,
     kinematic_tree: KinematicTree,
     config: SolverConfig,
     sequence: Vec<Vec<PyRef<'_, KeypointObservation>>>,
-    segmented_config: SegmentedSolveConfig,
+    parallel_config: ParallelSolveConfig,
     mapper: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Vec<State>> {
     let config = config.as_rust(extract_mapper(mapper.as_ref())?);
@@ -153,7 +164,7 @@ pub(crate) fn solve_sequence_segmented_parallel(
                 &kinematic_tree.inner,
                 config,
                 &sequence,
-                segmented_config.inner,
+                parallel_config.inner,
             )
         })
         .into_iter()

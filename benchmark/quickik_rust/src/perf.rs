@@ -11,9 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
-use quickik::high_level::{
-    SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel,
-};
+use quickik::high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
 use quickik::observation::KeypointObservation;
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
@@ -25,19 +23,17 @@ use crate::fixtures::{Fixtures, NativeRateFrame};
 /// and `quickik_scaling`'s weak-scaling sweep.
 pub const SEGMENT_LEN: usize = 200;
 pub const OVERLAP_LEN: usize = 20;
-/// Thread count for the main "multi-thread sequence throughput" metric --
-/// fixed rather than detected, so the number is reproducible regardless of
-/// the machine/taskset state (sizing the sequence to exactly this many
-/// segments also naturally caps `solve_sequence_segmented_parallel`'s own
-/// thread spawning at this count, via its `available_parallelism().min(n_segments)`).
-/// See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
+/// Worker count for the main "multi-thread sequence throughput" metric,
+/// passed explicitly via `ParallelSolveConfig::n_workers` -- fixed rather
+/// than detected, so the number is reproducible regardless of the machine's
+/// core count. See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
 const MULTITHREAD_N_THREADS: usize = 8;
 
 /// Total frame count that `solve_sequence_segmented_parallel`'s own
 /// `segment_bounds` splits into exactly `n_segments` segments of
 /// `SEGMENT_LEN` frames each (stride `SEGMENT_LEN - OVERLAP_LEN` between
-/// segment starts) -- so a `n_segments`-thread run gets exactly one segment
-/// per thread, rather than some threads getting two while others idle.
+/// segment starts) -- so a `n_segments`-worker run gets exactly one segment
+/// per worker, rather than some workers getting two while others idle.
 pub fn frames_for_n_segments(n_segments: usize) -> usize {
     SEGMENT_LEN + n_segments.saturating_sub(1) * (SEGMENT_LEN - OVERLAP_LEN)
 }
@@ -142,22 +138,24 @@ fn bench_single_thread_sequence_throughput(
 }
 
 /// Multi-thread sequence throughput: `solve_sequence_segmented_parallel` on
-/// a longer tiled sequence, using however many threads
-/// [`std::thread::available_parallelism`] reports (the full machine, unless
-/// constrained via `taskset`). Warms up once, then times a second run.
+/// a longer tiled sequence, using exactly `n_workers` threads (joblib
+/// convention -- see `ParallelSolveConfig::n_workers`). Warms up once, then
+/// times a second run.
 pub fn bench_multithread_sequence_throughput(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
+    n_workers: isize,
 ) -> Duration {
     let config: SolverConfig = SolverConfig::default();
-    let segmented_config = SegmentedSolveConfig {
+    let parallel_config = ParallelSolveConfig {
         segment_len: SEGMENT_LEN,
         overlap_len: OVERLAP_LEN,
         overlap_tolerance: 0.05,
+        n_workers,
     };
-    let _ = solve_sequence_segmented_parallel(tree, config, sequence, segmented_config);
+    let _ = solve_sequence_segmented_parallel(tree, config, sequence, parallel_config);
     let t0 = Instant::now();
-    let states = solve_sequence_segmented_parallel(tree, config, sequence, segmented_config);
+    let states = solve_sequence_segmented_parallel(tree, config, sequence, parallel_config);
     let elapsed = t0.elapsed();
     black_box(&states);
     elapsed
@@ -204,7 +202,8 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         &fixtures.native_rate_frames,
         frames_for_n_segments(MULTITHREAD_N_THREADS),
     );
-    let elapsed = bench_multithread_sequence_throughput(tree, &sequence);
+    let elapsed =
+        bench_multithread_sequence_throughput(tree, &sequence, MULTITHREAD_N_THREADS as isize);
     let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(
         "solve_sequence_segmented_parallel   n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s",

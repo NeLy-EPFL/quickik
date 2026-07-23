@@ -88,10 +88,16 @@ mod ffi {
 
     /// Configuration for `solve_sequence_segmented_parallel`.
     #[derive(Clone, Copy, Debug)]
-    struct SegmentedSolveConfig {
+    struct ParallelSolveConfig {
         segment_len: usize,
         overlap_len: usize,
         overlap_tolerance: f32,
+        /// Number of worker threads. A positive value is used directly,
+        /// unless it exceeds the number of available cores -- in that case
+        /// it's clipped to that count and a warning is logged. A negative
+        /// value counts backward from all available cores: `-1` uses all,
+        /// `-2` uses all but one, etc. `0` is invalid.
+        n_workers: isize,
     }
 
     extern "Rust" {
@@ -215,7 +221,7 @@ mod ffi {
             config: SolverConfig,
             observations: &[KeypointObservation],
             n_joints: usize,
-            segmented_config: SegmentedSolveConfig,
+            parallel_config: ParallelSolveConfig,
             mapper: Mapper,
         ) -> Result<Box<StateList>>;
     }
@@ -620,15 +626,16 @@ fn solve_sequence_segmented_parallel(
     config: ffi::SolverConfig,
     observations: &[ffi::KeypointObservation],
     n_joints: usize,
-    segmented_config: ffi::SegmentedSolveConfig,
+    parallel_config: ffi::ParallelSolveConfig,
     mapper: ffi::Mapper,
 ) -> Result<Box<StateList>, String> {
     let mapper = to_runtime_mapper(&mapper);
     let sequence = split_into_frames(observations, n_joints);
-    let core_segmented_config = quickik_core::high_level::SegmentedSolveConfig {
-        segment_len: segmented_config.segment_len,
-        overlap_len: segmented_config.overlap_len,
-        overlap_tolerance: segmented_config.overlap_tolerance,
+    let core_parallel_config = quickik_core::high_level::ParallelSolveConfig {
+        segment_len: parallel_config.segment_len,
+        overlap_len: parallel_config.overlap_len,
+        overlap_tolerance: parallel_config.overlap_tolerance,
+        n_workers: parallel_config.n_workers,
     };
     let core_config = to_core_config(config, mapper);
     catch_panic(move || {
@@ -637,7 +644,7 @@ fn solve_sequence_segmented_parallel(
                 &tree.0,
                 core_config,
                 &sequence,
-                core_segmented_config,
+                core_parallel_config,
             ),
         ))
     })

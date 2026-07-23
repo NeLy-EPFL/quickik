@@ -20,7 +20,7 @@ mod state;
 use pyo3::prelude::*;
 
 use body_plan::KinematicTree;
-use high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+use high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
 use observation::{Camera, KeypointObservation, XYView};
 use solver::{Solver, SolverConfig};
 use state::State;
@@ -35,7 +35,7 @@ fn quickik(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SolverConfig>()?;
     m.add_class::<Solver>()?;
     m.add_class::<SequenceSolver>()?;
-    m.add_class::<SegmentedSolveConfig>()?;
+    m.add_class::<ParallelSolveConfig>()?;
     m.add_function(wrap_pyfunction!(solve_sequence_segmented_parallel, m)?)?;
     Ok(())
 }

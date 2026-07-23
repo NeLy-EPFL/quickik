@@ -5,9 +5,7 @@ use std::sync::Arc;
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::high_level::{
-    SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel,
-};
+use quickik::high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
 use quickik::observation::KeypointObservation;
 use quickik::solver::SolverConfig;
 use quickik::state::State;
@@ -94,13 +92,14 @@ fn solve_sequence_segmented_parallel_reconstructs_smooth_trajectory() {
         .map(|angles| observations_for(&tree, angles))
         .collect();
 
-    let segmented_config = SegmentedSolveConfig {
+    let parallel_config = ParallelSolveConfig {
         segment_len: 10,
         overlap_len: 3,
         overlap_tolerance: 0.05,
+        n_workers: -1,
     };
     let config: SolverConfig = SolverConfig::default();
-    let states = solve_sequence_segmented_parallel(&tree, config, &sequence, segmented_config);
+    let states = solve_sequence_segmented_parallel(&tree, config, &sequence, parallel_config);
 
     assert_eq!(states.len(), n_frames);
     for (state, angles) in states.iter().zip(&true_angles) {
@@ -120,14 +119,49 @@ fn solve_sequence_segmented_parallel_reconstructs_smooth_trajectory() {
 }
 
 #[test]
+fn solve_sequence_segmented_parallel_honors_explicit_n_workers() {
+    let tree = common::two_joint_chain();
+    let n_frames = 40;
+    let true_angles: Vec<[f32; 2]> = (0..n_frames)
+        .map(|t| {
+            let a = 0.3 * (t as f32 * 0.15).sin();
+            [a, a * 0.5]
+        })
+        .collect();
+    let sequence: Vec<Vec<KeypointObservation>> = true_angles
+        .iter()
+        .map(|angles| observations_for(&tree, angles))
+        .collect();
+
+    // n_workers: 1 forces every segment through the same chunk on a single
+    // spawned thread, exercising a different code path than the default
+    // (-1, i.e. all available cores) used elsewhere in this file.
+    let parallel_config = ParallelSolveConfig {
+        segment_len: 10,
+        overlap_len: 3,
+        overlap_tolerance: 0.05,
+        n_workers: 1,
+    };
+    let config: SolverConfig = SolverConfig::default();
+    let states = solve_sequence_segmented_parallel(&tree, config, &sequence, parallel_config);
+
+    assert_eq!(states.len(), n_frames);
+    for (state, angles) in states.iter().zip(&true_angles) {
+        assert!((state.dof_angles[0] - angles[0]).abs() < 1e-2);
+        assert!((state.dof_angles[1] - angles[1]).abs() < 1e-2);
+    }
+}
+
+#[test]
 fn solve_sequence_segmented_parallel_handles_empty_input() {
     let tree = common::two_joint_chain();
-    let segmented_config = SegmentedSolveConfig {
+    let parallel_config = ParallelSolveConfig {
         segment_len: 10,
         overlap_len: 3,
         overlap_tolerance: 0.01,
+        n_workers: -1,
     };
     let config: SolverConfig = SolverConfig::default();
-    let result = solve_sequence_segmented_parallel(&tree, config, &[], segmented_config);
+    let result = solve_sequence_segmented_parallel(&tree, config, &[], parallel_config);
     assert!(result.is_empty());
 }

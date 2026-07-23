@@ -264,12 +264,13 @@ def bench_solve_sequence(tree, all_obs, config):
     return samples
 
 
-# Frames per segment/thread, matching perf.rs exactly (same stride, so a
-# `n_segments`-thread run gets exactly one segment per thread).
+# Frames per segment/worker, matching perf.rs exactly (same stride, so a
+# `n_segments`-worker run gets exactly one segment per worker).
 SEGMENT_LEN = 200
 OVERLAP_LEN = 20
-# Thread count for the main "multi-thread sequence throughput" metric --
-# fixed rather than detected, matching perf.rs (see its comment).
+# Worker count for the main "multi-thread sequence throughput" metric,
+# passed explicitly via ParallelSolveConfig.n_workers -- fixed rather than
+# detected, matching perf.rs (see its comment).
 MULTITHREAD_N_THREADS = 8
 
 
@@ -284,14 +285,16 @@ def tiled_native_rate_sequence(ctx, length):
     return [base[i % len(base)] for i in range(length)]
 
 
-def bench_multithread_sequence_throughput(tree, sequence):
+def bench_multithread_sequence_throughput(tree, sequence, n_workers):
     config = quickik.SolverConfig()
-    segmented_config = quickik.SegmentedSolveConfig(SEGMENT_LEN, OVERLAP_LEN, 0.05)
+    parallel_config = quickik.ParallelSolveConfig(
+        SEGMENT_LEN, OVERLAP_LEN, 0.05, n_workers
+    )
     quickik.solve_sequence_segmented_parallel(
-        tree, config, sequence, segmented_config
+        tree, config, sequence, parallel_config
     )  # warm up
     t0 = time.perf_counter()
-    quickik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)
+    quickik.solve_sequence_segmented_parallel(tree, config, sequence, parallel_config)
     return time.perf_counter() - t0
 
 
@@ -365,7 +368,9 @@ def run_performance(ctx):
     sequence = tiled_native_rate_sequence(
         ctx, frames_for_n_segments(MULTITHREAD_N_THREADS)
     )
-    elapsed = bench_multithread_sequence_throughput(tree, sequence)
+    elapsed = bench_multithread_sequence_throughput(
+        tree, sequence, MULTITHREAD_N_THREADS
+    )
     multithread_fps = len(sequence) / elapsed
     print(
         f"solve_sequence_segmented_parallel   n_frames={len(sequence):<6} elapsed={elapsed * 1e3:>9.3f}ms  "

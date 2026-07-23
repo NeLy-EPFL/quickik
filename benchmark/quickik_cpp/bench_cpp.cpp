@@ -231,12 +231,13 @@ std::vector<double> bench_solve_sequence(rust::Box<quickik::KinematicTree> &tree
   return samples;
 }
 
-// Frames per segment/thread, matching perf.rs exactly (same stride, so a
-// `n_segments`-thread run gets exactly one segment per thread).
+// Frames per segment/worker, matching perf.rs exactly (same stride, so a
+// `n_segments`-worker run gets exactly one segment per worker).
 constexpr size_t kSegmentLen = 200;
 constexpr size_t kOverlapLen = 20;
-// Thread count for the main "multi-thread sequence throughput" metric --
-// fixed rather than detected, matching perf.rs (see its comment).
+// Worker count for the main "multi-thread sequence throughput" metric,
+// passed explicitly via ParallelSolveConfig::n_workers -- fixed rather than
+// detected, matching perf.rs (see its comment).
 constexpr size_t kMultithreadNThreads = 8;
 
 size_t frames_for_n_segments(size_t n_segments) {
@@ -253,9 +254,10 @@ std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequenc
 }
 
 double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &tree,
-                                              const std::vector<std::vector<quickik::KeypointObservation>> &sequence) {
+                                              const std::vector<std::vector<quickik::KeypointObservation>> &sequence,
+                                              rust::isize n_workers) {
   quickik::SolverConfig config = quickik::default_solver_config();
-  quickik::SegmentedSolveConfig segmented_config{kSegmentLen, kOverlapLen, 0.05f};
+  quickik::ParallelSolveConfig parallel_config{kSegmentLen, kOverlapLen, 0.05f, n_workers};
 
   // solve_sequence_segmented_parallel takes one flat slice (see cpp/src/lib.rs's
   // module docs); flatten once, outside the timed section.
@@ -265,7 +267,7 @@ double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &
   for (auto &obs : sequence) flat.insert(flat.end(), obs.begin(), obs.end());
 
   auto run_once = [&] {
-    return quickik::solve_sequence_segmented_parallel(*tree, config, slice_of(flat), n_joints, segmented_config,
+    return quickik::solve_sequence_segmented_parallel(*tree, config, slice_of(flat), n_joints, parallel_config,
                                                        quickik::no_mapper());
   };
   run_once();  // warm up
@@ -328,7 +330,7 @@ void run_performance(const std::string &body, rust::Box<quickik::KinematicTree> 
   std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, %zu threads) --\n",
               kMultithreadNThreads);
   auto sequence = tiled_native_rate_sequence(fixtures, frames_for_n_segments(kMultithreadNThreads));
-  double elapsed_ms = bench_multithread_sequence_throughput(tree, sequence);
+  double elapsed_ms = bench_multithread_sequence_throughput(tree, sequence, static_cast<rust::isize>(kMultithreadNThreads));
   double multithread_fps = sequence.size() / (elapsed_ms / 1e3);
   std::printf("solve_sequence_segmented_parallel   n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n",
               sequence.size(), elapsed_ms, multithread_fps);

@@ -101,15 +101,12 @@ A single `solve()` call always starts from whatever `State` you pass it – usua
 === "Rust"
 
     ```rust
-    use quickik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+    use quickik::high_level::SequenceSolver;
 
     let mut seq_solver = SequenceSolver::new(kinematic_tree.clone(), SolverConfig::default());
     for frame_observations in &recording {
         let pose = seq_solver.solve_frame(frame_observations);
     }
-
-    let segmented_config = SegmentedSolveConfig { segment_len: 200, overlap_len: 20, overlap_tolerance: 0.05 };
-    let poses = solve_sequence_segmented_parallel(&kinematic_tree, SolverConfig::default(), &long_recording, segmented_config);
     ```
 
 === "Python"
@@ -118,13 +115,6 @@ A single `solve()` call always starts from whatever `State` you pass it – usua
     seq_solver = quickik.SequenceSolver(kinematic_tree, quickik.SolverConfig())
     for frame_observations in recording:
         pose = seq_solver.solve_frame(frame_observations)
-
-    segmented_config = quickik.SegmentedSolveConfig(
-        segment_len=200, overlap_len=20, overlap_tolerance=0.05
-    )
-    poses = quickik.solve_sequence_segmented_parallel(
-        kinematic_tree, quickik.SolverConfig(), long_recording, segmented_config
-    )
     ```
 
 === "C++"
@@ -135,18 +125,44 @@ A single `solve()` call always starts from whatever `State` you pass it – usua
         auto pose = seq_solver->solve_frame(
             rust::Slice<const quickik::KeypointObservation>(frame_observations.data(), frame_observations.size()));
     }
+    ```
 
+A plain, sequential `SequenceSolver` like this only ever uses one thread, and one frame has to finish before the next can start (each one warm-starts from the last, after all). For a single long recording, `solve_sequence_segmented_parallel` gets around that: it splits the sequence into segments with a small overlap, solves every segment on its own worker thread (cold-started at each segment's own first frame, then warm-started within it), and stitches the results back into one continuous sequence. `overlap_tolerance` is a consistency check, not a correctness requirement – neighboring segments' overlapping frames were solved independently (one cold-started, one warm-started from a different point), so they can disagree slightly even on a real recording; exceeding this per-DOF angle tolerance (radians) just logs a warning; the resulting sequence itself is unaffected. A positive `n_workers` is used directly, unless it exceeds the number of available cores – in that case it's clipped to that count and a warning is logged. A negative value counts backward from all available cores: `-1` uses all, `-2` uses all but one, etc.; `0` is invalid.
+
+=== "Rust"
+
+    ```rust
+    use quickik::high_level::{ParallelSolveConfig, solve_sequence_segmented_parallel};
+
+    let parallel_config = ParallelSolveConfig { segment_len: 200, overlap_len: 20, overlap_tolerance: 0.05, n_workers: -1 };
+    let poses = solve_sequence_segmented_parallel(&kinematic_tree, SolverConfig::default(), &long_recording, parallel_config);
+    ```
+
+=== "Python"
+
+    ```python
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=200, overlap_len=20, overlap_tolerance=0.05, n_workers=-1
+    )
+    poses = quickik.solve_sequence_segmented_parallel(
+        kinematic_tree, quickik.SolverConfig(), long_recording, parallel_config
+    )
+    ```
+
+=== "C++"
+
+    ```cpp
     // flattened_long_recording is n_joints * n_frames long – see below.
-    quickik::SegmentedSolveConfig segmented_config{200, 20, 0.05f};
+    quickik::ParallelSolveConfig parallel_config{200, 20, 0.05f, -1};
     auto poses = quickik::solve_sequence_segmented_parallel(
         *tree, quickik::default_solver_config(),
         rust::Slice<const quickik::KeypointObservation>(flattened_long_recording.data(), flattened_long_recording.size()),
-        tree->n_joints(), segmented_config, quickik::no_mapper());
+        tree->n_joints(), parallel_config, quickik::no_mapper());
     ```
 
     C++ has no nested-container binding across the FFI, so a "sequence" is one flat `observations` slice of length `n_joints * n_frames` (frame `i` spanning `[i * n_joints, (i + 1) * n_joints)`) rather than a list of lists, and `solve_sequence`/`solve_sequence_segmented_parallel` return a `StateList` handle (`len()`/`at(i)`) instead of a `Vec<State>`/`list[State]`. See `cpp/src/lib.rs`'s module docs.
 
-A plain, sequential `SequenceSolver` only ever uses one thread, and one frame has to finish before the next can start (each one warm-starts from the last, after all). `solve_sequence_segmented_parallel` gets around that for a single long recording: it splits the sequence into segments with a small overlap, solves every segment on its own thread (cold-started at each segment's own first frame, then warm-started within it), and stitches the results back into one continuous sequence. `overlap_tolerance` is a consistency check, not a correctness requirement – neighboring segments' overlapping frames were solved independently (one cold-started, one warm-started from a different point), so they can disagree slightly even on a real recording; exceeding this per-DOF angle tolerance (radians) just logs a warning; the resulting sequence itself is unaffected. Independent sequences (e.g. one per subject or one per camera) don't need this machinery at all – just solve each with its own `SequenceSolver` and parallelize however you like (a thread pool, `rayon`, Python's `multiprocessing`, ...).
+Independent sequences (e.g. one per subject or one per camera) don't need this machinery at all – just solve each with its own `SequenceSolver` and parallelize however you like (a thread pool, `rayon`, Python's `multiprocessing`, ...).
 
 ## Keypoint positions observed in 2D
 

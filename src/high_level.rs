@@ -46,7 +46,7 @@ impl<M: Mapper3Dto2D> SequenceSolver<M> {
 
 /// Configuration for [`solve_sequence_segmented_parallel`].
 #[derive(Clone, Copy, Debug)]
-pub struct SegmentedSolveConfig {
+pub struct ParallelSolveConfig {
     /// Frames per segment, including overlap with neighbors. Must be
     /// greater than `overlap_len`.
     pub segment_len: usize,
@@ -56,44 +56,73 @@ pub struct SegmentedSolveConfig {
     /// Maximum per-DOF angle disagreement (radians) allowed between
     /// neighboring segments' overlapping frames before logging a warning.
     pub overlap_tolerance: f32,
+    /// Number of worker threads. A positive value is used directly, unless it
+    /// exceeds the number of available cores -- in that case it's clipped to
+    /// that count and a warning is logged. A negative value counts backward
+    /// from all available cores: `-1` uses all, `-2` uses all but one, etc.
+    /// `0` is invalid.
+    pub n_workers: isize,
+}
+
+/// Resolves [`ParallelSolveConfig::n_workers`] into an actual thread count –
+/// see its docs for the exact convention.
+fn resolve_n_workers(n_workers: isize) -> usize {
+    assert!(
+        n_workers != 0,
+        "ParallelSolveConfig::n_workers must not be 0"
+    );
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    if n_workers > 0 {
+        let n_workers = n_workers as usize;
+        if n_workers > available {
+            log::warn!(
+                "ParallelSolveConfig::n_workers ({n_workers}) exceeds available cores \
+                 ({available}); clipping to {available}"
+            );
+            return available;
+        }
+        return n_workers;
+    }
+    (available as isize + 1 + n_workers).max(1) as usize
 }
 
 /// Solves a single long sequence in parallel by splitting it into slightly
-/// overlapping segments (see [`SegmentedSolveConfig`]), each solved on its
+/// overlapping segments (see [`ParallelSolveConfig`]), each solved on its
 /// own thread via [`solve_sequence`](SequenceSolver::solve_sequence).
 /// Since segments are solved independently, their overlapping frames can
 /// converge to slightly different poses; any disagreement in `dof_angles`
-/// beyond `segmented_config.overlap_tolerance` generates a warning and the
+/// beyond `parallel_config.overlap_tolerance` generates a warning and the
 /// earlier segment's version is kept.
 pub fn solve_sequence_segmented_parallel<M: Mapper3Dto2D + Sync>(
     kinematic_tree: &Arc<KinematicTree>,
     config: SolverConfig<M>,
     sequence: &[Vec<KeypointObservation>],
-    segmented_config: SegmentedSolveConfig,
+    parallel_config: ParallelSolveConfig,
 ) -> Vec<State> {
-    let bounds = segment_bounds(sequence.len(), segmented_config);
-    let segment_states = solve_in_parallel(&bounds, |&(start, end)| {
+    let bounds = segment_bounds(sequence.len(), parallel_config);
+    let n_workers = resolve_n_workers(parallel_config.n_workers);
+    let segment_states = solve_in_parallel(&bounds, n_workers, |&(start, end)| {
         SequenceSolver::new(Arc::clone(kinematic_tree), config)
             .solve_sequence(&sequence[start..end])
     });
     stitch_overlapping_segments(
         segment_states,
-        segmented_config.overlap_len,
-        segmented_config.overlap_tolerance,
+        parallel_config.overlap_len,
+        parallel_config.overlap_tolerance,
     )
 }
 
 /// Applies `solve_one` to every item in `items`, spread across at most
-/// [`available_parallelism`] threads, preserving order.
-///
-/// [`available_parallelism`]: std::thread::available_parallelism
-fn solve_in_parallel<T: Sync, R: Send>(items: &[T], solve_one: impl Fn(&T) -> R + Sync) -> Vec<R> {
+/// `n_workers` threads, preserving order.
+fn solve_in_parallel<T: Sync, R: Send>(
+    items: &[T],
+    n_workers: usize,
+    solve_one: impl Fn(&T) -> R + Sync,
+) -> Vec<R> {
     if items.is_empty() {
         return Vec::new();
     }
-    let n_threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(items.len());
+    let n_threads = n_workers.min(items.len());
     let chunk_size = items.len().div_ceil(n_threads);
 
     std::thread::scope(|scope| {
@@ -111,7 +140,7 @@ fn solve_in_parallel<T: Sync, R: Send>(items: &[T], solve_one: impl Fn(&T) -> R 
 
 /// Splits `total_len` frames into overlapping `(start, end)` (end-exclusive)
 /// segment bounds per `config.segment_len`/`config.overlap_len`.
-fn segment_bounds(total_len: usize, config: SegmentedSolveConfig) -> Vec<(usize, usize)> {
+fn segment_bounds(total_len: usize, config: ParallelSolveConfig) -> Vec<(usize, usize)> {
     assert!(
         config.overlap_len < config.segment_len,
         "overlap_len must be smaller than segment_len"
@@ -205,17 +234,18 @@ mod tests {
         state
     }
 
-    fn segmented_config(segment_len: usize, overlap_len: usize) -> SegmentedSolveConfig {
-        SegmentedSolveConfig {
+    fn parallel_config(segment_len: usize, overlap_len: usize) -> ParallelSolveConfig {
+        ParallelSolveConfig {
             segment_len,
             overlap_len,
             overlap_tolerance: 0.01,
+            n_workers: -1,
         }
     }
 
     #[test]
     fn segment_bounds_covers_whole_sequence_with_expected_overlap() {
-        let config = segmented_config(10, 3);
+        let config = parallel_config(10, 3);
         let bounds = segment_bounds(25, config);
 
         assert_eq!(bounds.first().unwrap().0, 0);
@@ -239,7 +269,7 @@ mod tests {
 
     #[test]
     fn segment_bounds_handles_short_and_empty_sequences() {
-        let config = segmented_config(10, 3);
+        let config = parallel_config(10, 3);
         assert_eq!(segment_bounds(7, config), vec![(0, 7)]);
         assert_eq!(segment_bounds(0, config), Vec::<(usize, usize)>::new());
     }
@@ -247,7 +277,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "overlap_len must be smaller than segment_len")]
     fn segment_bounds_rejects_overlap_not_smaller_than_segment_len() {
-        segment_bounds(20, segmented_config(5, 5));
+        segment_bounds(20, parallel_config(5, 5));
     }
 
     #[test]
@@ -269,5 +299,36 @@ mod tests {
 
         let angles: Vec<f32> = stitched.iter().map(|s| s.dof_angles[0]).collect();
         assert_eq!(angles, vec![0.0, 0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn resolve_n_workers_passes_small_positive_values_through_unchanged() {
+        assert_eq!(resolve_n_workers(1), 1);
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        if available > 1 {
+            // Not clipped, since it's within the available count.
+            assert_eq!(resolve_n_workers((available - 1) as isize), available - 1);
+        }
+    }
+
+    #[test]
+    fn resolve_n_workers_clips_positive_values_past_available_cores() {
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(resolve_n_workers(10_000), available);
+    }
+
+    #[test]
+    fn resolve_n_workers_follows_joblib_convention_for_negative_values() {
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(resolve_n_workers(-1), available);
+        assert_eq!(resolve_n_workers(-2), (available - 1).max(1));
+        // Never resolves below 1, however far negative.
+        assert_eq!(resolve_n_workers(-(available as isize) - 100), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "n_workers must not be 0")]
+    fn resolve_n_workers_rejects_zero() {
+        resolve_n_workers(0);
     }
 }

@@ -214,11 +214,36 @@ def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
         true_angles.append((a, a * 0.5))
         sequence.append(observations_for(a, a * 0.5))
 
-    segmented_config = quickik.SegmentedSolveConfig(
-        segment_len=10, overlap_len=3, overlap_tolerance=0.05
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
     )
     states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), sequence, segmented_config
+        tree, quickik.SolverConfig(), sequence, parallel_config
+    )
+
+    assert len(states) == n_frames
+    for state, (a1, a2) in zip(states, true_angles, strict=True):
+        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
+def test_solve_sequence_segmented_parallel_honors_explicit_n_workers(tree):
+    n_frames = 40
+    true_angles = []
+    sequence = []
+    for t in range(n_frames):
+        a = 0.3 * math.sin(t * 0.15)
+        true_angles.append((a, a * 0.5))
+        sequence.append(observations_for(a, a * 0.5))
+
+    # n_workers=1 forces every segment through a single spawned thread,
+    # exercising a different code path than the -1 (all available cores)
+    # used above.
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=1
+    )
+    states = quickik.solve_sequence_segmented_parallel(
+        tree, quickik.SolverConfig(), sequence, parallel_config
     )
 
     assert len(states) == n_frames
