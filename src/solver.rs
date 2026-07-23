@@ -171,11 +171,27 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 self.jtj[(i, i)] += self.config.damping * self.jtj[(i, i)].max(1.0);
             }
 
-            // Update state
-            let delta = nalgebra::linalg::Cholesky::new(self.jtj.clone())
-                .map(|chol| chol.solve(&self.jtr))
-                // no update if all keypoints are missing or if numerically unstable
-                .unwrap_or_else(|| DVector::zeros(state_dim));
+            // Update state. `jtj`'s pre-decomposition values are never read
+            // again after this point (the next iteration immediately zeroes
+            // it), so it's moved into the decomposition in place instead of
+            // cloned, and `unpack()` hands the same allocation back for the
+            // next iteration to reuse -- avoiding a fresh state_dim x
+            // state_dim allocation+copy on every Gauss-Newton iteration.
+            let jtj_owned = std::mem::replace(&mut self.jtj, DMatrix::zeros(0, 0));
+            let delta = match nalgebra::linalg::Cholesky::new(jtj_owned) {
+                Some(chol) => {
+                    let delta = chol.solve(&self.jtr);
+                    self.jtj = chol.unpack();
+                    delta
+                }
+                None => {
+                    // Not positive-definite (numerically unstable): no
+                    // update this iteration. `Cholesky::new` drops the
+                    // matrix it failed on, so reallocate for next time.
+                    self.jtj = DMatrix::zeros(state_dim, state_dim);
+                    DVector::zeros(state_dim)
+                }
+            };
             state.apply_delta(&delta);
 
             if self.has_converged(&delta) {
