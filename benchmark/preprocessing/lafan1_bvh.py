@@ -68,7 +68,7 @@ def _local_rotation(channel_names, values_deg):
     intrinsic axis rotations (scipy's uppercase-axis convention matches
     this directly)."""
     axes = "".join(_AXIS_LETTERS[c[0]] for c in channel_names if c.endswith("rotation"))
-    angles = [v for c, v in zip(channel_names, values_deg) if c.endswith("rotation")]
+    angles = [v for c, v in zip(channel_names, values_deg, strict=True) if c.endswith("rotation")]
     return R.from_euler(axes, angles, degrees=True)
 
 
@@ -94,7 +94,9 @@ class Lafan1Skeleton:
             values = motion_row[start : start + len(channels)]
 
             if j.parent is None:
-                pos_by_axis = dict(zip([c[0] for c in channels if c.endswith("position")], values))
+                pos_by_axis = {
+                    c[0]: v for c, v in zip(channels, values, strict=True) if c.endswith("position")
+                }
                 world_pos = np.array([pos_by_axis["X"], pos_by_axis["Y"], pos_by_axis["Z"]])
                 world_rot = _local_rotation(channels, values)
             else:

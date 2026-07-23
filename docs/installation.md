@@ -26,7 +26,7 @@ git clone https://github.com/NeLy-EPFL/quickik
     pip install pytest && pytest tests/   # runs the binding's own test suite
     ```
 
-    `maturin develop` builds the Rust extension and installs it into your active environment in editable mode, so it rebuilds in place as you change the Rust source.
+    `maturin develop` builds the Rust extension and installs it into your active environment in editable mode, so it rebuilds in place as you change the Rust source. For linting or benchmark plotting rather than the bindings themselves, see [`python-devtools/`](https://github.com/NeLy-EPFL/quickik/blob/main/python-devtools/README.md) instead.
 
 === "C++"
 

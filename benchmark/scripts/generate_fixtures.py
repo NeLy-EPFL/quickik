@@ -40,8 +40,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
 import mujoco as mj
+import numpy as np
 
 FLYGYM_ROOT = Path(__file__).resolve().parents[3] / "flygym"
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
@@ -129,7 +129,7 @@ def build_qpos_addr_map(mj_model, bodyplan: dict):
 
 def set_leg_qpos(base_qpos, qpos_addr, gt_bp_angles_per_leg):
     qpos = base_qpos.copy()
-    for leg, angles in zip(LEGS, gt_bp_angles_per_leg):
+    for leg, angles in zip(LEGS, gt_bp_angles_per_leg, strict=True):
         idx = 0
         for jk in JOINT_KEYS:
             addrs = qpos_addr[(leg, jk)]

@@ -10,7 +10,7 @@ Each language/library's benchmark loops over both bodies on its own and writes o
 - `extern/{kdl,pinocchio,rbdl}/README.md` for each external library's build and run steps.
 - `preprocessing/README.md` for how G1's assets are generated; `scripts/generate_fixtures.py` for the fly's.
 
-Once whichever benchmarks you want are run, aggregate everything into a chart and table per body:
+Once whichever benchmarks you want are run, aggregate everything into a chart and table per body (with [`python-devtools`](../python-devtools/README.md)'s shared venv active, for matplotlib/numpy/scipy):
 
 ```sh
 python plot/plot_comparison.py

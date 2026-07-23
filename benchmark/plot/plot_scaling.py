@@ -17,7 +17,7 @@ threads and work grow together, throughput(n)/throughput(1) ideally equals
 exactly n under that same ideal, so the same "how far below the diagonal"
 reading applies.
 
-Usage:
+Usage (with python-devtools/'s shared venv active -- see its own README.md):
 
     python plot_scaling.py
 """
@@ -60,10 +60,10 @@ def print_table(points):
         for p in points
     ]
     widths = [max(len(row[i]) for row in [header] + rows) for i in range(len(header))]
-    print(" | ".join(h.ljust(w) for h, w in zip(header, widths)))
+    print(" | ".join(h.ljust(w) for h, w in zip(header, widths, strict=True)))
     print("-|-".join("-" * w for w in widths))
     for row in rows:
-        print(" | ".join(c.ljust(w) for c, w in zip(row, widths)))
+        print(" | ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)))
 
 
 def plot_chart(points):
@@ -89,7 +89,7 @@ def plot_chart(points):
 
     ax.plot(n_threads, n_threads, linestyle="--", color="gray", label="Ideal scaling")
     ax.plot(n_threads, speedup, marker="o", color=COLOR, label="QuickIK (Rust)")
-    for x, y in zip(n_threads, speedup):
+    for x, y in zip(n_threads, speedup, strict=True):
         ax.annotate(
             f"{y:.2f}x",
             (x, y),

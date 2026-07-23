@@ -160,7 +160,7 @@ def build_g1_body_plan(neutral_angles):
     # a later joint parented on that same link should point at this node).
     link_to_node_name = {ROOT_LINK: ROOT_LINK}
 
-    for joint_name, neutral_angle in zip(REVOLUTE_JOINT_ORDER, neutral_angles):
+    for joint_name, neutral_angle in zip(REVOLUTE_JOINT_ORDER, neutral_angles, strict=True):
         j = joints[joint_name]
         parent_node = link_to_node_name[j["parent"]]
         node_name = joint_name.removesuffix("_joint")

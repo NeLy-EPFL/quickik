@@ -19,7 +19,6 @@ docs/installation.md):
 import math
 
 import pytest
-
 import quickik
 
 TWO_JOINT_CHAIN_JSON = """
@@ -62,7 +61,10 @@ def no_prior_config():
 
 
 def test_malformed_json_raises():
-    with pytest.raises(BaseException):
+    # PyO3 surfaces the underlying Rust panic as pyo3_runtime.PanicException,
+    # which (deliberately, on PyO3's part) subclasses BaseException, not
+    # Exception -- a bare `except Exception:` in caller code won't catch it.
+    with pytest.raises(BaseException):  # noqa: B017
         quickik.KinematicTree.from_json_str("not valid json")
 
 
@@ -81,7 +83,7 @@ def test_position2d_observation_on_mapperless_solver_raises(tree):
     observations[1] = quickik.KeypointObservation.position_2d([1.0, 0.0], 1.0)
 
     solver = quickik.Solver(tree, quickik.SolverConfig())
-    with pytest.raises(BaseException):
+    with pytest.raises(BaseException):  # noqa: B017 -- see test_malformed_json_raises
         solver.solve(state, observations)
 
 
@@ -209,6 +211,6 @@ def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
     states = quickik.solve_sequence_segmented_parallel(tree, quickik.SolverConfig(), sequence, segmented_config)
 
     assert len(states) == n_frames
-    for state, (a1, a2) in zip(states, true_angles):
+    for state, (a1, a2) in zip(states, true_angles, strict=True):
         assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)

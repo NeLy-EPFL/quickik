@@ -68,5 +68,13 @@ anchor_linenums = true
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.magiclink]
 [project.markdown_extensions.pymdownx.superfences]
+# Without an explicit `slugify`, tab panels get an unreadable auto-numbered
+# id (e.g. "#__tabbed_3_2") instead of a real anchor -- unlike `toc` above,
+# whose header anchors already have a sensible default baked into Python-
+# Markdown itself. `combine_header_slug` (Zensical's own default for this
+# extension) prefixes the tab's own slug with its parent header's, so e.g.
+# "## Quick start" + tab "Python" -> "#quick-start_python".
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
+combine_header_slug = true
+slugify = { object = "pymdownx.slugs.slugify", kwds = { case = "lower" } }

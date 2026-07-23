@@ -1,0 +1,12 @@
+[project]
+name = "python-devtools"
+version = "0.1.0"
+description = "Shared dependencies for this repo's Python-side tooling -- linting, benchmark plotting, and tests. Not a package; nothing outside this directory imports from it."
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.1",
+    "pytest>=9.1.1",
+    "ruff>=0.15.22",
+    "scipy>=1.18.0",
+]

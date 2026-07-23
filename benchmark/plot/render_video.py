@@ -24,11 +24,11 @@ the video ends as soon as either panel's own sequence runs out.
 
 Writes `results/example_clips.mp4` (requires ffmpeg on PATH).
 
-Usage (QuickIK's Python extension must already be built for this interpreter
--- see `../quickik_python/bench.py`'s own docstring; matplotlib is the only
-extra dependency beyond that script's numpy/scipy):
+Usage (with python-devtools/'s shared venv active -- see its own README.md --
+plus QuickIK's Python extension built for that same interpreter; see
+`../quickik_python/bench.py`'s own docstring):
 
-    uv run --with matplotlib python render_video.py
+    python render_video.py
 """
 
 import json
@@ -41,12 +41,11 @@ matplotlib.use("Agg")
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
+import quickik
 from matplotlib import animation
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from scipy.spatial.transform import Rotation as R
-
-import quickik
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
@@ -215,11 +214,17 @@ def prepare_body(name):
     # sets keeps their relative alignment (the actual thing being compared)
     # untouched.
     root_positions = [np.array(s.root_pos) for s in states]
-    mocap_frames = [np.array(f["target_ego"]) - root_pos for f, root_pos in zip(native_frames, root_positions)]
-    fitted_frames = [np.array(list(p.values())) - root_pos for p, root_pos in zip(fitted_positions, root_positions)]
+    mocap_frames = [
+        np.array(f["target_ego"]) - root_pos
+        for f, root_pos in zip(native_frames, root_positions, strict=True)
+    ]
+    fitted_frames = [
+        np.array(list(p.values())) - root_pos
+        for p, root_pos in zip(fitted_positions, root_positions, strict=True)
+    ]
     fitted_bones = [
         np.array([[pos[parent], pos[child]] for parent, child in edges]) - root_pos
-        for pos, root_pos in zip(fitted_positions, root_positions)
+        for pos, root_pos in zip(fitted_positions, root_positions, strict=True)
     ]
 
     if cfg["up_reference"] is not None:
@@ -293,12 +298,12 @@ def render_comparison():
     fig = plt.figure(figsize=(9.6, 5.2), frameon=False)
     fig.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.02, wspace=0.02)
     axes = [fig.add_subplot(1, 2, i + 1, projection="3d") for i in range(len(bodies))]
-    panels = [setup_panel(ax, body, show_legend=(i == 0)) for i, (ax, body) in enumerate(zip(axes, bodies))]
+    panels = [setup_panel(ax, body, show_legend=(i == 0)) for i, (ax, body) in enumerate(zip(axes, bodies, strict=True))]
 
     def update(k):
         t = k / output_fps
         artists = []
-        for (mocap_scatter, fit_scatter, fit_bones), body in zip(panels, bodies):
+        for (mocap_scatter, fit_scatter, fit_bones), body in zip(panels, bodies, strict=True):
             idx = min(int(t * body["display_fps"]), body["n_frames"] - 1)
             mocap_scatter._offsets3d = tuple(body["mocap_frames"][idx].T)
             fit_scatter._offsets3d = tuple(body["fitted_frames"][idx].T)

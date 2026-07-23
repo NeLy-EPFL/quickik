@@ -37,20 +37,19 @@ the fly one doesn't. The root keypoint itself is still always given `Missing`
 at solve time (that's a harness-side convention, not a fixtures one -- see
 `build_observations` in each of the 6 harnesses), matching the fly exactly.
 
-Usage:
+Usage (with python-devtools/'s shared venv active -- see its own README.md):
 
-    uv run --with numpy --with scipy python g1_fixtures.py
+    python g1_fixtures.py
 """
 
 import json
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
-
 from g1_body_plan import NEUTRAL_ANGLES, build_g1_body_plan
 from g1_kinematics import G1Kinematics
 from lafan1_bvh import Lafan1Skeleton, parse_bvh
+from scipy.spatial.transform import Rotation as R
 
 PREPROCESSING_DIR = Path(__file__).resolve().parent
 BENCHMARK_DIR = PREPROCESSING_DIR.parent

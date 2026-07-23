@@ -72,12 +72,8 @@ def build_leg_model(joints: list[dict], leg_prefix: str) -> tuple[pin.Model, int
         last_joint_id = None
         for dof in node["dofs"]:
             axis = np.array(dof["axis"], dtype=float)
-            sign = np.sign(axis[np.argmax(np.abs(axis))]) or 1.0
-            axis_key = tuple(np.round(np.abs(axis) * sign).astype(float))
-            # Normalize axis key to a positive canonical direction, and flip
-            # the joint's sign convention by negating the offset axis vector
-            # instead (Pinocchio's RX/RY/RZ are all +axis; QuickIK allows
-            # signed axes for mirrored left/right legs).
+            # Pinocchio's RX/RY/RZ are all +axis; QuickIK allows signed axes
+            # for mirrored left/right legs, so each sign gets its own case.
             if tuple(axis) == (-1.0, 0.0, 0.0):
                 joint_model = pin.JointModelRX()
                 flip = -1.0

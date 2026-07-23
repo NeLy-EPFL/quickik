@@ -41,3 +41,13 @@ jobs:
       - run: pip install maturin pytest
       - run: cd python && maturin develop --release
       - run: pytest python/tests/
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: cd python-devtools && uv sync
+      # ruff.toml at the root covers python/tests/, benchmark/, and
+      # python-devtools/ itself.
+      - run: cd python-devtools && uv run ruff check ..

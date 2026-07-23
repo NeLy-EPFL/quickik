@@ -34,9 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
-
 import quickik
+from scipy.spatial.transform import Rotation as R
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"

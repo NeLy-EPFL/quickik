@@ -12,7 +12,7 @@ single-chain-only library that can't be reformulated to solve the whole-tree
 problem) is excluded entirely, not just visually de-emphasized, and listed
 separately in the printed table.
 
-Usage:
+Usage (with python-devtools/'s shared venv active -- see its own README.md):
 
     python plot_comparison.py
 """
@@ -168,10 +168,10 @@ def print_table(results, excluded):
         rows.append(row)
 
     widths = [max(len(row[i]) for row in [header] + rows) for i in range(len(header))]
-    print(" | ".join(h.ljust(w) for h, w in zip(header, widths)))
+    print(" | ".join(h.ljust(w) for h, w in zip(header, widths, strict=True)))
     print("-|-".join("-" * w for w in widths))
     for row in rows:
-        print(" | ".join(c.ljust(w) for c, w in zip(row, widths)))
+        print(" | ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)))
 
     if excluded:
         names = ", ".join(r["name"] for r in excluded)
@@ -354,9 +354,9 @@ def plot_chart(results, body):
         ax = axes[metric["row"], metric["col"]]
         key, title, xlabel, unit, small_unit = metric["key"], metric["title"], metric["xlabel"], metric["unit"], metric["small_unit"]
         values = [r.get(key) for r in ordered]
-        bar_names = [n for n, v in zip(names, values) if v is not None]
+        bar_names = [n for n, v in zip(names, values, strict=True) if v is not None]
         bar_values = [v * metric["scale"] for v in values if v is not None]
-        bar_colors = [c for c, v in zip(colors, values) if v is not None]
+        bar_colors = [c for c, v in zip(colors, values, strict=True) if v is not None]
 
         if not bar_values:
             ax.set_title(f"{title}\n(no data)")

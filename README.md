@@ -13,3 +13,5 @@ docs/build.sh serve   # http://localhost:8000
 ```
 
 Not yet published to crates.io or PyPI -- see [`docs/installation.md`](docs/installation.md) for building from a local clone.
+
+Development tooling (ruff, benchmark plotting, tests) lives in [`python-devtools/`](python-devtools/README.md), a shared uv environment separate from the `quickik` package itself.

@@ -1,0 +1,18 @@
+# Applies repo-wide: benchmark/, python/tests/, docs/ code examples (see
+# python-devtools/scripts/lint_docs_examples.py), and python-devtools/ itself.
+# Line length is ruff's own default (88); not overridden.
+
+extend-exclude = [
+    "benchmark/extern/*/eigen-src",
+    "benchmark/extern/*/okd-src",
+    "benchmark/extern/*/rbdl-src",
+    "benchmark/extern/*/install",
+    "benchmark/extern/*/build",
+]
+
+[lint]
+extend-select = [
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
