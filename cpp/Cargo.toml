@@ -1,17 +1,17 @@
 [package]
-name = "fastik-cpp"
-description = "C++ bindings for the FastIK inverse kinematics library"
+name = "quickik-cpp"
+description = "C++ bindings for the QuickIK inverse kinematics library"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [lib]
-name = "fastik_cpp"
+name = "quickik_cpp"
 crate-type = ["staticlib"]
 
 [dependencies]
 cxx = "1"
-fastik_core = { package = "fastik", path = ".." }
+quickik_core = { package = "quickik", path = ".." }
 nalgebra = "0.35"
 
 [build-dependencies]

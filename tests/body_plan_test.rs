@@ -1,4 +1,4 @@
-use fastik::body_plan::KinematicTree;
+use quickik::body_plan::KinematicTree;
 
 fn valid_body_json() -> &'static str {
     r#"{

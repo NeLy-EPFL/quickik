@@ -4,7 +4,7 @@
 // lf_tibia_tarsus (1 dof) -> lf_claw (fixed tip)) as a KDL::Chain and run
 // ChainFkSolverPos_recursive at all-zero joint angles.
 //
-// fastik's own FK convention (see fastik/src/forward.rs::evaluate_frame_at_joint):
+// QuickIK's own FK convention (see quickik/src/forward.rs::evaluate_frame_at_joint):
 //   origin   = parent.origin + parent.rotation * offset_pos
 //   rotation = parent.rotation * offset_quat
 //   for each dof in order: rotation *= AxisAngle(dof.axis_local, angle)
@@ -18,7 +18,7 @@
 // Because Segment::pose(q) = joint.pose(q) * f_tip, and every RotAxis segment
 // here has an Identity f_tip and a joint origin at the local (0,0,0), the
 // *position* of a joint's keypoint is unaffected by that joint's own dofs --
-// exactly matching fastik's semantics where a joint's own rotation only
+// exactly matching QuickIK's semantics where a joint's own rotation only
 // re-orients the frame for its children, never displaces the joint itself.
 
 #include <kdl/chain.hpp>

@@ -1,4 +1,4 @@
-"""Correctness cross-check and throughput/latency benchmark for fastik's
+"""Correctness cross-check and throughput/latency benchmark for quickik's
 Python bindings, mirroring `benchmark/src/{correctness,perf}.rs` (the Rust
 API benchmark) so the two are directly comparable.
 
@@ -6,7 +6,7 @@ Runs against every body listed in `BODIES` below, each with its own
 body-plan + fixtures JSON pair under `assets/` (see `generate_fixtures.py`).
 Requires:
 
-  - fastik's Python extension built for this interpreter (see
+  - quickik's Python extension built for this interpreter (see
     `python/README` or the top-level README's "Python" install section --
     this script does not build it for you).
   - flygym's own venv (mujoco, scipy, flygym) for the real-frame
@@ -15,14 +15,14 @@ Requires:
 Run with flygym's own venv:
 
     cd /path/to/flygym && source .venv/bin/activate
-    python /path/to/fastik/benchmark/fastik_python/bench.py
+    python /path/to/quickik/benchmark/quickik_python/bench.py
 
 One thing the Rust benchmark can do that this one can't, since it's not
-exposed to Python: forward kinematics on its own (`fastik::forward` isn't
-bound). So instead of an independent FK re-check via fastik's own
+exposed to Python: forward kinematics on its own (`quickik::forward` isn't
+bound). So instead of an independent FK re-check via quickik's own
 (unexposed) `evaluate_fwdkin`, this script reimplements forward kinematics
 directly from the JSON body plan (a fresh, independent computation, not
-calling into fastik at all) for the keypoint comparisons below. The
+calling into quickik at all) for the keypoint comparisons below. The
 performance benchmark's single-frame-latency target is one of the fixture's
 own targets (`synthetic_frames[0]`), matching the Rust and C++ benchmarks
 exactly, for a fair cross-language comparison.
@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-import fastik
+import quickik
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
@@ -62,7 +62,7 @@ class BodyContext:
     instead of living in module globals."""
 
     name: str
-    tree: "fastik.KinematicTree"
+    tree: "quickik.KinematicTree"
     fixtures: dict
     joints: list
     leg_joint_names: list
@@ -82,14 +82,14 @@ def build_body_context(name, body_plan, fixtures):
         dof_offsets[j["name"]] = cursor
         cursor += len(j["dofs"])
 
-    tree = fastik.KinematicTree.from_json_file(str(body_plan_path))
+    tree = quickik.KinematicTree.from_json_file(str(body_plan_path))
     return BodyContext(name, tree, fixtures, joints, leg_joint_names, dof_offsets)
 
 
 # -----------------------------------------------------------------------------
 # Independent forward kinematics, straight from the JSON body plan -- does not
-# call into fastik at all, so it's a genuine cross-check of fastik's solved
-# state, mirroring the Rust benchmark's use of fastik's own (Python-unexposed)
+# call into quickik at all, so it's a genuine cross-check of quickik's solved
+# state, mirroring the Rust benchmark's use of quickik's own (Python-unexposed)
 # evaluate_fwdkin for the same purpose.
 # -----------------------------------------------------------------------------
 def forward_kinematics(ctx, dof_angles, root_pos, root_rot_wxyz):
@@ -116,8 +116,8 @@ def forward_kinematics(ctx, dof_angles, root_pos, root_rot_wxyz):
 
 
 def build_observations(target_ego):
-    obs = [fastik.KeypointObservation.missing()]
-    obs += [fastik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
+    obs = [quickik.KeypointObservation.missing()]
+    obs += [quickik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
     return obs
 
 
@@ -135,8 +135,8 @@ def run_correctness(ctx):
 
     print("== Synthetic exact-fit frames (bug hunt) ==")
     print(f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}")
-    default_solver = fastik.Solver(tree, fastik.SolverConfig())
-    zero_reg_solver = fastik.Solver(tree, fastik.SolverConfig(neutral_pose_weight=0.0))
+    default_solver = quickik.Solver(tree, quickik.SolverConfig())
+    zero_reg_solver = quickik.Solver(tree, quickik.SolverConfig(neutral_pose_weight=0.0))
     for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
         ground_truth = np.concatenate(
@@ -144,13 +144,13 @@ def run_correctness(ctx):
         )
         obs = build_observations(target)
 
-        state = fastik.State.neutral_pose(tree)
+        state = quickik.State.neutral_pose(tree)
         default_solver.solve(state, obs)
         solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
         residual = np.linalg.norm(solved_pts - target, axis=1)
         angle_err = angle_error_deg(state.dof_angles, ground_truth)
 
-        state0 = fastik.State.neutral_pose(tree)
+        state0 = quickik.State.neutral_pose(tree)
         zero_reg_solver.solve(state0, obs)
         angle_err0 = angle_error_deg(state0.dof_angles, ground_truth)
 
@@ -165,30 +165,30 @@ def run_correctness(ctx):
     )
 
     print("== Real mocap frames (cross-solver vs. flygym.ik) ==")
-    seq = fastik.SequenceSolver(tree, fastik.SolverConfig())
+    seq = quickik.SequenceSolver(tree, quickik.SolverConfig())
     # Per-frame (rms, max) first, then aggregate across frames -- matching
     # correctness.rs's residual_stats/rms_of/mean/max_of exactly, so the two
     # benchmarks' numbers are directly comparable (a flat rms/mean over every
     # keypoint pooled together is a *different*, not-quite-comparable
     # statistic from a per-frame-then-aggregated one).
-    fastik_rms, fastik_max, cross_rms, cross_max = [], [], [], []
+    quickik_rms, quickik_max, cross_rms, cross_max = [], [], [], []
     for frame in ctx.fixtures["real_frames"]:
         target = np.array(frame["target_ego"])
         state = seq.solve_frame(build_observations(target))
         solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
         dists = np.linalg.norm(solved_pts - target, axis=1)
-        fastik_rms.append(np.sqrt((dists**2).mean()))
-        fastik_max.append(dists.max())
+        quickik_rms.append(np.sqrt((dists**2).mean()))
+        quickik_max.append(dists.max())
         reconstructed = frame.get("flygym_ik_reconstructed_ego")
         if reconstructed is not None:
             cross_dists = np.linalg.norm(solved_pts - np.array(reconstructed), axis=1)
             cross_rms.append(np.sqrt((cross_dists**2).mean()))
             cross_max.append(cross_dists.max())
-    fastik_rms, fastik_max = np.array(fastik_rms), np.array(fastik_max)
+    quickik_rms, quickik_max = np.array(quickik_rms), np.array(quickik_max)
     print(f"over {len(ctx.fixtures['real_frames'])} frames:")
     print(
-        f"  fastik fit residual to target:      "
-        f"rms={np.sqrt((fastik_rms**2).mean()):.5f}  mean={fastik_rms.mean():.5f}  max={fastik_max.max():.5f}"
+        f"  quickik fit residual to target:      "
+        f"rms={np.sqrt((quickik_rms**2).mean()):.5f}  mean={quickik_rms.mean():.5f}  max={quickik_max.max():.5f}"
     )
     if cross_rms:
         cross_rms, cross_max = np.array(cross_rms), np.array(cross_max)
@@ -206,7 +206,7 @@ def run_correctness(ctx):
 def summarize(label, samples_sec):
     """Prints the usual latency/throughput summary and returns the mean in
     microseconds, for callers that also want the number for
-    results/fastik-python-<body>.json."""
+    results/quickik-python-<body>.json."""
     samples_us = np.sort(np.array(samples_sec) * 1e6)
     n = len(samples_us)
     mean = samples_us.mean()
@@ -223,15 +223,15 @@ def bench_single_frame_latency(tree, target, n_calls, config):
     """Single-frame latency: a fresh State.neutral_pose() solved against a
     fixed real target every call (no warm start) -- the same fixture-derived
     target used by the Rust and C++ benchmarks."""
-    solver = fastik.Solver(tree, config)
+    solver = quickik.Solver(tree, config)
     obs = build_observations(target)
     for _ in range(1000):
-        state = fastik.State.neutral_pose(tree)
+        state = quickik.State.neutral_pose(tree)
         solver.solve(state, obs)
 
     samples = []
     for _ in range(n_calls):
-        state = fastik.State.neutral_pose(tree)
+        state = quickik.State.neutral_pose(tree)
         t0 = time.perf_counter()
         solver.solve(state, obs)
         samples.append(time.perf_counter() - t0)
@@ -239,11 +239,11 @@ def bench_single_frame_latency(tree, target, n_calls, config):
 
 
 def bench_solve_sequence(tree, all_obs, config):
-    seq = fastik.SequenceSolver(tree, config)
+    seq = quickik.SequenceSolver(tree, config)
     for obs in all_obs:
         seq.solve_frame(obs)
 
-    timed_seq = fastik.SequenceSolver(tree, config)
+    timed_seq = quickik.SequenceSolver(tree, config)
     samples = []
     for obs in all_obs:
         t0 = time.perf_counter()
@@ -271,11 +271,11 @@ def tiled_native_rate_sequence(ctx, length):
 
 
 def bench_multithread_sequence_throughput(tree, sequence):
-    config = fastik.SolverConfig()
-    segmented_config = fastik.SegmentedSolveConfig(SEGMENT_LEN, OVERLAP_LEN, 0.05)
-    fastik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)  # warm up
+    config = quickik.SolverConfig()
+    segmented_config = quickik.SegmentedSolveConfig(SEGMENT_LEN, OVERLAP_LEN, 0.05)
+    quickik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)  # warm up
     t0 = time.perf_counter()
-    fastik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)
+    quickik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)
     return time.perf_counter() - t0
 
 
@@ -286,10 +286,10 @@ def write_results_json(
     single_thread_throughput_fps,
     multi_thread_throughput_fps,
 ):
-    """Writes plot/results/fastik-python-<body>.json for
+    """Writes plot/results/quickik-python-<body>.json for
     plot/plot_comparison.py to pick up."""
     results = {
-        "name": "fastik-python",
+        "name": "quickik-python",
         "body": body,
         "language": "python",
         "formulation": "whole-tree",
@@ -302,24 +302,24 @@ def write_results_json(
     }
     out_dir = BENCHMARK_DIR / "plot" / "results"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"fastik-python-{body}.json").write_text(json.dumps(results, indent=2))
+    (out_dir / f"quickik-python-{body}.json").write_text(json.dumps(results, indent=2))
 
 
 def run_performance(ctx):
     tree = ctx.tree
-    print(f"fastik Python-bindings benchmark (state_dim={tree.n_dofs + 6})\n")
+    print(f"quickik Python-bindings benchmark (state_dim={tree.n_dofs + 6})\n")
 
     # Same fixture-derived target used by the Rust and C++ benchmarks, so
     # this number is directly comparable across all three.
     target = np.array(ctx.fixtures["synthetic_frames"][0]["target_ego"])
     print("-- single-frame time (latency), default config (adaptive early stop) --")
     single_frame_latency_us = summarize(
-        "solve()", bench_single_frame_latency(tree, target, 20_000, fastik.SolverConfig())
+        "solve()", bench_single_frame_latency(tree, target, 20_000, quickik.SolverConfig())
     )
 
     # Early stop disabled (tolerances = 0), so every call runs the full
     # n_iterations -- the worst case if a frame never converges early.
-    max_iterations_config = fastik.SolverConfig(position_tolerance=0.0, angle_tolerance=0.0)
+    max_iterations_config = quickik.SolverConfig(position_tolerance=0.0, angle_tolerance=0.0)
     print(f"\n-- single-frame time (latency), early stop disabled ({max_iterations_config.n_iterations} iterations) --")
     single_frame_latency_max_us = summarize(
         "solve() (forced max iterations)", bench_single_frame_latency(tree, target, 20_000, max_iterations_config)
@@ -329,7 +329,7 @@ def run_performance(ctx):
     native_obs = [build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]]
     single_thread_mean_us = summarize(
         "SequenceSolver.solve_frame",
-        bench_solve_sequence(tree, native_obs, fastik.SolverConfig()),
+        bench_solve_sequence(tree, native_obs, quickik.SolverConfig()),
     )
 
     print(

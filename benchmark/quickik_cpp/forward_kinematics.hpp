@@ -1,5 +1,5 @@
 // An independent forward-kinematics replica, computed directly from the JSON
-// body plan (not calling into fastik at all), mirroring
+// body plan (not calling into quickik at all), mirroring
 // scripts/bench_python.py's own `forward_kinematics()` -- used to cross-check
 // the C++ bindings' solved `State`, since FK isn't exposed to C++ (same as
 // Python; see cpp/src/lib.rs's module docs).
@@ -19,7 +19,7 @@ struct Vec3 {
   float norm() const { return std::sqrt(x * x + y * y + z * z); }
 };
 
-// Hamilton quaternion, (w, x, y, z), matching fastik's own convention
+// Hamilton quaternion, (w, x, y, z), matching quickik's own convention
 // (nalgebra::UnitQuaternion, serialized in JSON body plans as [w, x, y, z]).
 struct Quat {
   float w = 1, x = 0, y = 0, z = 0;

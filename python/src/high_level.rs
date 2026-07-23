@@ -11,9 +11,9 @@ use crate::state::State;
 /// starting each frame from the previous frame's converged pose. See
 /// [`Solver`](crate::solver::Solver) for `mapper` and `config` semantics
 /// (both flattened here from Rust's nested `solver.solver`).
-#[pyclass(module = "fastik")]
+#[pyclass(module = "quickik")]
 pub(crate) struct SequenceSolver {
-    inner: fastik_core::high_level::SequenceSolver<Mapper>,
+    inner: quickik_core::high_level::SequenceSolver<Mapper>,
     config: Py<SolverConfig>,
     mapper: Option<Mapper>,
 }
@@ -32,7 +32,7 @@ impl SequenceSolver {
     ) -> PyResult<Self> {
         let mapper = extract_mapper(mapper.as_ref())?;
         Ok(SequenceSolver {
-            inner: fastik_core::high_level::SequenceSolver::new(
+            inner: quickik_core::high_level::SequenceSolver::new(
                 kinematic_tree.inner,
                 config.as_rust(mapper),
             ),
@@ -107,10 +107,10 @@ impl SequenceSolver {
 }
 
 /// Configuration for [`solve_sequence_segmented_parallel`].
-#[pyclass(module = "fastik", from_py_object, frozen)]
+#[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
 pub(crate) struct SegmentedSolveConfig {
-    inner: fastik_core::high_level::SegmentedSolveConfig,
+    inner: quickik_core::high_level::SegmentedSolveConfig,
 }
 
 #[pymethods]
@@ -123,7 +123,7 @@ impl SegmentedSolveConfig {
     #[new]
     fn new(segment_len: usize, overlap_len: usize, overlap_tolerance: f32) -> Self {
         SegmentedSolveConfig {
-            inner: fastik_core::high_level::SegmentedSolveConfig {
+            inner: quickik_core::high_level::SegmentedSolveConfig {
                 segment_len,
                 overlap_len,
                 overlap_tolerance,
@@ -149,7 +149,7 @@ pub(crate) fn solve_sequence_segmented_parallel(
     let sequence: Vec<Vec<_>> = sequence.into_iter().map(extract_observations).collect();
     Ok(py
         .detach(|| {
-            fastik_core::high_level::solve_sequence_segmented_parallel(
+            quickik_core::high_level::solve_sequence_segmented_parallel(
                 &kinematic_tree.inner,
                 config,
                 &sequence,

@@ -3,10 +3,10 @@ use pyo3::prelude::*;
 use crate::body_plan::KinematicTree;
 
 /// The pose being solved for.
-#[pyclass(module = "fastik", from_py_object)]
+#[pyclass(module = "quickik", from_py_object)]
 #[derive(Clone)]
 pub(crate) struct State {
-    pub(crate) inner: fastik_core::state::State,
+    pub(crate) inner: quickik_core::state::State,
 }
 
 #[pymethods]
@@ -15,7 +15,7 @@ impl State {
     #[staticmethod]
     fn neutral_pose(kinematic_tree: KinematicTree) -> Self {
         State {
-            inner: fastik_core::state::State::neutral_pose(kinematic_tree.inner),
+            inner: quickik_core::state::State::neutral_pose(kinematic_tree.inner),
         }
     }
 

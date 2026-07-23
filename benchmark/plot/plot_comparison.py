@@ -23,7 +23,7 @@ from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
-# fastik/RBDL/Pinocchio all cap their Gauss-Newton solve at this many
+# QuickIK/RBDL/Pinocchio all cap their Gauss-Newton solve at this many
 # iterations by default (early-stop tolerances usually trigger sooner); KDL
 # uses a higher nominal cap but converges within the same range in practice
 # (see extern/kdl/README.md).
@@ -95,9 +95,9 @@ CAP_MULTIPLE = 3
 # Explicit display order (not alphabetical): language variants of the same
 # library grouped together, fastest-per-library first.
 ORDER = [
-    "fastik-rust",
-    "fastik-cpp",
-    "fastik-python",
+    "quickik-rust",
+    "quickik-cpp",
+    "quickik-python",
     "rbdl",
     "rbdl-python",
     "pinocchio-cpp",
@@ -105,16 +105,16 @@ ORDER = [
     "kdl",
 ]
 DISPLAY_NAMES = {
-    "fastik-rust": "FastIK (Rust)",
-    "fastik-python": "FastIK (Python)",
-    "fastik-cpp": "FastIK (C++)",
+    "quickik-rust": "QuickIK (Rust)",
+    "quickik-python": "QuickIK (Python)",
+    "quickik-cpp": "QuickIK (C++)",
     "kdl": "KDL",
     "pinocchio": "Pinocchio (Python)",
     "pinocchio-cpp": "Pinocchio (C++)",
     "rbdl": "RBDL (C++)",
     "rbdl-python": "RBDL (Python)",
 }
-FASTIK_COLOR = "tab:orange"
+QUICKIK_COLOR = "#4051b5"
 OTHER_COLOR = "#888888"
 TEXT_NUMBER_FONTSIZE = 8
 # Open Sans isn't bundled with matplotlib (unlike DejaVu Sans, its default);
@@ -136,7 +136,7 @@ def load_results():
     all_results = []
     for path in sorted(RESULTS_DIR.glob("*.json")):
         data = json.loads(path.read_text())
-        # fastik-scaling.json is a list of weak-scaling data points (see
+        # quickik-scaling.json is a list of weak-scaling data points (see
         # plot_scaling.py), not a single-library result -- skip it here.
         if isinstance(data, dict):
             all_results.append(data)
@@ -342,7 +342,7 @@ def plot_chart(results, body):
     # results is already in ORDER; reversed for barh so it reads top-to-bottom.
     ordered = list(reversed(results))
     names = [DISPLAY_NAMES.get(r["name"], r["name"]) for r in ordered]
-    colors = [FASTIK_COLOR if r["name"].startswith("fastik-") else OTHER_COLOR for r in ordered]
+    colors = [QUICKIK_COLOR if r["name"].startswith("quickik-") else OTHER_COLOR for r in ordered]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 7))
     # Manually tuned for this 2x2 layout: top=0.84 leaves room for the

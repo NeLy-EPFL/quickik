@@ -19,7 +19,7 @@ compromise: RBDL's native `JointTypeFloatingBase` (quaternion joint) crashes
 header comment), so the free-floating thorax root is built as
 `JointTypeTranslationXYZ` + `JointTypeEulerZYX` in series instead. Solver
 tuning (`lambda=1e-6, max_steps=10, step_tol=1e-3`) is copied verbatim from
-`bench_rbdl.cpp` -- literally fastik's own `SolverConfig::default()` values.
+`bench_rbdl.cpp` -- literally QuickIK's own `SolverConfig::default()` values.
 RBDL's own defaults (`max_steps=300, step_tol=1e-10`) are far tighter than
 this problem needs and burn far more time for the same accuracy on real,
 imperfectly-fittable mocap data.
@@ -27,7 +27,7 @@ imperfectly-fittable mocap data.
 Run with the dedicated Python 3.12 venv built for the RBDL Cython wrapper
 (see README.md):
 
-    cd /path/to/fastik/benchmark/extern/rbdl
+    cd /path/to/quickik/benchmark/extern/rbdl
     .venv312/bin/python bench_rbdl.py
 """
 
@@ -77,7 +77,7 @@ def build_model(body_plan_path):
         model: the `rbdl.Model`.
         keypoint_body: length-31 list of RBDL body ids, one per JSON joint
             (index 0 is the thorax root -- unused as an IK target, matching
-            fastik's `Missing`-root convention).
+            QuickIK's `Missing`-root convention).
         keypoint_point: length-31 list of length-3 numpy arrays, the local
             point on `keypoint_body[i]` representing joint i's own
             (pre-own-rotation) position.
@@ -297,7 +297,7 @@ def bench_single_thread_sequence(model, keypoint_body, keypoint_point, q_neutral
 # Multi-thread ("multi-process") sequence throughput -----------------------
 # Python's GIL means CPU-bound Cython/RBDL code can't run in real parallel
 # threads, so this uses multiprocessing (separate processes) instead of
-# fastik's in-process thread pool -- same approach as
+# QuickIK's in-process thread pool -- same approach as
 # ../pinocchio/bench_pinocchio.py's bench_multithread_sequence_throughput.
 MULTITHREAD_N_PROCESSES = 8
 CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
@@ -367,7 +367,7 @@ def write_results_json(
             "instead of RBDL's native JointTypeFloatingBase, which crashes "
             "InverseKinematicsConstraintSet -- an upstream bug) and "
             "solver tuning (lambda=1e-6, max_steps=10, step_tol=1e-3, literally "
-            "fastik's own SolverConfig::default() values) are copied verbatim "
+            "QuickIK's own SolverConfig::default() values) are copied verbatim "
             "from bench_rbdl.cpp for an apples-to-apples Python-vs-C++ "
             "comparison. All 30 leg keypoints are fit jointly in one "
             "InverseKinematicsCS() call per frame, same as the C++ benchmark -- "

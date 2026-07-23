@@ -1,4 +1,4 @@
-"""Converts the Unitree G1 URDF into fastik's body-plan JSON schema (the same
+"""Converts the Unitree G1 URDF into QuickIK's body-plan JSON schema (the same
 schema as `benchmark/assets/neuromechfly_ypr_legs.json` -- see
 `benchmark/scripts/generate_fixtures.py`'s docstring and `src/body_plan.rs`):
 
@@ -25,7 +25,7 @@ the fly's arbitrary "model units", there's no reason not to use G1's actual
 dimensions). All `limits` are written as `null` (unbounded), matching every
 other body plan in this repo: RBDL/KDL's own benchmarks specifically rely on
 `limits: null` to skip joint-limit clamping (see ../extern/kdl/bench_kdl.cpp's
-comment), and fastik's own `State` setter clamps to `limits` when present, so
+comment), and QuickIK's own `State` setter clamps to `limits` when present, so
 introducing real bounds here would silently change solver behavior relative
 to the other libraries' benchmarks.
 

@@ -1,11 +1,11 @@
 [package]
-name = "fastik"
+name = "quickik"
 description = "Fast inverse kinematics library"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["python", "cpp", "benchmark/fastik_rust", "benchmark/fastik_scaling"]
+members = ["python", "cpp", "benchmark/quickik_rust", "benchmark/quickik_scaling"]
 
 [dependencies]
 log = "0.4"

@@ -1,26 +1,26 @@
-//! Consolidated throughput/latency benchmark for `fastik`'s Rust API: single-
+//! Consolidated throughput/latency benchmark for `quickik`'s Rust API: single-
 //! frame latency, single-thread sequence throughput, and multi-thread
 //! sequence throughput -- all at the default config (early stopping via
 //! `position_tolerance`/`angle_tolerance` enabled, i.e. `n_iterations` acts as
 //! a ceiling rather than a fixed cost). The weak-scaling sweep lives in
-//! `../../fastik_scaling`, reusing this module's tiling/multi-thread-
+//! `../../quickik_scaling`, reusing this module's tiling/multi-thread-
 //! throughput helpers (`pub` below for that reason).
 
 use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fastik::body_plan::KinematicTree;
-use fastik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
-use fastik::observation::KeypointObservation;
-use fastik::solver::{Solver, SolverConfig};
-use fastik::state::State;
+use quickik::body_plan::KinematicTree;
+use quickik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+use quickik::observation::KeypointObservation;
+use quickik::solver::{Solver, SolverConfig};
+use quickik::state::State;
 
 use crate::correctness::build_observations;
 use crate::fixtures::{Fixtures, NativeRateFrame};
 
 /// Frames per segment/thread for both the multi-thread throughput benchmark
-/// and `fastik_scaling`'s weak-scaling sweep.
+/// and `quickik_scaling`'s weak-scaling sweep.
 pub const SEGMENT_LEN: usize = 200;
 pub const OVERLAP_LEN: usize = 20;
 /// Thread count for the main "multi-thread sequence throughput" metric --
@@ -28,7 +28,7 @@ pub const OVERLAP_LEN: usize = 20;
 /// the machine/taskset state (sizing the sequence to exactly this many
 /// segments also naturally caps `solve_sequence_segmented_parallel`'s own
 /// thread spawning at this count, via its `available_parallelism().min(n_segments)`).
-/// See `../../fastik_scaling` for the separate 1/2/4/8/16 sweep.
+/// See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
 const MULTITHREAD_N_THREADS: usize = 8;
 
 /// Total frame count that `solve_sequence_segmented_parallel`'s own
@@ -46,7 +46,7 @@ fn percentile(sorted: &[Duration], p: f64) -> Duration {
 }
 
 /// Prints the usual latency/throughput summary and returns the mean, for
-/// callers that also want the number for `results/fastik-rust.json`.
+/// callers that also want the number for `results/quickik-rust.json`.
 fn summarize(label: &str, mut samples: Vec<Duration>) -> Duration {
     samples.sort();
     let n = samples.len();
@@ -162,7 +162,7 @@ pub fn bench_multithread_sequence_throughput(
 }
 
 pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
-    println!("fastik Rust benchmark (state_dim={})\n", tree.state_dim());
+    println!("quickik Rust benchmark (state_dim={})\n", tree.state_dim());
 
     // Same fixture-derived target used by the Python and C++ benchmarks, so
     // this number is directly comparable across all three.
@@ -219,7 +219,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     );
 }
 
-/// Writes `../plot/results/fastik-rust-<body>.json` for
+/// Writes `../plot/results/quickik-rust-<body>.json` for
 /// `../plot/plot_comparison.py` to pick up.
 fn write_results_json(
     body: &str,
@@ -229,7 +229,7 @@ fn write_results_json(
     multi_thread_throughput_fps: f64,
 ) {
     let results = serde_json::json!({
-        "name": "fastik-rust",
+        "name": "quickik-rust",
         "body": body,
         "language": "rust",
         "formulation": "whole-tree",
@@ -242,7 +242,7 @@ fn write_results_json(
     });
     let out_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plot/results");
     std::fs::create_dir_all(&out_dir).expect("failed to create ../plot/results");
-    let out_path = out_dir.join(format!("fastik-rust-{body}.json"));
+    let out_path = out_dir.join(format!("quickik-rust-{body}.json"));
     std::fs::write(&out_path, serde_json::to_string_pretty(&results).unwrap())
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_path.display()));
 }

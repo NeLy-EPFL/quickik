@@ -13,13 +13,13 @@ fn main() {
 
     cxx_build::bridge("src/lib.rs")
         .flag_if_supported("-std=c++17")
-        .compile("fastik-cpp-bridge");
+        .compile("quickik-cpp-bridge");
 
     let include_dir = manifest_dir.join("include");
     fs::create_dir_all(include_dir.join("rust")).unwrap();
     fs::copy(
-        out_dir.join("cxxbridge/include/fastik-cpp/src/lib.rs.h"),
-        include_dir.join("fastik.h"),
+        out_dir.join("cxxbridge/include/quickik-cpp/src/lib.rs.h"),
+        include_dir.join("quickik.h"),
     )
     .unwrap();
     fs::copy(
@@ -31,8 +31,8 @@ fn main() {
     let lib_dir = manifest_dir.join("lib");
     fs::create_dir_all(&lib_dir).unwrap();
     fs::copy(
-        out_dir.join("libfastik-cpp-bridge.a"),
-        lib_dir.join("libfastik-cpp-bridge.a"),
+        out_dir.join("libquickik-cpp-bridge.a"),
+        lib_dir.join("libquickik-cpp-bridge.a"),
     )
     .unwrap();
 

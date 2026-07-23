@@ -1,6 +1,6 @@
 // Throughput/latency benchmark for Orocos KDL, mirroring
-// ../../fastik_rust/src/perf.rs and ../../fastik_cpp/bench_cpp.cpp so all
-// three (plus fastik-python) are directly comparable. See ../../fastik_cpp/
+// ../../quickik_rust/src/perf.rs and ../../quickik_cpp/bench_cpp.cpp so all
+// three (plus quickik-python) are directly comparable. See ../../quickik_cpp/
 // for the shared, dependency-free json.hpp / forward_kinematics.hpp copied
 // into this directory (per that file's own header comment on why an
 // independent FK/JSON reader is used at all).
@@ -8,17 +8,17 @@
 // -----------------------------------------------------------------------
 // Modeling compromises (see README.md for the long version):
 //
-// 1. Floating base: KDL has no native 6-DOF floating joint, so fastik's
+// 1. Floating base: KDL has no native 6-DOF floating joint, so QuickIK's
 //    free-floating "thorax" root (parametrized as a translation + a
 //    singularity-free unit quaternion) is represented here as 6 scalar
 //    joints in series -- TransX, TransY, TransZ, RotZ, RotY, RotX -- i.e. a
 //    sequential Euler-angle-like parametrization. This is functionally
 //    workable (same reachable pose space, modulo gimbal lock) but not
-//    mathematically identical to fastik's quaternion root.
+//    mathematically identical to QuickIK's quaternion root.
 //
 // 2. Position-only IK with a full-SE(3) solver: `TreeIkSolverPos_NR_JL`
 //    (built on `TreeIkSolverVel_wdls`) solves for full 6D pose (position +
-//    orientation) per endpoint, but fastik only fits 3D keypoint positions.
+//    orientation) per endpoint, but QuickIK only fits 3D keypoint positions.
 //    We zero out the 3 rotational rows of the task-space weighting matrix
 //    (`TreeIkSolverVel_wdls::setWeightTS`) for every endpoint, so orientation
 //    error never drives the solve and the target orientation we supply is a
@@ -27,7 +27,7 @@
 //
 // 3. Every joint in the JSON body plan is added as a named tree segment at
 //    its *own* local origin (before its own dof rotations are applied,
-//    exactly matching fastik's convention that a joint's own rotation only
+//    exactly matching QuickIK's convention that a joint's own rotation only
 //    re-orients its children, never displaces itself -- see
 //    kdl_leg_fk_test.cpp's header comment) so every one of the 30 non-root
 //    joints can be used as both an IK target and an FK query point.
@@ -42,7 +42,7 @@
 //    below reimplements the same per-iteration math (call the velocity
 //    solver, apply the update) directly against `TreeIkSolverVel_wdls`, and
 //    adds the step-size check `TreeIkSolverPos_NR_JL` lacks: max abs
-//    component of the per-iteration joint delta, matching fastik's own
+//    component of the per-iteration joint delta, matching QuickIK's own
 //    `position_tolerance`/`angle_tolerance` semantics exactly.
 
 #include <kdl/frames.hpp>
@@ -86,7 +86,7 @@ using KDL::diff;
 
 constexpr size_t kFloatingBaseDofs = 6;
 constexpr unsigned int kMaxIter = 100;
-// Matches fastik's own default `position_tolerance`/`angle_tolerance` (see
+// Matches QuickIK's own default `position_tolerance`/`angle_tolerance` (see
 // ../../src/solver.rs's `SolverConfig::default()`) -- see file header note 4
 // for why this gates our own step-size check, not `TreeIkSolverPos_NR_JL`'s
 // (non-functional, for this data) residual check.
@@ -98,7 +98,7 @@ constexpr double kLambda = 0.05;
 
 // A built KDL::Tree for the neuromechfly_ypr_legs body plan, plus the
 // bookkeeping needed to (a) address each non-root joint as an IK
-// target/FK query segment and (b) lay out q vectors the same way fastik's
+// target/FK query segment and (b) lay out q vectors the same way QuickIK's
 // flat dof_angles array does (see build_model()'s comment).
 struct KdlModel {
   Tree tree;
@@ -114,13 +114,13 @@ struct KdlModel {
 // joint as (Fixed offset segment) + (one RotAxis segment per dof), hooked
 // onto its parent's *last* segment (which carries the parent's full
 // rotation, needed to place this joint's own offset correctly) -- see
-// kdl_leg_fk_test.cpp for why this exactly reproduces fastik's FK.
+// kdl_leg_fk_test.cpp for why this exactly reproduces QuickIK's FK.
 //
 // Because Tree::addSegment only assigns a q-vector slot to non-Fixed
 // joints, and we add segments in exactly JSON order (floating base first,
 // then each joint's dofs in order), the resulting JntArray layout is
-// [6 floating-base dofs][42 real dofs in fastik's own dof_offset order] --
-// i.e. real dof `d` (0-indexed, fastik's flat numbering) lives at KDL q
+// [6 floating-base dofs][42 real dofs in QuickIK's own dof_offset order] --
+// i.e. real dof `d` (0-indexed, QuickIK's flat numbering) lives at KDL q
 // index `kFloatingBaseDofs + d`.
 KdlModel build_model(const BodyPlan &plan) {
   KdlModel m;
@@ -228,7 +228,7 @@ JntArray solve(SolverBundle &sb, const JntArray &q_init, const Frames &target, u
   return q;
 }
 
-// Flat, in-fastik-dof-order neutral angles (BodyPlan itself doesn't carry
+// Flat, in-quickik-dof-order neutral angles (BodyPlan itself doesn't carry
 // them -- only dof axes -- so read them directly from the JSON here).
 std::vector<double> load_neutral_angles(const std::string &path) {
   Json root = parse_json_file(path);
@@ -248,7 +248,7 @@ std::vector<Vec3> to_vec3s(const Json &target_ego) {
 
 // Builds the IK target map: keypoint_segment[i+1] -> Frame(target position,
 // don't-care orientation) for each of the 30 non-root joints, matching
-// fastik's convention of a `Missing` root observation (see file header
+// QuickIK's convention of a `Missing` root observation (see file header
 // comment #2 for why orientation is a don't-care here).
 Frames build_target_frames(const KdlModel &model, const std::vector<Vec3> &target_ego) {
   Frames out;
@@ -316,7 +316,7 @@ std::vector<double> bench_sequence(SolverBundle &sb, const JntArray &q_neutral, 
 // Metric 3: multi_thread_throughput_fps -- a longer tiled sequence split
 // into kNThreads contiguous, roughly-equal chunks, each solved on its own
 // std::thread: warm-started within the chunk, cold (neutral pose) at the
-// chunk's start. Simplified vs. fastik's overlap-stitched segmented solve
+// chunk's start. Simplified vs. QuickIK's overlap-stitched segmented solve
 // (see README.md's "notes" caveat) -- just plain contiguous chunking, since
 // KDL has no built-in parallel solve to mirror.
 constexpr size_t kNThreads = 8;
@@ -365,27 +365,27 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
       "Orocos KDL has no native floating-base joint or "
       "position-only-IK task; the free-floating root is modeled as 6 "
       "scalar joints in series (TransX/Y/Z, RotZ/Y/X -- a sequential "
-      "Euler-like parametrization, not fastik's singularity-free "
+      "Euler-like parametrization, not QuickIK's singularity-free "
       "quaternion), and position-only fitting is emulated by zeroing the "
       "3 rotational rows of TreeIkSolverVel_wdls's task-space weight "
       "matrix per endpoint. Uses a hand-written outer loop (not KDL's own "
       "TreeIkSolverPos_NR_JL, whose only early-stop -- a combined "
       "residual norm over all endpoints -- never triggers on real, "
       "imperfectly-fittable mocap data, so it silently always burns the "
-      "full iteration cap) adding a fastik-tolerance-matched step-size "
+      "full iteration cap) adding a quickik-tolerance-matched step-size "
       "early-stop instead, cutting mean iteration count from the full cap "
       "to ~7 on the fly body with no change in residual accuracy. KDL is "
-      "still far slower than fastik/RBDL on this workload, though -- its "
+      "still far slower than quickik/RBDL on this workload, though -- its "
       "per-iteration cost (a dense SVD over the task-space Jacobian) is "
-      "inherently much higher than RBDL's/fastik's normal-equations solve, "
+      "inherently much higher than RBDL's/quickik's normal-equations solve, "
       "a genuine algorithmic difference, not a tuning artifact. "
       "multi_thread_throughput_fps "
       "uses simple contiguous chunking (8 independent, "
       "internally-warm-started, externally-cold-started chunks), not "
-      "fastik's overlap-stitched segmented solve, since KDL has no "
+      "QuickIK's overlap-stitched segmented solve, since KDL has no "
       "parallel solve path to mirror. single_frame_latency_max_us forces "
       "max_iter=10 (not this file's own kMaxIter=100 ceiling) so the "
-      "forced-worst-case number is comparable to fastik/RBDL/Pinocchio's, "
+      "forced-worst-case number is comparable to quickik/RBDL/Pinocchio's, "
       "which all cap at 10.";
   if (body == "g1") {
     notes +=
@@ -449,7 +449,7 @@ void run_body(const BodyConfig &body, const std::filesystem::path &assets_dir) {
       summarize("CartToJnt() (cold)", bench_single_frame_latency(sb, q_neutral, target_frames, 20000, 1000));
 
   // step_tol=0 disables early stopping; max_iter is forced to 10 here (not
-  // this file's own kMaxIter=100) to match fastik/RBDL/Pinocchio's shared
+  // this file's own kMaxIter=100) to match QuickIK/RBDL/Pinocchio's shared
   // iteration cap -- the worst case if a frame never converges early.
   std::printf("\n-- single-frame time (latency), early stop disabled (10 iterations) --\n");
   double single_frame_latency_max_us = summarize(

@@ -3,10 +3,10 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "fastik"
+name = "quickik"
 version = "0.1.0"
-description = "Python bindings for the FastIK inverse kinematics library"
+description = "Python bindings for the QuickIK inverse kinematics library"
 requires-python = ">=3.8"
 
 [tool.maturin]
-module-name = "fastik"
+module-name = "quickik"

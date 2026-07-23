@@ -1,10 +1,10 @@
 [project]
-site_name = "FastIK"
+site_name = "QuickIK"
 site_description = "Fast inverse kinematics library"
-site_url = "https://sibocw.github.io/fastik/"
+site_url = "https://nely-epfl.github.io/quickik/"
 
-repo_url = "https://github.com/sibocw/fastik"
-repo_name = "sibocw/fastik"
+repo_url = "https://github.com/NeLy-EPFL/quickik"
+repo_name = "NeLy-EPFL/quickik"
 edit_uri = "edit/main/docs/"
 
 nav = [
@@ -12,8 +12,8 @@ nav = [
   { "Installation" = "installation.md" },
   { "Usage" = "usage.md" },
   { "Benchmarks" = "benchmarks.md" },
-  { "API reference (Rust)" = "api/rust/fastik/index.html" },
-  { "API reference (Python)" = "api/python/fastik.html" },
+  { "API reference (Rust)" = "api/rust/quickik/index.html" },
+  { "API reference (Python)" = "api/python/quickik.html" },
   { "API reference (C++)" = "api/cpp/html/index.html" },
 ]
 

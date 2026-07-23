@@ -15,7 +15,7 @@ A body plan is a kinematic tree of joints loaded from JSON, where every joint al
 }
 ```
 
-`parent` is a joint name (`null` for the root). `offset_pos`/`offset_quat` place a joint relative to its parent, and `dofs` are its rotational degrees of freedom (axis, neutral angle, optional `[min, max]` limits). See the [API reference](api/rust/fastik/body_plan/index.html) for the full schema.
+`parent` is a joint name (`null` for the root). `offset_pos`/`offset_quat` place a joint relative to its parent, and `dofs` are its rotational degrees of freedom (axis, neutral angle, optional `[min, max]` limits). See the [API reference](api/rust/quickik/body_plan/index.html) for the full schema.
 
 ## Quick start
 
@@ -25,10 +25,10 @@ Solve one frame with `Solver`, giving one `KeypointObservation` per keypoint (`M
 
     ```rust
     use std::sync::Arc;
-    use fastik::body_plan::KinematicTree;
-    use fastik::observation::KeypointObservation;
-    use fastik::solver::{Solver, SolverConfig};
-    use fastik::state::State;
+    use quickik::body_plan::KinematicTree;
+    use quickik::observation::KeypointObservation;
+    use quickik::solver::{Solver, SolverConfig};
+    use quickik::state::State;
     use nalgebra::Vector3;
 
     let kinematic_tree = Arc::new(KinematicTree::from_json_file("body_plan.json"));
@@ -47,16 +47,16 @@ Solve one frame with `Solver`, giving one `KeypointObservation` per keypoint (`M
 === "Python"
 
     ```python
-    import fastik
+    import quickik
 
-    kinematic_tree = fastik.KinematicTree.from_json_file("body_plan.json")
-    state = fastik.State.neutral_pose(kinematic_tree)
-    solver = fastik.Solver(kinematic_tree, fastik.SolverConfig())
+    kinematic_tree = quickik.KinematicTree.from_json_file("body_plan.json")
+    state = quickik.State.neutral_pose(kinematic_tree)
+    solver = quickik.Solver(kinematic_tree, quickik.SolverConfig())
 
     observations = [
-        fastik.KeypointObservation.position_3d((0.0, 0.0, 0.0), 1.0),
-        fastik.KeypointObservation.position_3d((1.0, 0.0, 0.0), 1.0),
-        fastik.KeypointObservation.position_3d((1.0, 1.0, 0.0), 1.0),
+        quickik.KeypointObservation.position_3d((0.0, 0.0, 0.0), 1.0),
+        quickik.KeypointObservation.position_3d((1.0, 0.0, 0.0), 1.0),
+        quickik.KeypointObservation.position_3d((1.0, 1.0, 0.0), 1.0),
     ]
     solver.solve(state, observations)
     print(state.dof_angles)
@@ -65,18 +65,18 @@ Solve one frame with `Solver`, giving one `KeypointObservation` per keypoint (`M
 === "C++"
 
     ```cpp
-    #include "fastik.h"
+    #include "quickik.h"
 
-    auto tree = fastik::kinematic_tree_from_json_file("body_plan.json");
-    auto state = fastik::state_neutral_pose(*tree);
-    auto solver = fastik::new_solver(*tree, fastik::default_solver_config(), fastik::no_mapper());
+    auto tree = quickik::kinematic_tree_from_json_file("body_plan.json");
+    auto state = quickik::state_neutral_pose(*tree);
+    auto solver = quickik::new_solver(*tree, quickik::default_solver_config(), quickik::no_mapper());
 
-    std::vector<fastik::KeypointObservation> observations = {
-        fastik::keypoint_position_3d({0.0, 0.0, 0.0}, 1.0),
-        fastik::keypoint_position_3d({1.0, 0.0, 0.0}, 1.0),
-        fastik::keypoint_position_3d({1.0, 1.0, 0.0}, 1.0),
+    std::vector<quickik::KeypointObservation> observations = {
+        quickik::keypoint_position_3d({0.0, 0.0, 0.0}, 1.0),
+        quickik::keypoint_position_3d({1.0, 0.0, 0.0}, 1.0),
+        quickik::keypoint_position_3d({1.0, 1.0, 0.0}, 1.0),
     };
-    solver->solve(*state, rust::Slice<const fastik::KeypointObservation>(observations.data(), observations.size()));
+    solver->solve(*state, rust::Slice<const quickik::KeypointObservation>(observations.data(), observations.size()));
     for (float angle : state->dof_angles()) { /* ... */ }
     ```
 
@@ -89,7 +89,7 @@ For continuous recordings, `SequenceSolver` keeps a `Solver` and `State` togethe
 === "Rust"
 
     ```rust
-    use fastik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+    use quickik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
 
     let mut seq_solver = SequenceSolver::new(kinematic_tree.clone(), SolverConfig::default());
     for frame_observations in &recording {
@@ -103,29 +103,29 @@ For continuous recordings, `SequenceSolver` keeps a `Solver` and `State` togethe
 === "Python"
 
     ```python
-    seq_solver = fastik.SequenceSolver(kinematic_tree, fastik.SolverConfig())
+    seq_solver = quickik.SequenceSolver(kinematic_tree, quickik.SolverConfig())
     for frame_observations in recording:
         pose = seq_solver.solve_frame(frame_observations)
 
-    segmented_config = fastik.SegmentedSolveConfig(segment_len=200, overlap_len=20, overlap_tolerance=0.05)
-    poses = fastik.solve_sequence_segmented_parallel(kinematic_tree, fastik.SolverConfig(), long_recording, segmented_config)
+    segmented_config = quickik.SegmentedSolveConfig(segment_len=200, overlap_len=20, overlap_tolerance=0.05)
+    poses = quickik.solve_sequence_segmented_parallel(kinematic_tree, quickik.SolverConfig(), long_recording, segmented_config)
     ```
 
 === "C++"
 
     ```cpp
-    auto seq_solver = fastik::new_sequence_solver(*tree, fastik::default_solver_config(), fastik::no_mapper());
+    auto seq_solver = quickik::new_sequence_solver(*tree, quickik::default_solver_config(), quickik::no_mapper());
     for (auto &frame_observations : recording) {
         auto pose = seq_solver->solve_frame(
-            rust::Slice<const fastik::KeypointObservation>(frame_observations.data(), frame_observations.size()));
+            rust::Slice<const quickik::KeypointObservation>(frame_observations.data(), frame_observations.size()));
     }
 
     // flattened_long_recording is n_joints * n_frames long – see below.
-    fastik::SegmentedSolveConfig segmented_config{200, 20, 0.05f};
-    auto poses = fastik::solve_sequence_segmented_parallel(
-        *tree, fastik::default_solver_config(),
-        rust::Slice<const fastik::KeypointObservation>(flattened_long_recording.data(), flattened_long_recording.size()),
-        tree->n_joints(), segmented_config, fastik::no_mapper());
+    quickik::SegmentedSolveConfig segmented_config{200, 20, 0.05f};
+    auto poses = quickik::solve_sequence_segmented_parallel(
+        *tree, quickik::default_solver_config(),
+        rust::Slice<const quickik::KeypointObservation>(flattened_long_recording.data(), flattened_long_recording.size()),
+        tree->n_joints(), segmented_config, quickik::no_mapper());
     ```
 
     C++ has no nested-container binding across the FFI, so a "sequence" is one flat `observations` slice of length `n_joints * n_frames` (frame `i` spanning `[i * n_joints, (i + 1) * n_joints)`) rather than a list of lists, and `solve_sequence`/`solve_sequence_segmented_parallel` return a `StateList` handle (`len()`/`at(i)`) instead of a `Vec<State>`/`list[State]`. See `cpp/src/lib.rs`'s module docs.
@@ -137,7 +137,7 @@ For keypoints given as 2D pixel coordinates, set `SolverConfig::mapper` to a `Ca
 === "Rust"
 
     ```rust
-    use fastik::observation::Camera;
+    use quickik::observation::Camera;
     use nalgebra::Matrix3;
 
     let camera = Camera {
@@ -155,25 +155,25 @@ For keypoints given as 2D pixel coordinates, set `SolverConfig::mapper` to a `Ca
 === "Python"
 
     ```python
-    camera = fastik.Camera(
+    camera = quickik.Camera(
         fx=800.0, fy=800.0, cx=320.0, cy=240.0,
         world2cam_pos=(0.0, 0.0, 5.0),
         world2cam_rot_mat=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),  # row-major 3x3
     )
-    solver = fastik.Solver(kinematic_tree, fastik.SolverConfig(), mapper=camera)
+    solver = quickik.Solver(kinematic_tree, quickik.SolverConfig(), mapper=camera)
     ```
 
 === "C++"
 
     ```cpp
-    fastik::Camera camera{};
+    quickik::Camera camera{};
     camera.fx = 800.0f;
     camera.fy = 800.0f;
     camera.cx = 320.0f;
     camera.cy = 240.0f;
     camera.world2cam_pos = {0.0f, 0.0f, 5.0f};
     camera.world2cam_rot_mat = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};  // row-major 3x3
-    auto solver = fastik::new_solver(*tree, fastik::default_solver_config(), fastik::camera_mapper(camera));
+    auto solver = quickik::new_solver(*tree, quickik::default_solver_config(), quickik::camera_mapper(camera));
     ```
 
-Rust's `Solver<M>` is generic over the mapper type at compile time; neither Python nor C++ has an equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper value chosen at runtime instead – Python takes `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument; C++ takes a `fastik::Mapper` built via `no_mapper()`/`camera_mapper(camera)`/`xyview_mapper()` as an ordinary constructor argument in the same spots. It's deliberately not part of `SolverConfig` in either binding: like Rust's `M`, it's fixed for the solver's lifetime (read-only `mapper`/`solver.mapper` accessor, no setter), whereas `SolverConfig`'s other fields stay freely mutable. Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) raise a Python exception or a C++ exception (`rust::Error`) rather than crashing in either binding.
+Rust's `Solver<M>` is generic over the mapper type at compile time; neither Python nor C++ has an equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper value chosen at runtime instead – Python takes `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument; C++ takes a `quickik::Mapper` built via `no_mapper()`/`camera_mapper(camera)`/`xyview_mapper()` as an ordinary constructor argument in the same spots. It's deliberately not part of `SolverConfig` in either binding: like Rust's `M`, it's fixed for the solver's lifetime (read-only `mapper`/`solver.mapper` accessor, no setter), whereas `SolverConfig`'s other fields stay freely mutable. Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) raise a Python exception or a C++ exception (`rust::Error`) rather than crashing in either binding.

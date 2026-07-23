@@ -1,0 +1,7 @@
+-std=c++17
+-I.venv312/lib/python3.12/site-packages/cmeel.prefix/include
+-I../rbdl/eigen-src
+-DBOOST_MPL_LIMIT_LIST_SIZE=30
+-DBOOST_MPL_LIMIT_VECTOR_SIZE=30
+-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
+-DBOOST_FUSION_INVOKE_MAX_ARITY=12

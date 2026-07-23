@@ -1,4 +1,4 @@
-# Created by https://www.toptal.com/developers/gitignore/api/rust,c++,python,linux,macos,windows,git,vim,visualstudiocode
+# Based on https://www.toptal.com/developers/gitignore/api/rust,c++,python,linux,macos,windows,git,vim,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=rust,c++,python,linux,macos,windows,git,vim,visualstudiocode
 
 ### C++ ###
@@ -209,7 +209,7 @@ benchmark/extern/kdl/kdl_leg_fk_test
 benchmark/extern/rbdl/bench_rbdl
 benchmark/extern/rbdl/leg_poc
 benchmark/extern/pinocchio/bench_pinocchio_cpp
-benchmark/fastik_cpp/bench_cpp
+benchmark/quickik_cpp/bench_cpp
 
 # Jupyter Notebook
 .ipynb_checkpoints

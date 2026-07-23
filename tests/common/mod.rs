@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use fastik::body_plan::{Dof, Joint, KinematicTree};
+use quickik::body_plan::{Dof, Joint, KinematicTree};
 use nalgebra::{UnitQuaternion, Vector3};
 
 pub fn two_joint_chain() -> Arc<KinematicTree> {

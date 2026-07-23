@@ -1,8 +1,8 @@
-# FastIK
+# QuickIK
 
 Fast inverse kinematics library aimed for both high throughput and low latency.
 
-FastIK provides high-level APIs for processing consecutive frames (i.e. with warm starts) and multi-threaded batch processing, as well as low-level APIs for more specific use cases (e.g. real-time application). FastIK is written in Rust but comes with Python and C++ bindings.
+QuickIK provides high-level APIs for processing consecutive frames (i.e. with warm starts) and multi-threaded batch processing, as well as low-level APIs for more specific use cases (e.g. real-time application). QuickIK is written in Rust but comes with Python and C++ bindings.
 
 ## Documentation
 

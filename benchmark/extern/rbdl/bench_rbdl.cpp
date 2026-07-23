@@ -1,6 +1,6 @@
 // Throughput/latency benchmark for RBDL (Rigid Body Dynamics Library),
-// mirroring ../../fastik_rust/src/perf.rs, ../../fastik_cpp/bench_cpp.cpp,
-// and ../kdl/bench_kdl.cpp so all are directly comparable. See ../../fastik_cpp/
+// mirroring ../../quickik_rust/src/perf.rs, ../../quickik_cpp/bench_cpp.cpp,
+// and ../kdl/bench_kdl.cpp so all are directly comparable. See ../../quickik_cpp/
 // for the shared, dependency-free json.hpp / forward_kinematics.hpp copied
 // into this directory.
 //
@@ -12,7 +12,7 @@
 //    rows, see ../kdl/bench_kdl.cpp -- to do position-only multi-endpoint
 //    fitting), RBDL's `InverseKinematicsConstraintSet` natively takes an
 //    arbitrary list of point constraints solved jointly in one linear
-//    system, so -- like fastik -- this benchmark fits all 30 leg
+//    system, so -- like QuickIK -- this benchmark fits all 30 leg
 //    keypoints (every coxa/femur/tibia/claw, not just the 6 claws)
 //    simultaneously against the floating thorax root, in a single Model.
 //
@@ -36,7 +36,7 @@
 //    `JointTypeTranslationXYZ` + `JointTypeEulerZYX` in series -- a
 //    non-quaternion 6-DOF floating base where q_size == qdot_size
 //    everywhere, which sidesteps the bug entirely. Same reachable pose
-//    space as a true floating base, modulo gimbal lock; not fastik's
+//    space as a true floating base, modulo gimbal lock; not QuickIK's
 //    singularity-free quaternion root.
 //
 // 3. Every joint in the JSON body plan is a keypoint. Multi-dof joints are
@@ -44,7 +44,7 @@
 //    ../leg_poc.cpp: the *first* dof in the chain carries the joint's
 //    offset translation, later dofs use a zero-offset frame. A joint's own
 //    keypoint is the local origin (0,0,0) of the *first* body in its chain
-//    -- invariant to that joint's own rotation, matching fastik's
+//    -- invariant to that joint's own rotation, matching QuickIK's
 //    convention that a joint's own dofs re-orient only its children. Leaf
 //    (0-dof) joints (the claws) are not separate RBDL bodies at all: they
 //    are a body-point offset off their parent's last chain body.
@@ -54,16 +54,16 @@
 //    function uses (whose docstring warns accuracy may only reach ~1e-2) --
 //    reading src/Kinematics.cc shows it instead solves the *joint-space*
 //    Levenberg-Marquardt normal equations `(J^T J + Wn) delta_q = J^T e`,
-//    much closer in spirit to fastik's own Gauss-Newton solve. `step_tol`
+//    much closer in spirit to QuickIK's own Gauss-Newton solve. `step_tol`
 //    gates two early-stop checks: `||e||_2 < step_tol` (L2 norm of the
 //    stacked position-residual vector, checked before the step) and
 //    `||delta_theta||_2 < step_tol` (L2 norm of the joint-space update,
-//    checked after) -- both whole-vector L2 norms, unlike fastik's
+//    checked after) -- both whole-vector L2 norms, unlike QuickIK's
 //    per-component max-abs-value check, but comparable in spirit (both are
 //    "stop once the update step is negligible" criteria).
 //
 //    Tuning: `lambda=1e-6`, `max_steps=10`, `step_tol=1e-3` -- literally
-//    fastik's own `n_iterations`/`position_tolerance`/`angle_tolerance`
+//    QuickIK's own `n_iterations`/`position_tolerance`/`angle_tolerance`
 //    defaults, for a fair comparison. RBDL's own defaults (`max_steps=300,
 //    step_tol=1e-10`) are far tighter than this problem needs: real,
 //    imperfectly-fittable mocap data never gets close enough to trigger
@@ -94,7 +94,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 // Damped Levenberg-Marquardt tuning for InverseKinematicsConstraintSet --
-// literally fastik's own SolverConfig::default() values (n_iterations,
+// literally QuickIK's own SolverConfig::default() values (n_iterations,
 // position_tolerance/angle_tolerance); see the file header comment and
 // README.md for why.
 constexpr double kLambda = 1e-6;
@@ -103,7 +103,7 @@ constexpr double kStepTol = 1e-3;
 
 // A built RBDL Model for the neuromechfly_ypr_legs body plan, plus the
 // bookkeeping needed to (a) address each non-root joint as an IK target/FK
-// query point and (b) map fastik's flat dof_offset numbering to RBDL q
+// query point and (b) map QuickIK's flat dof_offset numbering to RBDL q
 // indices.
 struct RbdlModel {
   rbdl::Model model;
@@ -113,7 +113,7 @@ struct RbdlModel {
   std::vector<unsigned int> keypoint_body;
   std::vector<rmath::Vector3d> keypoint_point;
   // dof_q_index[d]: the RBDL q (== qdot, see file header note 2) index for
-  // fastik's flat dof `d`, in JSON dof order.
+  // QuickIK's flat dof `d`, in JSON dof order.
   std::vector<unsigned int> dof_q_index;
 };
 
@@ -173,7 +173,7 @@ RbdlModel build_model(const BodyPlan &plan) {
   return m;
 }
 
-// Flat, in-fastik-dof-order neutral angles (BodyPlan itself doesn't carry
+// Flat, in-quickik-dof-order neutral angles (BodyPlan itself doesn't carry
 // them -- only dof axes -- so read them directly from the JSON here).
 std::vector<double> load_neutral_angles(const std::string &path) {
   Json root = parse_json_file(path);
@@ -198,7 +198,7 @@ std::vector<Vec3> to_vec3s(const Json &target_ego) {
 }
 
 // Builds an IK constraint set for one target frame: one point constraint per
-// non-root joint, in joint order (matching target_ego's order 1:1), fastik's
+// non-root joint, in joint order (matching target_ego's order 1:1), QuickIK's
 // convention of a `Missing` root observation. `step_tol=0` disables early
 // stopping, forcing every solve to run the full `max_steps`.
 rbdl::InverseKinematicsConstraintSet build_cs(const RbdlModel &m, const std::vector<Vec3> &target_ego,
@@ -308,7 +308,7 @@ std::vector<double> bench_sequence(RbdlModel &m, const rmath::VectorNd &q_neutra
 // std::thread (its own RbdlModel/Model instance, since RBDL's kinematics
 // caches inside Model are not thread-safe to share): warm-started within
 // the chunk, cold (neutral pose) at the chunk's start. Simplified vs.
-// fastik's overlap-stitched segmented solve (see README.md's "notes"
+// QuickIK's overlap-stitched segmented solve (see README.md's "notes"
 // caveat) -- plain contiguous chunking, since RBDL has no parallel solve
 // path to mirror.
 constexpr size_t kNThreads = 8;
@@ -407,9 +407,9 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
       << "  \"multi_thread_throughput_fps\": " << multi_thread_throughput_fps << ",\n"
       << "  \"multi_thread_n_threads\": " << kNThreads << ",\n"
       << "  \"notes\": \"RBDL's InverseKinematicsConstraintSet solves the joint-space damped "
-         "Levenberg-Marquardt normal equations (J^T J + Wn) delta_q = J^T e, closer to fastik's own "
+         "Levenberg-Marquardt normal equations (J^T J + Wn) delta_q = J^T e, closer to QuickIK's own "
          "Gauss-Newton than to RBDL's simple transpose/DLS InverseKinematics() free function. Tuning "
-         "(max_steps=10, step_tol=1e-3) is literally fastik's own n_iterations/tolerance defaults, "
+         "(max_steps=10, step_tol=1e-3) is literally QuickIK's own n_iterations/tolerance defaults, "
          "for a fair comparison -- RBDL's own tighter defaults (max_steps=300, step_tol=1e-10) burn "
          "far more iterations on this workload without improving residual accuracy, since real mocap "
          "data never gets close enough to trigger the tighter tolerance. The free-floating thorax "
@@ -417,13 +417,13 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
          "that quaternion joint type crashes InverseKinematicsConstraintSet in this RBDL version "
          "(its Newton step mixes up q_size vs qdot_size once q_size > qdot_size) -- this looks like "
          "a genuine upstream bug, not a modeling error. All 30 leg keypoints (not just the 6 claws) "
-         "are fit jointly in one solve, same as fastik's whole-tree solve. Accuracy: synthetic "
+         "are fit jointly in one solve, same as QuickIK's whole-tree solve. Accuracy: synthetic "
          "(exact-fit) frames converge to residual rms ~1e-4-1e-5 model units in 4-5 steps; real "
          "native_rate_frames converge to a real, tuning-independent residual floor of rms ~0.076 "
          "model units, since real mocap data doesn't exactly satisfy this rigid rotation-axis model. "
          "multi_thread_throughput_fps uses simple "
          "contiguous chunking (8 independent, internally-warm-started, externally-cold-started "
-         "chunks, each with its own Model instance), not fastik's overlap-stitched segmented solve, "
+         "chunks, each with its own Model instance), not QuickIK's overlap-stitched segmented solve, "
          "since RBDL has no parallel solve path to mirror.\"\n"
       << "}\n";
 }

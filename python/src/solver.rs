@@ -9,7 +9,7 @@ use crate::state::State;
 /// Configuration for the inverse kinematics solver. Does not include the
 /// mapper -- see [`Solver`]'s and [`SequenceSolver`](crate::high_level::SequenceSolver)'s
 /// `mapper` argument.
-#[pyclass(module = "fastik", from_py_object)]
+#[pyclass(module = "quickik", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct SolverConfig {
     /// Number of Gauss-Newton steps per `solve` call. Also the cap on early
@@ -38,8 +38,8 @@ impl SolverConfig {
     pub(crate) fn as_rust(
         &self,
         mapper: Option<Mapper>,
-    ) -> fastik_core::solver::SolverConfig<Mapper> {
-        fastik_core::solver::SolverConfig {
+    ) -> quickik_core::solver::SolverConfig<Mapper> {
+        quickik_core::solver::SolverConfig {
             n_iterations: self.n_iterations,
             damping: self.damping,
             neutral_pose_weight: self.neutral_pose_weight,
@@ -86,9 +86,9 @@ impl SolverConfig {
 /// mirroring Rust's `pub config` field. Assigning `solver.config = other`
 /// re-points it at `other` (which then also mutates in place, same as any
 /// other Python object reference).
-#[pyclass(module = "fastik")]
+#[pyclass(module = "quickik")]
 pub(crate) struct Solver {
-    inner: fastik_core::solver::Solver<Mapper>,
+    inner: quickik_core::solver::Solver<Mapper>,
     config: Py<SolverConfig>,
     mapper: Option<Mapper>,
 }
@@ -108,7 +108,7 @@ impl Solver {
     ) -> PyResult<Self> {
         let mapper = extract_mapper(mapper.as_ref())?;
         Ok(Solver {
-            inner: fastik_core::solver::Solver::new(&kinematic_tree.inner, config.as_rust(mapper)),
+            inner: quickik_core::solver::Solver::new(&kinematic_tree.inner, config.as_rust(mapper)),
             config: Py::new(py, config)?,
             mapper,
         })

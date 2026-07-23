@@ -1,6 +1,6 @@
 # RBDL benchmark
 
-Benchmarks RBDL's core-library `InverseKinematicsConstraintSet` (not an addon -- see `rbdl-src/include/rbdl/Kinematics.h`) against fastik, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/benchmarks.md) for RBDL's modeling compromises and results; `bench_rbdl.cpp`'s header comment has the full write-up. `leg_poc.cpp` is the earlier one-leg proof of concept this was built up from.
+Benchmarks RBDL's core-library `InverseKinematicsConstraintSet` (not an addon -- see `rbdl-src/include/rbdl/Kinematics.h`) against QuickIK, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/benchmarks.md) for RBDL's modeling compromises and results; `bench_rbdl.cpp`'s header comment has the full write-up. `leg_poc.cpp` is the earlier one-leg proof of concept this was built up from.
 
 ## Build
 
@@ -8,13 +8,13 @@ RBDL and Eigen (header-only) are already built from source at `rbdl-src/build/li
 
 ```sh
 cd benchmark/extern/rbdl
-g++ -O3 -std=c++17 -DFASTIK_ASSETS_DIR='"../../assets"' -pthread \
+g++ -O3 -std=c++17 -DQUICKIK_ASSETS_DIR='"../../assets"' -pthread \
     -I rbdl-src/include -I rbdl-src/build/include -I eigen-src \
     -o bench_rbdl bench_rbdl.cpp rbdl-src/build/librbdl.a
 ./bench_rbdl
 ```
 
-`json.hpp` and `forward_kinematics.hpp` are verbatim copies of `../../fastik_cpp/`'s (dependency-free JSON reader + FK replica), kept local so this directory builds standalone.
+`json.hpp` and `forward_kinematics.hpp` are verbatim copies of `../../quickik_cpp/`'s (dependency-free JSON reader + FK replica), kept local so this directory builds standalone.
 
 ## Python bindings
 

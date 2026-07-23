@@ -1,12 +1,12 @@
-//! Correctness cross-check and throughput/latency benchmark for fastik,
-//! against reference fixtures. Rust API only (no fastik Python bindings
+//! Correctness cross-check and throughput/latency benchmark for quickik,
+//! against reference fixtures. Rust API only (no quickik Python bindings
 //! exercised here). Runs the same harness once per body in [`BODIES`]. See
 //! `README.md` for background and how to regenerate the fixtures.
 
 use std::sync::Arc;
 
-use fastik::body_plan::KinematicTree;
-use fastik_benchmark::{correctness, fixtures, perf};
+use quickik::body_plan::KinematicTree;
+use quickik_benchmark::{correctness, fixtures, perf};
 
 /// One body to benchmark: its body plan and matching fixtures file.
 struct BodyConfig {

@@ -1,4 +1,4 @@
-//! cxx bridge for the FastIK C++ bindings. Mirrors the Rust API where
+//! cxx bridge for the QuickIK C++ bindings. Mirrors the Rust API where
 //! reasonable; the main departure (as in `python/src/lib.rs`) is the mapper:
 //! Rust's `Solver<M>` is generic over the mapper type at compile time, but
 //! there's no C++ equivalent without templating the whole binding, so every
@@ -17,9 +17,9 @@
 
 use std::sync::Arc;
 
-use fastik_core::observation::Mapper3Dto2D;
+use quickik_core::observation::Mapper3Dto2D;
 
-#[cxx::bridge(namespace = "fastik")]
+#[cxx::bridge(namespace = "quickik")]
 mod ffi {
     /// Which kind of observation a `KeypointObservation` carries. cxx has no
     /// fielded enums, so the payload lives in `KeypointObservation`'s
@@ -74,7 +74,7 @@ mod ffi {
     }
 
     /// Configuration for the inverse kinematics solver. See Rust's
-    /// `fastik::solver::SolverConfig` for field docs. Unlike the Rust/Python
+    /// `quickik::solver::SolverConfig` for field docs. Unlike the Rust/Python
     /// APIs, this is a plain value type here (no shared live handle) --
     /// retune a solver by calling `set_config` again.
     #[derive(Clone, Copy, Debug)]
@@ -208,7 +208,7 @@ mod ffi {
 
         /// Solves a single long sequence in parallel by splitting it into
         /// slightly overlapping segments, each solved on its own thread. See
-        /// Rust's `fastik::high_level::solve_sequence_segmented_parallel`.
+        /// Rust's `quickik::high_level::solve_sequence_segmented_parallel`.
         /// See `Solver::solve`'s docs on panics being raised as exceptions.
         fn solve_sequence_segmented_parallel(
             tree: &KinematicTree,
@@ -252,17 +252,17 @@ fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> ffi::KeypointObservation 
 
 fn to_core_observation(
     obs: &ffi::KeypointObservation,
-) -> fastik_core::observation::KeypointObservation {
+) -> quickik_core::observation::KeypointObservation {
     match obs.kind {
-        ffi::ObservationKind::Missing => fastik_core::observation::KeypointObservation::Missing,
+        ffi::ObservationKind::Missing => quickik_core::observation::KeypointObservation::Missing,
         ffi::ObservationKind::Position3D => {
-            fastik_core::observation::KeypointObservation::Position3D {
+            quickik_core::observation::KeypointObservation::Position3D {
                 obs_pos: nalgebra::Vector3::new(obs.pos[0], obs.pos[1], obs.pos[2]),
                 weight: obs.weight,
             }
         }
         ffi::ObservationKind::Position2D => {
-            fastik_core::observation::KeypointObservation::Position2D {
+            quickik_core::observation::KeypointObservation::Position2D {
                 obs_pos: nalgebra::Vector2::new(obs.pos[0], obs.pos[1]),
                 weight: obs.weight,
             }
@@ -275,7 +275,7 @@ fn to_core_observation(
 /// `python/src/observation.rs`'s `Mapper`.
 #[derive(Clone, Copy, Debug)]
 enum RuntimeMapper {
-    Camera(fastik_core::observation::Camera),
+    Camera(quickik_core::observation::Camera),
     XYView,
 }
 
@@ -288,14 +288,14 @@ impl Mapper3Dto2D for RuntimeMapper {
         match self {
             RuntimeMapper::Camera(camera) => camera.project_3d_to_2d(pos_world3d, jacobian_world3d),
             RuntimeMapper::XYView => {
-                fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
+                quickik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
             }
         }
     }
 }
 
-fn to_core_camera(camera: &ffi::Camera) -> fastik_core::observation::Camera {
-    fastik_core::observation::Camera {
+fn to_core_camera(camera: &ffi::Camera) -> quickik_core::observation::Camera {
+    quickik_core::observation::Camera {
         fx: camera.fx,
         fy: camera.fy,
         cx: camera.cx,
@@ -379,14 +379,14 @@ fn runtime_mapper_to_ffi(mapper: Option<RuntimeMapper>) -> ffi::Mapper {
 // =============================================================================
 
 fn default_solver_config() -> ffi::SolverConfig {
-    from_core_config(&fastik_core::solver::SolverConfig::<RuntimeMapper>::default())
+    from_core_config(&quickik_core::solver::SolverConfig::<RuntimeMapper>::default())
 }
 
 fn to_core_config(
     config: ffi::SolverConfig,
     mapper: Option<RuntimeMapper>,
-) -> fastik_core::solver::SolverConfig<RuntimeMapper> {
-    fastik_core::solver::SolverConfig {
+) -> quickik_core::solver::SolverConfig<RuntimeMapper> {
+    quickik_core::solver::SolverConfig {
         n_iterations: config.n_iterations,
         damping: config.damping,
         neutral_pose_weight: config.neutral_pose_weight,
@@ -397,7 +397,7 @@ fn to_core_config(
 }
 
 fn from_core_config(
-    config: &fastik_core::solver::SolverConfig<RuntimeMapper>,
+    config: &quickik_core::solver::SolverConfig<RuntimeMapper>,
 ) -> ffi::SolverConfig {
     ffi::SolverConfig {
         n_iterations: config.n_iterations,
@@ -412,7 +412,7 @@ fn from_core_config(
 //  KinematicTree
 // =============================================================================
 
-struct KinematicTree(Arc<fastik_core::body_plan::KinematicTree>);
+struct KinematicTree(Arc<quickik_core::body_plan::KinematicTree>);
 
 /// Runs `f`, converting a panic (e.g. from malformed JSON, or a `Position2D`
 /// observation given to a mapper-less solver) into an `Err` instead of
@@ -434,7 +434,7 @@ fn catch_panic<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 fn kinematic_tree_from_json_str(json_str: &str) -> Result<Box<KinematicTree>, String> {
     catch_panic(|| {
         KinematicTree(Arc::new(
-            fastik_core::body_plan::KinematicTree::from_json_str(json_str),
+            quickik_core::body_plan::KinematicTree::from_json_str(json_str),
         ))
     })
     .map(Box::new)
@@ -443,7 +443,7 @@ fn kinematic_tree_from_json_str(json_str: &str) -> Result<Box<KinematicTree>, St
 fn kinematic_tree_from_json_file(path: &str) -> Result<Box<KinematicTree>, String> {
     catch_panic(|| {
         KinematicTree(Arc::new(
-            fastik_core::body_plan::KinematicTree::from_json_file(path),
+            quickik_core::body_plan::KinematicTree::from_json_file(path),
         ))
     })
     .map(Box::new)
@@ -462,10 +462,10 @@ impl KinematicTree {
 //  State
 // =============================================================================
 
-struct State(fastik_core::state::State);
+struct State(quickik_core::state::State);
 
 fn state_neutral_pose(tree: &KinematicTree) -> Box<State> {
-    Box::new(State(fastik_core::state::State::neutral_pose(
+    Box::new(State(quickik_core::state::State::neutral_pose(
         tree.0.clone(),
     )))
 }
@@ -488,7 +488,7 @@ impl State {
 //  StateList
 // =============================================================================
 
-struct StateList(Vec<fastik_core::state::State>);
+struct StateList(Vec<quickik_core::state::State>);
 
 impl StateList {
     fn len(&self) -> usize {
@@ -505,7 +505,7 @@ impl StateList {
 fn split_into_frames(
     flat: &[ffi::KeypointObservation],
     n_joints: usize,
-) -> Vec<Vec<fastik_core::observation::KeypointObservation>> {
+) -> Vec<Vec<quickik_core::observation::KeypointObservation>> {
     assert_eq!(
         flat.len() % n_joints,
         0,
@@ -521,14 +521,14 @@ fn split_into_frames(
 // =============================================================================
 
 struct Solver {
-    inner: fastik_core::solver::Solver<RuntimeMapper>,
+    inner: quickik_core::solver::Solver<RuntimeMapper>,
     mapper: Option<RuntimeMapper>,
 }
 
 fn new_solver(tree: &KinematicTree, config: ffi::SolverConfig, mapper: ffi::Mapper) -> Box<Solver> {
     let mapper = to_runtime_mapper(&mapper);
     Box::new(Solver {
-        inner: fastik_core::solver::Solver::new(&tree.0, to_core_config(config, mapper)),
+        inner: quickik_core::solver::Solver::new(&tree.0, to_core_config(config, mapper)),
         mapper,
     })
 }
@@ -560,7 +560,7 @@ impl Solver {
 // =============================================================================
 
 struct SequenceSolver {
-    inner: fastik_core::high_level::SequenceSolver<RuntimeMapper>,
+    inner: quickik_core::high_level::SequenceSolver<RuntimeMapper>,
     mapper: Option<RuntimeMapper>,
 }
 
@@ -571,7 +571,7 @@ fn new_sequence_solver(
 ) -> Box<SequenceSolver> {
     let mapper = to_runtime_mapper(&mapper);
     Box::new(SequenceSolver {
-        inner: fastik_core::high_level::SequenceSolver::new(
+        inner: quickik_core::high_level::SequenceSolver::new(
             tree.0.clone(),
             to_core_config(config, mapper),
         ),
@@ -625,7 +625,7 @@ fn solve_sequence_segmented_parallel(
 ) -> Result<Box<StateList>, String> {
     let mapper = to_runtime_mapper(&mapper);
     let sequence = split_into_frames(observations, n_joints);
-    let core_segmented_config = fastik_core::high_level::SegmentedSolveConfig {
+    let core_segmented_config = quickik_core::high_level::SegmentedSolveConfig {
         segment_len: segmented_config.segment_len,
         overlap_len: segmented_config.overlap_len,
         overlap_tolerance: segmented_config.overlap_tolerance,
@@ -633,7 +633,7 @@ fn solve_sequence_segmented_parallel(
     let core_config = to_core_config(config, mapper);
     catch_panic(move || {
         Box::new(StateList(
-            fastik_core::high_level::solve_sequence_segmented_parallel(
+            quickik_core::high_level::solve_sequence_segmented_parallel(
                 &tree.0,
                 core_config,
                 &sequence,

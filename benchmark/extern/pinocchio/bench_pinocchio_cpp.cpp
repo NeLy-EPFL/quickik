@@ -18,13 +18,13 @@
 //     rotation into the joint placement (R(-n, -t) = R(n, t)).
 //   - All 30 leg keypoints (every coxa/femur/tibia/claw) are tracked via
 //     `OP_FRAME` operational frames and fit jointly against the free-
-//     floating root, in one Gauss-Newton solve, matching fastik/RBDL's
+//     floating root, in one Gauss-Newton solve, matching QuickIK/RBDL's
 //     whole-tree formulation.
 //   - Solver: position-only 3-row residuals per keypoint accumulated into
 //     an nv x nv normal-equations matrix/nv-vector, a neutral-pose Tikhonov
 //     prior on the 42 leg DOFs, LM diagonal damping, `colPivHouseholderQr`
 //     solve, then `pinocchio::integrate` (respects the free-flyer's
-//     quaternion manifold). Same fastik SolverConfig::default() tuning as
+//     quaternion manifold). Same QuickIK SolverConfig::default() tuning as
 //     every other benchmark in this repo (n_iterations=10, damping=1e-6,
 //     neutral_pose_weight=1e-3, position/angle_tolerance=1e-3).
 
@@ -53,7 +53,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// Gauss-Newton/LM config -- literally fastik's own SolverConfig::default()
+// Gauss-Newton/LM config -- literally QuickIK's own SolverConfig::default()
 // values (src/solver.rs), matching every other benchmark in this repo.
 constexpr int kNIterations = 10;
 constexpr double kDamping = 1e-6;
@@ -420,7 +420,7 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
       << "  \"multi_thread_n_threads\": " << kNThreads << ",\n"
       << "  \"notes\": \"Native C++ re-implementation of pinocchio.json's benchmark: same model "
          "(thorax JointModelFreeFlyer + 6 legs x 7 DOFs, all 30 leg keypoints fit jointly via "
-         "OP_FRAME operational frames) and same fastik SolverConfig::default() tuning as "
+         "OP_FRAME operational frames) and same QuickIK SolverConfig::default() tuning as "
          "pinocchio.json and rbdl.json, but with the Gauss-Newton outer loop (building the "
          "normal-equations matrix, the linear solve, LM damping, the neutral-pose prior, "
          "pin.integrate) done in Eigen instead of Python/numpy, to measure Pinocchio's own C++ speed "
@@ -466,7 +466,7 @@ int main() {
 
     run_correctness(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, scratch, fixtures);
 
-    // Same fixture-derived target used by the Rust/Python/C++ fastik benchmarks and RBDL.
+    // Same fixture-derived target used by the Rust/Python/C++ QuickIK benchmarks and RBDL.
     auto target = to_targets(fixtures["synthetic_frames"][0]["target_ego"]);
 
     std::printf("-- single-frame time (latency), no warm start --\n");

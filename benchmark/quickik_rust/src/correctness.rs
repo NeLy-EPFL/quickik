@@ -1,13 +1,13 @@
-//! Correctness cross-check against flygym.ik, using fastik's Rust API only.
+//! Correctness cross-check against flygym.ik, using quickik's Rust API only.
 
 use std::sync::Arc;
 
-use fastik::body_plan::KinematicTree;
-use fastik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use fastik::high_level::SequenceSolver;
-use fastik::observation::KeypointObservation;
-use fastik::solver::{Solver, SolverConfig};
-use fastik::state::State;
+use quickik::body_plan::KinematicTree;
+use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use quickik::high_level::SequenceSolver;
+use quickik::observation::KeypointObservation;
+use quickik::solver::{Solver, SolverConfig};
+use quickik::state::State;
 use nalgebra::Vector3;
 
 use crate::fixtures::{Fixtures, RealFrame, SyntheticFrame};
@@ -104,10 +104,10 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
 }
 
 /// Real-data cross-solver test: feed real (noisy) mocap keypoints, warm
-/// started frame-to-frame like real usage, and check fastik's fit quality.
+/// started frame-to-frame like real usage, and check quickik's fit quality.
 /// When `frames` also carries a reference solver's reconstruction (currently
 /// only NeuroMechFly/flygym.ik, via `RealFrame::flygym_ik_reconstructed_ego`),
-/// also compares fastik's reconstructed keypoints against it.
+/// also compares quickik's reconstructed keypoints against it.
 pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
 
@@ -115,8 +115,8 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
         SequenceSolver::new(tree.clone(), SolverConfig::default());
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
 
-    let mut fastik_rms_all = Vec::new();
-    let mut fastik_max_all = Vec::new();
+    let mut quickik_rms_all = Vec::new();
+    let mut quickik_max_all = Vec::new();
     let mut cross_rms_all = Vec::new();
     let mut cross_max_all = Vec::new();
 
@@ -126,8 +126,8 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
         evaluate_fwdkin(&mut workspace, state);
 
         let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
-        fastik_rms_all.push(rms);
-        fastik_max_all.push(max);
+        quickik_rms_all.push(rms);
+        quickik_max_all.push(max);
 
         if let Some(flygym_ik_reconstructed_ego) = &frame.flygym_ik_reconstructed_ego {
             let (cross_rms, cross_max) =
@@ -143,10 +143,10 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
 
     println!("over {} frames:", frames.len());
     println!(
-        "  fastik fit residual to target:      rms={:.5}  mean={:.5}  max={:.5}",
-        rms_of(&fastik_rms_all),
-        mean(&fastik_rms_all),
-        max_of(&fastik_max_all)
+        "  quickik fit residual to target:      rms={:.5}  mean={:.5}  max={:.5}",
+        rms_of(&quickik_rms_all),
+        mean(&quickik_rms_all),
+        max_of(&quickik_max_all)
     );
     if cross_rms_all.is_empty() {
         println!("  cross-solver agreement: no reference reconstruction in fixtures, skipped\n");

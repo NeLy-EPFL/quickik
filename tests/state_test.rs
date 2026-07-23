@@ -1,6 +1,6 @@
 mod common;
 
-use fastik::state::State;
+use quickik::state::State;
 use nalgebra::DVector;
 
 #[test]

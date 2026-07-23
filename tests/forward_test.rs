@@ -1,7 +1,7 @@
 mod common;
 
-use fastik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use fastik::state::State;
+use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use quickik::state::State;
 use nalgebra::Vector3;
 
 #[test]

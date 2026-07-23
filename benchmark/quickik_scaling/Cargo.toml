@@ -1,0 +1,15 @@
+[package]
+name = "quickik-scaling"
+description = "Weak-scaling sweep (1/2/4/8/16 threads, via taskset) for quickik's solve_sequence_segmented_parallel"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "quickik-scaling"
+path = "src/main.rs"
+
+[dependencies]
+quickik = { path = "../.." }
+quickik-benchmark = { path = "../quickik_rust" }
+serde_json = "1.0"

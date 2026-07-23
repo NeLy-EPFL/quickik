@@ -1,4 +1,4 @@
-//! PyO3 bindings for the `fastik` crate. Mirrors the Rust API where
+//! PyO3 bindings for the `quickik` crate. Mirrors the Rust API where
 //! reasonable; the main departure is the mapper: Rust's `Solver<M>` is
 //! generic over the mapper type at compile time, but Python has no
 //! equivalent, so every Python-facing solver is backed by a single
@@ -26,7 +26,7 @@ use solver::{Solver, SolverConfig};
 use state::State;
 
 #[pymodule]
-fn fastik(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn quickik(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KinematicTree>()?;
     m.add_class::<State>()?;
     m.add_class::<KeypointObservation>()?;

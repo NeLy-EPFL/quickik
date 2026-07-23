@@ -26,4 +26,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build cpp/build -j
-      - run: ./cpp/build/fastik_cpp_tests
+      - run: ./cpp/build/quickik_cpp_tests

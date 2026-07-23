@@ -1,5 +1,5 @@
 """Correctness cross-check and throughput/latency benchmark for Pinocchio,
-mirroring `benchmark/fastik_python/bench.py` / `benchmark/fastik_rust/src/perf.rs`
+mirroring `benchmark/quickik_python/bench.py` / `benchmark/quickik_rust/src/perf.rs`
 so all three are directly comparable.
 
 Pinocchio has no built-in general-purpose IK solver, so this script:
@@ -9,7 +9,7 @@ Pinocchio has no built-in general-purpose IK solver, so this script:
      API (no URDF), generalizing `poc_one_leg.py` to all 6 legs. See
      `build_full_model` below.
   2. Implements its own Gauss-Newton/Levenberg-Marquardt IK loop on top of
-     `pin.computeJointJacobians`/`pin.getFrameJacobian`, matching fastik's
+     `pin.computeJointJacobians`/`pin.getFrameJacobian`, matching QuickIK's
      own solver (`src/solver.rs`) as closely as possible: position-only 3-row
      residuals per keypoint, LM diagonal damping, a small neutral-pose
      Tikhonov prior, and the same early-stopping rule (position/angle delta
@@ -18,14 +18,14 @@ Pinocchio has no built-in general-purpose IK solver, so this script:
 Run with the dedicated Python 3.12 venv (Pinocchio's wheels don't support
 3.13+):
 
-    cd /path/to/fastik/benchmark/extern/pinocchio
+    cd /path/to/quickik/benchmark/extern/pinocchio
     .venv312/bin/python bench_pinocchio.py
 
 Runs against every body in `BODIES` below (currently the neuromechfly fly and
 a Unitree G1 humanoid) and writes one results file per body.
 
 See README.md for modeling compromises (mirrored-leg axis handling,
-multiprocessing standing in for fastik's in-process thread pool) and the
+multiprocessing standing in for QuickIK's in-process thread pool) and the
 numbers from the last run.
 """
 
@@ -47,7 +47,7 @@ BODIES = [
     {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
 ]
 
-# Gauss-Newton/LM config, matching fastik's SolverConfig::default() exactly
+# Gauss-Newton/LM config, matching QuickIK's SolverConfig::default() exactly
 # (src/solver.rs) for a fair comparison.
 N_ITERATIONS = 10
 DAMPING = 1e-6
@@ -97,7 +97,7 @@ def build_full_model(body_plan_path):
             `neutral_angle`, sign-adjusted per `_axis_to_joint`).
         dof_signs: array of +-1, one per DOF, in JSON DOF-flatten order
             (matches `state.dof_angles` / `ground_truth_dof_angles_per_leg`
-            convention used by fastik's own benchmarks) -- needed to convert
+            convention used by QuickIK's own benchmarks) -- needed to convert
             a solved Pinocchio angle back to the JSON's signed-axis
             convention for cross-checks.
         dof_names: DOF names, same order as `dof_signs`.
@@ -177,7 +177,7 @@ def solve_ik(model, data, keypoint_frame_ids, target, q0, neutral_q, disable_ear
     """Runs up to `N_ITERATIONS` Gauss-Newton steps from `q0` toward `target`
     (an (n_keypoints, 3) array of world positions, one per
     `keypoint_frame_ids` entry -- the thorax has no residual term, matching
-    fastik's `Missing` convention for the root keypoint).
+    QuickIK's `Missing` convention for the root keypoint).
 
     `disable_early_stop=True` always runs the full `N_ITERATIONS`, ignoring
     `POSITION_TOLERANCE`/`ANGLE_TOLERANCE` -- the worst case if a frame never
@@ -267,7 +267,7 @@ def run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtu
 
 
 # -----------------------------------------------------------------------------
-# Performance (mirrors perf.rs / fastik_python/bench.py).
+# Performance (mirrors perf.rs / quickik_python/bench.py).
 # -----------------------------------------------------------------------------
 def summarize(label, samples_sec):
     samples_us = np.sort(np.array(samples_sec) * 1e6)
@@ -285,7 +285,7 @@ def summarize(label, samples_sec):
 def bench_single_frame_latency(model, data, keypoint_frame_ids, q_neutral, target, n_calls, disable_early_stop=False):
     """One IK solve from the fixed neutral configuration against a fixed
     target every call (no warm start) -- the same fixture-derived target
-    used by the Rust/C++/Python fastik benchmarks."""
+    used by the Rust/C++/Python QuickIK benchmarks."""
     for _ in range(1000):
         solve_ik(model, data, keypoint_frame_ids, target, q_neutral, q_neutral, disable_early_stop)
 
@@ -316,7 +316,7 @@ def bench_single_thread_sequence(model, data, keypoint_frame_ids, q_neutral, tar
 # Multi-thread ("multi-process") sequence throughput -----------------------
 # Python's GIL means CPU-bound numpy/Pinocchio code can't run in real
 # parallel threads, so this uses multiprocessing (separate processes)
-# instead of fastik's in-process thread pool -- see README.md.
+# instead of QuickIK's in-process thread pool -- see README.md.
 MULTITHREAD_N_PROCESSES = 8
 CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
 
@@ -377,11 +377,11 @@ def write_results_json(
             "Pinocchio has no built-in IK solver; this benchmarks a hand-written "
             "Gauss-Newton/LM loop (position-only residuals, LM damping, neutral-"
             "pose prior, early stopping) on top of pin.computeJointJacobians/"
-            "getFrameJacobian, matching fastik's SolverConfig::default() math "
+            "getFrameJacobian, matching QuickIK's SolverConfig::default() math "
             "shape. 'multi-thread' throughput uses multiprocessing (8 separate "
             "processes), not an in-process thread pool, since Python's GIL "
             "prevents real multi-threaded parallelism for CPU-bound numpy/"
-            "Pinocchio code -- not directly comparable to fastik's in-process "
+            "Pinocchio code -- not directly comparable to QuickIK's in-process "
             "segmented solve."
         ),
     }

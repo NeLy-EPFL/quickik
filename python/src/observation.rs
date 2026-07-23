@@ -4,11 +4,11 @@ use pyo3::prelude::*;
 /// Runtime stand-in for Rust's generic mapper type parameter `M`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Mapper {
-    Camera(fastik_core::observation::Camera),
+    Camera(quickik_core::observation::Camera),
     XYView,
 }
 
-impl fastik_core::observation::Mapper3Dto2D for Mapper {
+impl quickik_core::observation::Mapper3Dto2D for Mapper {
     fn project_3d_to_2d(
         &self,
         pos_world3d: &nalgebra::Vector3<f32>,
@@ -17,7 +17,7 @@ impl fastik_core::observation::Mapper3Dto2D for Mapper {
         match self {
             Mapper::Camera(camera) => camera.project_3d_to_2d(pos_world3d, jacobian_world3d),
             Mapper::XYView => {
-                fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
+                quickik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
             }
         }
     }
@@ -52,7 +52,7 @@ fn vec_to_array<const N: usize>(v: &[f32], name: &str) -> PyResult<[f32; N]> {
 }
 
 /// A pinhole camera mapper for 2D keypoint observations.
-#[pyclass(module = "fastik", from_py_object)]
+#[pyclass(module = "quickik", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct Camera {
     /// Focal length in pixels (x).
@@ -73,8 +73,8 @@ pub(crate) struct Camera {
 }
 
 impl Camera {
-    fn as_rust(&self) -> fastik_core::observation::Camera {
-        fastik_core::observation::Camera {
+    fn as_rust(&self) -> quickik_core::observation::Camera {
+        quickik_core::observation::Camera {
             fx: self.fx,
             fy: self.fy,
             cx: self.cx,
@@ -84,7 +84,7 @@ impl Camera {
         }
     }
 
-    fn from_rust(camera: fastik_core::observation::Camera) -> Self {
+    fn from_rust(camera: quickik_core::observation::Camera) -> Self {
         let p = camera.world2cam_pos;
         Camera {
             fx: camera.fx,
@@ -153,7 +153,7 @@ impl Camera {
 }
 
 /// A mapper for 2D keypoints already reprojected to physical X-Y coordinates.
-#[pyclass(module = "fastik", from_py_object, frozen)]
+#[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
 pub(crate) struct XYView;
 
@@ -167,10 +167,10 @@ impl XYView {
 
 /// Observation of a single keypoint: `missing()`, `position_3d(pos, weight)`,
 /// or `position_2d(pos, weight)`.
-#[pyclass(module = "fastik", from_py_object, frozen)]
+#[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
 pub(crate) struct KeypointObservation {
-    inner: fastik_core::observation::KeypointObservation,
+    inner: quickik_core::observation::KeypointObservation,
 }
 
 #[pymethods]
@@ -179,7 +179,7 @@ impl KeypointObservation {
     #[staticmethod]
     fn missing() -> Self {
         KeypointObservation {
-            inner: fastik_core::observation::KeypointObservation::Missing,
+            inner: quickik_core::observation::KeypointObservation::Missing,
         }
     }
 
@@ -189,7 +189,7 @@ impl KeypointObservation {
     #[staticmethod]
     fn position_3d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
         Ok(KeypointObservation {
-            inner: fastik_core::observation::KeypointObservation::Position3D {
+            inner: quickik_core::observation::KeypointObservation::Position3D {
                 obs_pos: nalgebra::Vector3::from(vec_to_array::<3>(&pos, "pos")?),
                 weight,
             },
@@ -203,7 +203,7 @@ impl KeypointObservation {
     fn position_2d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
         let [x, y] = vec_to_array::<2>(&pos, "pos")?;
         Ok(KeypointObservation {
-            inner: fastik_core::observation::KeypointObservation::Position2D {
+            inner: quickik_core::observation::KeypointObservation::Position2D {
                 obs_pos: nalgebra::Vector2::new(x, y),
                 weight,
             },
@@ -217,6 +217,6 @@ impl KeypointObservation {
 
 pub(crate) fn extract_observations(
     observations: Vec<PyRef<'_, KeypointObservation>>,
-) -> Vec<fastik_core::observation::KeypointObservation> {
+) -> Vec<quickik_core::observation::KeypointObservation> {
     observations.iter().map(|obs| obs.inner).collect()
 }

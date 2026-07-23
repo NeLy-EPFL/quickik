@@ -1,6 +1,6 @@
 """Proof-of-concept: build the thorax + one leg chain from
 neuromechfly_ypr_legs.json in Pinocchio, using a free-flyer root joint plus a
-chain of single-DOF revolute joints (mirroring fastik's per-joint DOF list),
+chain of single-DOF revolute joints (mirroring QuickIK's per-joint DOF list),
 and compute forward kinematics at zero joint angles.
 
 This is a feasibility check only, not part of the final benchmark.
@@ -12,7 +12,7 @@ import numpy as np
 import pinocchio as pin
 
 MODEL_JSON = (
-    "/home/sibwang/Projects/fastik/benchmark/assets/neuromechfly_ypr_legs.json"
+    "/home/sibwang/Projects/quickik/benchmark/assets/neuromechfly_ypr_legs.json"
 )
 
 AXIS_MAP = {
@@ -76,7 +76,7 @@ def build_leg_model(joints: list[dict], leg_prefix: str) -> tuple[pin.Model, int
             axis_key = tuple(np.round(np.abs(axis) * sign).astype(float))
             # Normalize axis key to a positive canonical direction, and flip
             # the joint's sign convention by negating the offset axis vector
-            # instead (Pinocchio's RX/RY/RZ are all +axis; fastik allows
+            # instead (Pinocchio's RX/RY/RZ are all +axis; QuickIK allows
             # signed axes for mirrored left/right legs).
             if tuple(axis) == (-1.0, 0.0, 0.0):
                 joint_model = pin.JointModelRX()

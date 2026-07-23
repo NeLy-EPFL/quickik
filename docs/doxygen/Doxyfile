@@ -1,6 +1,6 @@
 # Run from the repo root: doxygen docs/doxygen/Doxyfile
 # (see docs/build.sh, which stages the input header first)
-PROJECT_NAME           = "FastIK"
+PROJECT_NAME           = "QuickIK"
 PROJECT_BRIEF          = "C++ bindings"
 OUTPUT_DIRECTORY       = docs/api/cpp
 INPUT                  = docs/api/cpp-staging

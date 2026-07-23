@@ -1,13 +1,13 @@
 mod common;
 
-use fastik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use fastik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
-use fastik::solver::{Solver, SolverConfig};
-use fastik::state::State;
+use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
+use quickik::solver::{Solver, SolverConfig};
+use quickik::state::State;
 use nalgebra::{Matrix3, Vector3};
 
 fn keypoints_at(
-    tree: &std::sync::Arc<fastik::body_plan::KinematicTree>,
+    tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,
     angles: &[f32],
 ) -> Vec<Vector3<f32>> {
     let mut state = State::neutral_pose(tree.clone());

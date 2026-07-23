@@ -1,4 +1,4 @@
-use fastik::observation::{Camera, Mapper3Dto2D, XYView};
+use quickik::observation::{Camera, Mapper3Dto2D, XYView};
 use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
 
 #[test]

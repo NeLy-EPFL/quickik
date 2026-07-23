@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # --- Rust API reference (cargo doc) ---
-cargo doc --no-deps -p fastik
+cargo doc --no-deps -p quickik
 rm -rf docs/api/rust
 mkdir -p docs/api/rust
 cp -r target/doc/. docs/api/rust/
@@ -26,29 +26,29 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 (cd python && VIRTUAL_ENV="$OLDPWD/$VENV" "$OLDPWD/$VENV/bin/maturin" develop --release)
 rm -rf docs/api/python
-"$VENV/bin/pdoc" -o docs/api/python -d google fastik
+"$VENV/bin/pdoc" -o docs/api/python -d google quickik
 
 # --- C++ API reference (Doxygen) ---
-cargo build -p fastik-cpp
+cargo build -p quickik-cpp
 rm -rf docs/api/cpp-staging docs/api/cpp
 mkdir -p docs/api/cpp-staging
 cp docs/doxygen/rust_stub.h docs/api/cpp-staging/
 python3 -c '
 import re, pathlib
-src = pathlib.Path("cpp/include/fastik.h").read_text()
+src = pathlib.Path("cpp/include/quickik.h").read_text()
 # cxx emits Rust doc comments as plain "//" C++ comments; promote them to
 # "///" so Doxygen (which only treats /** */, ///, and //! as doc comments)
 # picks them up.
 src = re.sub(r"^(\s*)// ", r"\1/// ", src, flags=re.MULTILINE)
-# cxx names each include guard "CXXBRIDGE1_..._fastik$Name" -- the "$" desyncs
+# cxx names each include guard "CXXBRIDGE1_..._quickik$Name" -- the "$" desyncs
 # Doxygen'"'"'s preprocessor across successive guards, silently dropping every
-# fastik:: type after the first. The guards are meaningless for docs anyway.
+# quickik:: type after the first. The guards are meaningless for docs anyway.
 src = re.sub(r"^\s*#(ifndef|define|endif)\b.*CXXBRIDGE1_.*$\n?", "", src, flags=re.MULTILINE)
-# Keep only the fastik-facing declarations; rust_stub.h stands in for the
+# Keep only the quickik-facing declarations; rust_stub.h stands in for the
 # runtime-support preamble (rust::Box/Slice/Str/Vec/Opaque/Error) that comes
 # before it in the real generated header.
-src = src[src.index("namespace fastik {"):]
-pathlib.Path("docs/api/cpp-staging/fastik.h").write_text(src)
+src = src[src.index("namespace quickik {"):]
+pathlib.Path("docs/api/cpp-staging/quickik.h").write_text(src)
 '
 doxygen docs/doxygen/Doxyfile
 

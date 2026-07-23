@@ -1,5 +1,5 @@
 """Renders a single side-by-side comparison video (NeuroMechFly left, G1
-right), overlaying real motion-capture keypoints against fastik's inverse-
+right), overlaying real motion-capture keypoints against QuickIK's inverse-
 kinematics-fitted skeleton, frame by frame over `native_rate_frames` (see
 `../scripts/generate_fixtures.py` / `../preprocessing/g1_fixtures.py`'s
 module docstrings -- a contiguous run of consecutive recorded frames, the
@@ -7,8 +7,8 @@ same warm-start sequence the throughput benchmark solves, so the fit shown
 here is a genuine continuous-tracking result, not a slideshow of
 independently solved poses).
 
-Solves each body's whole sequence once with `fastik.SequenceSolver` (warm-
-started frame to frame, exactly like `../fastik_python/bench.py`'s
+Solves each body's whole sequence once with `quickik.SequenceSolver` (warm-
+started frame to frame, exactly like `../quickik_python/bench.py`'s
 `bench_solve_sequence`), then re-derives every joint's world position from
 the solved state via an independent from-JSON forward-kinematics replica
 (same technique as that script's own `forward_kinematics`, extended here to
@@ -24,8 +24,8 @@ the video ends as soon as either panel's own sequence runs out.
 
 Writes `results/example_clips.mp4` (requires ffmpeg on PATH).
 
-Usage (fastik's Python extension must already be built for this interpreter
--- see `../fastik_python/bench.py`'s own docstring; matplotlib is the only
+Usage (QuickIK's Python extension must already be built for this interpreter
+-- see `../quickik_python/bench.py`'s own docstring; matplotlib is the only
 extra dependency beyond that script's numpy/scipy):
 
     uv run --with matplotlib python render_video.py
@@ -42,18 +42,19 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
+from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from scipy.spatial.transform import Rotation as R
 
-import fastik
+import quickik
 
 BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = BENCHMARK_DIR / "assets"
 OUT_DIR = Path(__file__).resolve().parent / "results"
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 
-MOCAP_COLOR = "black"
-FIT_COLOR = "tab:blue"
+MOCAP_COLOR = "gray"
+FIT_COLOR = "#4051b5"
 
 DPI = 112.5
 
@@ -124,7 +125,7 @@ def load_body(name):
         dof_offsets[j["name"]] = cursor
         cursor += len(j["dofs"])
 
-    tree = fastik.KinematicTree.from_json_file(str(ASSETS_DIR / cfg["body_plan"]))
+    tree = quickik.KinematicTree.from_json_file(str(ASSETS_DIR / cfg["body_plan"]))
     # (parent, child) node-name pairs to draw as bones -- every joint except
     # the root, which has no parent of its own.
     edges = [(j["parent"], j["name"]) for j in joints if j["parent"] is not None]
@@ -134,7 +135,7 @@ def load_body(name):
 def forward_kinematics_full(joints, dof_offsets, dof_angles, root_pos, root_rot_wxyz):
     """Every body-plan node's world position (including the root), from a
     solved state -- an independent from-JSON FK replica, does not call into
-    fastik at all (same role as `../fastik_python/bench.py`'s own
+    QuickIK at all (same role as `../quickik_python/bench.py`'s own
     `forward_kinematics`, extended to return the whole tree rather than just
     the non-root keypoints, since the video needs every bone)."""
     w, x, y, z = root_rot_wxyz
@@ -157,16 +158,16 @@ def forward_kinematics_full(joints, dof_offsets, dof_angles, root_pos, root_rot_
 
 
 def build_observations(target_ego):
-    obs = [fastik.KeypointObservation.missing()]
-    obs += [fastik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
+    obs = [quickik.KeypointObservation.missing()]
+    obs += [quickik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
     return obs
 
 
 def solve_sequence(tree, fixtures):
     """Warm-started solve over `native_rate_frames`, exactly like the
-    throughput benchmark (see `../fastik_python/bench.py`'s
+    throughput benchmark (see `../quickik_python/bench.py`'s
     `bench_solve_sequence`) -- returns one solved `State` per frame."""
-    seq = fastik.SequenceSolver(tree, fastik.SolverConfig())
+    seq = quickik.SequenceSolver(tree, quickik.SolverConfig())
     return [seq.solve_frame(build_observations(f["target_ego"])) for f in fixtures["native_rate_frames"]]
 
 
@@ -253,14 +254,20 @@ def setup_panel(ax, body, show_legend):
     ax.set_zticks([])
     ax.set_title(cfg["title"])
 
-    mocap_scatter = ax.scatter([], [], [], c=MOCAP_COLOR, s=25, label="MoCap keypoints", depthshade=False)
-    fit_scatter = ax.scatter([], [], [], c=FIT_COLOR, s=15, label="QuickIK fit", depthshade=False)
+    mocap_scatter = ax.scatter([], [], [], c=MOCAP_COLOR, s=25, depthshade=False)
+    fit_scatter = ax.scatter([], [], [], c=FIT_COLOR, s=15, depthshade=False)
     # add_collection3d computes its own axis bounds from the initial segments,
     # so it must be seeded with real data (frame 0), not an empty list.
     fit_bones = Line3DCollection(body["fitted_bones"][0], colors=FIT_COLOR, linewidths=1.5)
     ax.add_collection3d(fit_bones)
     if show_legend:
-        ax.legend(loc="upper left", frameon=False)
+        # Proxy handles, not the scatters' own auto-generated legend entries:
+        # a scatter-only handle would draw "QuickIK fit" as a bare dot, hiding
+        # that it's also a connected skeleton (the bones have no label of
+        # their own to contribute a line to the legend).
+        mocap_handle = Line2D([0], [0], marker="o", linestyle="None", color=MOCAP_COLOR, label="MoCap keypoints")
+        fit_handle = Line2D([0], [0], marker="o", linestyle="-", color=FIT_COLOR, label="QuickIK fit")
+        ax.legend(handles=[mocap_handle, fit_handle], loc="upper left", frameon=False)
     # text2D pins this to the axes' own 2D display space (top right corner),
     # unaffected by the 3D view/rotation -- unlike ax.text, which would place
     # it at a fixed *data* point instead.

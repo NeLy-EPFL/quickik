@@ -15,7 +15,7 @@
 // Each named joint with N dofs is expanded into N chained 1-dof RBDL
 // revolute joints: the first carries the joint's offset translation, the
 // rest use an identity SpatialTransform (zero offset) since they act at
-// the same point. This reproduces fastik's intrinsic-axis composition
+// the same point. This reproduces QuickIK's intrinsic-axis composition
 // (see forward.rs: `rotation *= from_axis_angle(axis_local, angle)`
 // applied sequentially), because each subsequent RBDL joint's axis is
 // expressed in the frame already rotated by the previous dofs.
