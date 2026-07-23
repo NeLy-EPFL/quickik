@@ -45,8 +45,7 @@ fn main() {
             tree.n_dofs(),
             tree.state_dim()
         );
-        let leg_joint_names: Vec<&str> =
-            tree.joints[1..].iter().map(|j| j.name.as_str()).collect();
+        let leg_joint_names: Vec<&str> = tree.joints[1..].iter().map(|j| j.name.as_str()).collect();
         assert_eq!(
             leg_joint_names, fixtures.leg_joint_names,
             "{}'s leg_joint_names order doesn't match the loaded body plan's joints[1..] -- \

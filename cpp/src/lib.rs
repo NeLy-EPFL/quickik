@@ -159,7 +159,11 @@ mod ffi {
         /// Panics from the underlying solve (e.g. a `Position2D` observation
         /// given to a mapper-less solver) are caught and raised as an
         /// exception rather than aborting the process.
-        fn solve(self: &mut Solver, state: &mut State, observations: &[KeypointObservation]) -> Result<()>;
+        fn solve(
+            self: &mut Solver,
+            state: &mut State,
+            observations: &[KeypointObservation],
+        ) -> Result<()>;
         /// The solver's current configuration.
         fn config(self: &Solver) -> SolverConfig;
         /// Replaces the solver's configuration in place.
@@ -172,16 +176,27 @@ mod ffi {
         type SequenceSolver;
         /// Starts a new sequence at the neutral pose, for `tree`, with the
         /// given `config` and `mapper`.
-        fn new_sequence_solver(tree: &KinematicTree, config: SolverConfig, mapper: Mapper) -> Box<SequenceSolver>;
+        fn new_sequence_solver(
+            tree: &KinematicTree,
+            config: SolverConfig,
+            mapper: Mapper,
+        ) -> Box<SequenceSolver>;
         /// Solves the next frame in place, warm-started from the current
         /// pose, and returns the converged state.
         /// See `Solver::solve`'s docs on panics being raised as exceptions.
-        fn solve_frame(self: &mut SequenceSolver, observations: &[KeypointObservation]) -> Result<Box<State>>;
+        fn solve_frame(
+            self: &mut SequenceSolver,
+            observations: &[KeypointObservation],
+        ) -> Result<Box<State>>;
         /// Solves every frame in order, each warm-started from the previous
         /// one, returning the converged pose after each frame.
         /// `observations` is flattened: `n_joints * n_frames` long, frame `i`
         /// spanning `[i * n_joints, (i + 1) * n_joints)`.
-        fn solve_sequence(self: &mut SequenceSolver, observations: &[KeypointObservation], n_joints: usize) -> Result<Box<StateList>>;
+        fn solve_sequence(
+            self: &mut SequenceSolver,
+            observations: &[KeypointObservation],
+            n_joints: usize,
+        ) -> Result<Box<StateList>>;
         /// The most recently converged pose (a snapshot).
         fn state(self: &SequenceSolver) -> Box<State>;
         /// The solver's current configuration.
@@ -235,17 +250,23 @@ fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> ffi::KeypointObservation 
     }
 }
 
-fn to_core_observation(obs: &ffi::KeypointObservation) -> fastik_core::observation::KeypointObservation {
+fn to_core_observation(
+    obs: &ffi::KeypointObservation,
+) -> fastik_core::observation::KeypointObservation {
     match obs.kind {
         ffi::ObservationKind::Missing => fastik_core::observation::KeypointObservation::Missing,
-        ffi::ObservationKind::Position3D => fastik_core::observation::KeypointObservation::Position3D {
-            obs_pos: nalgebra::Vector3::new(obs.pos[0], obs.pos[1], obs.pos[2]),
-            weight: obs.weight,
-        },
-        ffi::ObservationKind::Position2D => fastik_core::observation::KeypointObservation::Position2D {
-            obs_pos: nalgebra::Vector2::new(obs.pos[0], obs.pos[1]),
-            weight: obs.weight,
-        },
+        ffi::ObservationKind::Position3D => {
+            fastik_core::observation::KeypointObservation::Position3D {
+                obs_pos: nalgebra::Vector3::new(obs.pos[0], obs.pos[1], obs.pos[2]),
+                weight: obs.weight,
+            }
+        }
+        ffi::ObservationKind::Position2D => {
+            fastik_core::observation::KeypointObservation::Position2D {
+                obs_pos: nalgebra::Vector2::new(obs.pos[0], obs.pos[1]),
+                weight: obs.weight,
+            }
+        }
         _ => unreachable!("unknown ObservationKind"),
     }
 }
@@ -266,7 +287,9 @@ impl Mapper3Dto2D for RuntimeMapper {
     ) -> (nalgebra::Vector2<f32>, nalgebra::DMatrix<f32>) {
         match self {
             RuntimeMapper::Camera(camera) => camera.project_3d_to_2d(pos_world3d, jacobian_world3d),
-            RuntimeMapper::XYView => fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d),
+            RuntimeMapper::XYView => {
+                fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
+            }
         }
     }
 }
@@ -285,7 +308,9 @@ fn to_core_camera(camera: &ffi::Camera) -> fastik_core::observation::Camera {
 fn to_runtime_mapper(mapper: &ffi::Mapper) -> Option<RuntimeMapper> {
     match mapper.kind {
         ffi::MapperKind::NoMapper => None,
-        ffi::MapperKind::CameraMapper => Some(RuntimeMapper::Camera(to_core_camera(&mapper.camera))),
+        ffi::MapperKind::CameraMapper => {
+            Some(RuntimeMapper::Camera(to_core_camera(&mapper.camera)))
+        }
         ffi::MapperKind::XYViewMapper => Some(RuntimeMapper::XYView),
         _ => unreachable!("unknown MapperKind"),
     }
@@ -294,18 +319,35 @@ fn to_runtime_mapper(mapper: &ffi::Mapper) -> Option<RuntimeMapper> {
 fn no_mapper() -> ffi::Mapper {
     ffi::Mapper {
         kind: ffi::MapperKind::NoMapper,
-        camera: ffi::Camera { fx: 0.0, fy: 0.0, cx: 0.0, cy: 0.0, world2cam_pos: [0.0; 3], world2cam_rot_mat: [0.0; 9] },
+        camera: ffi::Camera {
+            fx: 0.0,
+            fy: 0.0,
+            cx: 0.0,
+            cy: 0.0,
+            world2cam_pos: [0.0; 3],
+            world2cam_rot_mat: [0.0; 9],
+        },
     }
 }
 
 fn camera_mapper(camera: ffi::Camera) -> ffi::Mapper {
-    ffi::Mapper { kind: ffi::MapperKind::CameraMapper, camera }
+    ffi::Mapper {
+        kind: ffi::MapperKind::CameraMapper,
+        camera,
+    }
 }
 
 fn xyview_mapper() -> ffi::Mapper {
     ffi::Mapper {
         kind: ffi::MapperKind::XYViewMapper,
-        camera: ffi::Camera { fx: 0.0, fy: 0.0, cx: 0.0, cy: 0.0, world2cam_pos: [0.0; 3], world2cam_rot_mat: [0.0; 9] },
+        camera: ffi::Camera {
+            fx: 0.0,
+            fy: 0.0,
+            cx: 0.0,
+            cy: 0.0,
+            world2cam_pos: [0.0; 3],
+            world2cam_rot_mat: [0.0; 9],
+        },
     }
 }
 
@@ -320,7 +362,12 @@ fn runtime_mapper_to_ffi(mapper: Option<RuntimeMapper>) -> ffi::Mapper {
                 cx: camera.cx,
                 cy: camera.cy,
                 world2cam_pos: [p.x, p.y, p.z],
-                world2cam_rot_mat: camera.world2cam_rot_mat.transpose().as_slice().try_into().unwrap(),
+                world2cam_rot_mat: camera
+                    .world2cam_rot_mat
+                    .transpose()
+                    .as_slice()
+                    .try_into()
+                    .unwrap(),
             })
         }
         Some(RuntimeMapper::XYView) => xyview_mapper(),
@@ -349,7 +396,9 @@ fn to_core_config(
     }
 }
 
-fn from_core_config(config: &fastik_core::solver::SolverConfig<RuntimeMapper>) -> ffi::SolverConfig {
+fn from_core_config(
+    config: &fastik_core::solver::SolverConfig<RuntimeMapper>,
+) -> ffi::SolverConfig {
     ffi::SolverConfig {
         n_iterations: config.n_iterations,
         damping: config.damping,
@@ -383,11 +432,21 @@ fn catch_panic<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 }
 
 fn kinematic_tree_from_json_str(json_str: &str) -> Result<Box<KinematicTree>, String> {
-    catch_panic(|| KinematicTree(Arc::new(fastik_core::body_plan::KinematicTree::from_json_str(json_str)))).map(Box::new)
+    catch_panic(|| {
+        KinematicTree(Arc::new(
+            fastik_core::body_plan::KinematicTree::from_json_str(json_str),
+        ))
+    })
+    .map(Box::new)
 }
 
 fn kinematic_tree_from_json_file(path: &str) -> Result<Box<KinematicTree>, String> {
-    catch_panic(|| KinematicTree(Arc::new(fastik_core::body_plan::KinematicTree::from_json_file(path)))).map(Box::new)
+    catch_panic(|| {
+        KinematicTree(Arc::new(
+            fastik_core::body_plan::KinematicTree::from_json_file(path),
+        ))
+    })
+    .map(Box::new)
 }
 
 impl KinematicTree {
@@ -406,7 +465,9 @@ impl KinematicTree {
 struct State(fastik_core::state::State);
 
 fn state_neutral_pose(tree: &KinematicTree) -> Box<State> {
-    Box::new(State(fastik_core::state::State::neutral_pose(tree.0.clone())))
+    Box::new(State(fastik_core::state::State::neutral_pose(
+        tree.0.clone(),
+    )))
 }
 
 impl State {
@@ -445,8 +506,14 @@ fn split_into_frames(
     flat: &[ffi::KeypointObservation],
     n_joints: usize,
 ) -> Vec<Vec<fastik_core::observation::KeypointObservation>> {
-    assert_eq!(flat.len() % n_joints, 0, "observations length must be a multiple of n_joints");
-    flat.chunks(n_joints).map(|frame| frame.iter().map(to_core_observation).collect()).collect()
+    assert_eq!(
+        flat.len() % n_joints,
+        0,
+        "observations length must be a multiple of n_joints"
+    );
+    flat.chunks(n_joints)
+        .map(|frame| frame.iter().map(to_core_observation).collect())
+        .collect()
 }
 
 // =============================================================================
@@ -467,7 +534,11 @@ fn new_solver(tree: &KinematicTree, config: ffi::SolverConfig, mapper: ffi::Mapp
 }
 
 impl Solver {
-    fn solve(&mut self, state: &mut State, observations: &[ffi::KeypointObservation]) -> Result<(), String> {
+    fn solve(
+        &mut self,
+        state: &mut State,
+        observations: &[ffi::KeypointObservation],
+    ) -> Result<(), String> {
         let observations: Vec<_> = observations.iter().map(to_core_observation).collect();
         let inner = &mut self.inner;
         let state = &mut state.0;
@@ -493,21 +564,35 @@ struct SequenceSolver {
     mapper: Option<RuntimeMapper>,
 }
 
-fn new_sequence_solver(tree: &KinematicTree, config: ffi::SolverConfig, mapper: ffi::Mapper) -> Box<SequenceSolver> {
+fn new_sequence_solver(
+    tree: &KinematicTree,
+    config: ffi::SolverConfig,
+    mapper: ffi::Mapper,
+) -> Box<SequenceSolver> {
     let mapper = to_runtime_mapper(&mapper);
     Box::new(SequenceSolver {
-        inner: fastik_core::high_level::SequenceSolver::new(tree.0.clone(), to_core_config(config, mapper)),
+        inner: fastik_core::high_level::SequenceSolver::new(
+            tree.0.clone(),
+            to_core_config(config, mapper),
+        ),
         mapper,
     })
 }
 
 impl SequenceSolver {
-    fn solve_frame(&mut self, observations: &[ffi::KeypointObservation]) -> Result<Box<State>, String> {
+    fn solve_frame(
+        &mut self,
+        observations: &[ffi::KeypointObservation],
+    ) -> Result<Box<State>, String> {
         let observations: Vec<_> = observations.iter().map(to_core_observation).collect();
         let inner = &mut self.inner;
         catch_panic(move || Box::new(State(inner.solve_frame(&observations).clone())))
     }
-    fn solve_sequence(&mut self, observations: &[ffi::KeypointObservation], n_joints: usize) -> Result<Box<StateList>, String> {
+    fn solve_sequence(
+        &mut self,
+        observations: &[ffi::KeypointObservation],
+        n_joints: usize,
+    ) -> Result<Box<StateList>, String> {
         let sequence = split_into_frames(observations, n_joints);
         let inner = &mut self.inner;
         catch_panic(move || Box::new(StateList(inner.solve_sequence(&sequence))))
@@ -547,11 +632,13 @@ fn solve_sequence_segmented_parallel(
     };
     let core_config = to_core_config(config, mapper);
     catch_panic(move || {
-        Box::new(StateList(fastik_core::high_level::solve_sequence_segmented_parallel(
-            &tree.0,
-            core_config,
-            &sequence,
-            core_segmented_config,
-        )))
+        Box::new(StateList(
+            fastik_core::high_level::solve_sequence_segmented_parallel(
+                &tree.0,
+                core_config,
+                &sequence,
+                core_segmented_config,
+            ),
+        ))
     })
 }

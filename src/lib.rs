@@ -3,7 +3,6 @@
 //! frames (i.e. with warm starts) and multi-threaded batch processing, as well
 //! as low-level APIs for more specific use cases (e.g. real-time application).
 
-
 pub mod body_plan;
 pub mod forward;
 pub mod high_level;

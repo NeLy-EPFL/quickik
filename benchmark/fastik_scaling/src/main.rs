@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 use fastik::body_plan::KinematicTree;
 use fastik_benchmark::fixtures;
-use fastik_benchmark::perf::{bench_multithread_sequence_throughput, frames_for_n_segments, tiled_native_rate_sequence};
+use fastik_benchmark::perf::{
+    bench_multithread_sequence_throughput, frames_for_n_segments, tiled_native_rate_sequence,
+};
 
 fn write_results_json(n_threads: usize, total_frames: usize, elapsed_s: f64, throughput_fps: f64) {
     let out_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plot/results");
@@ -60,5 +62,10 @@ fn main() {
          throughput={throughput_fps:>10.1} frames/s",
     );
 
-    write_results_json(n_threads, total_frames, elapsed.as_secs_f64(), throughput_fps);
+    write_results_json(
+        n_threads,
+        total_frames,
+        elapsed.as_secs_f64(),
+        throughput_fps,
+    );
 }

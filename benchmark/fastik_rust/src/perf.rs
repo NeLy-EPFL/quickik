@@ -76,8 +76,12 @@ fn observations_from_target_egos<'a>(
 /// Tiles the native-rate fixture (real, contiguous frame-to-frame motion) up
 /// to `len` frames, for benchmarks that need more frames than the 300-frame
 /// fixture has (e.g. to occupy many threads).
-pub fn tiled_native_rate_sequence(native_rate_frames: &[NativeRateFrame], len: usize) -> Vec<Vec<KeypointObservation>> {
-    let base = observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
+pub fn tiled_native_rate_sequence(
+    native_rate_frames: &[NativeRateFrame],
+    len: usize,
+) -> Vec<Vec<KeypointObservation>> {
+    let base =
+        observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
     (0..len).map(|i| base[i % base.len()].clone()).collect()
 }
 
@@ -112,8 +116,12 @@ fn bench_single_frame_latency(
 /// tracking pipeline would see), default config. A second, fresh
 /// `SequenceSolver` is used for the timed pass after warming up once, so the
 /// sequence's own frame-to-frame warm-starting is what's measured.
-fn bench_single_thread_sequence_throughput(tree: &Arc<KinematicTree>, native_rate_frames: &[NativeRateFrame]) -> Vec<Duration> {
-    let all_obs = observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
+fn bench_single_thread_sequence_throughput(
+    tree: &Arc<KinematicTree>,
+    native_rate_frames: &[NativeRateFrame],
+) -> Vec<Duration> {
+    let all_obs =
+        observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
     let config = SolverConfig::default();
 
     let mut seq: SequenceSolver = SequenceSolver::new(tree.clone(), config);
@@ -135,7 +143,10 @@ fn bench_single_thread_sequence_throughput(tree: &Arc<KinematicTree>, native_rat
 /// a longer tiled sequence, using however many threads
 /// [`std::thread::available_parallelism`] reports (the full machine, unless
 /// constrained via `taskset`). Warms up once, then times a second run.
-pub fn bench_multithread_sequence_throughput(tree: &Arc<KinematicTree>, sequence: &[Vec<KeypointObservation>]) -> Duration {
+pub fn bench_multithread_sequence_throughput(
+    tree: &Arc<KinematicTree>,
+    sequence: &[Vec<KeypointObservation>],
+) -> Duration {
     let config: SolverConfig = SolverConfig::default();
     let segmented_config = SegmentedSolveConfig {
         segment_len: SEGMENT_LEN,
@@ -184,8 +195,13 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         bench_single_thread_sequence_throughput(tree, &fixtures.native_rate_frames),
     );
 
-    println!("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, {MULTITHREAD_N_THREADS} threads) --");
-    let sequence = tiled_native_rate_sequence(&fixtures.native_rate_frames, frames_for_n_segments(MULTITHREAD_N_THREADS));
+    println!(
+        "\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, {MULTITHREAD_N_THREADS} threads) --"
+    );
+    let sequence = tiled_native_rate_sequence(
+        &fixtures.native_rate_frames,
+        frames_for_n_segments(MULTITHREAD_N_THREADS),
+    );
     let elapsed = bench_multithread_sequence_throughput(tree, &sequence);
     let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(

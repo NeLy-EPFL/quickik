@@ -16,7 +16,9 @@ impl fastik_core::observation::Mapper3Dto2D for Mapper {
     ) -> (nalgebra::Vector2<f32>, nalgebra::DMatrix<f32>) {
         match self {
             Mapper::Camera(camera) => camera.project_3d_to_2d(pos_world3d, jacobian_world3d),
-            Mapper::XYView => fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d),
+            Mapper::XYView => {
+                fastik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
+            }
         }
     }
 }
@@ -30,7 +32,9 @@ pub(crate) fn extract_mapper(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<
     } else if obj.extract::<XYView>().is_ok() {
         Ok(Some(Mapper::XYView))
     } else {
-        Err(PyValueError::new_err("mapper must be a Camera, an XYView, or None"))
+        Err(PyValueError::new_err(
+            "mapper must be a Camera, an XYView, or None",
+        ))
     }
 }
 
@@ -88,7 +92,12 @@ impl Camera {
             cx: camera.cx,
             cy: camera.cy,
             world2cam_pos: [p.x, p.y, p.z],
-            world2cam_rot_mat: camera.world2cam_rot_mat.transpose().as_slice().try_into().unwrap(),
+            world2cam_rot_mat: camera
+                .world2cam_rot_mat
+                .transpose()
+                .as_slice()
+                .try_into()
+                .unwrap(),
         }
     }
 }
@@ -98,7 +107,14 @@ impl Camera {
     /// `world2cam_pos` must have exactly 3 elements and `world2cam_rot_mat`
     /// exactly 9 (row-major 3x3); raises `ValueError` otherwise.
     #[new]
-    fn new(fx: f32, fy: f32, cx: f32, cy: f32, world2cam_pos: Vec<f32>, world2cam_rot_mat: Vec<f32>) -> PyResult<Self> {
+    fn new(
+        fx: f32,
+        fy: f32,
+        cx: f32,
+        cy: f32,
+        world2cam_pos: Vec<f32>,
+        world2cam_rot_mat: Vec<f32>,
+    ) -> PyResult<Self> {
         Ok(Camera {
             fx,
             fy,

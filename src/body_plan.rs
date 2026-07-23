@@ -109,7 +109,7 @@ impl KinematicTree {
                 name: joint_spec.name,
                 offset_pos: Vector3::from(joint_spec.offset_pos),
                 offset_quat: quat_from_wxyz(joint_spec.offset_quat),
-                dofs: dofs,
+                dofs,
                 parent: parent_idx,
                 children: Vec::new(),
                 dof_offset: curr_dof_offset,

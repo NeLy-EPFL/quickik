@@ -72,8 +72,8 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     /// Buffers for accumulating `J^T*J`/`J^T*r` into `jtj`/`jtr` without
     /// allocating a temporary for the transpose or the product.
     jacobian_transpose_buffer: DMatrix<f32>, // state_dim x 3
-    jtj_buffer: DMatrix<f32>,                // state_dim x state_dim
-    jtr_buffer: DVector<f32>,                // state_dim
+    jtj_buffer: DMatrix<f32>, // state_dim x state_dim
+    jtr_buffer: DVector<f32>, // state_dim
     pub config: SolverConfig<M>,
 }
 

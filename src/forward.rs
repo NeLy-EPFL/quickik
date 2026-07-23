@@ -52,7 +52,7 @@ impl ForwardKinematicsWorkspace {
 pub fn evaluate_fwdkin(workspace: &mut ForwardKinematicsWorkspace, state: &State) {
     debug_assert_eq!(workspace.n_joints, state.kinematic_tree.n_joints());
 
-    // Matrix::fill is a generic, unspecialized per-element loop and it's ~60x 
+    // Matrix::fill is a generic, unspecialized per-element loop and it's ~60x
     // slower than filling the underlying contiguous storage directly using
     // matrix.as_mut_slice().fill.
     workspace.kpt_jacobian.as_mut_slice().fill(0.0);

@@ -16,7 +16,9 @@ impl KinematicTree {
     #[staticmethod]
     fn from_json_str(json_str: &str) -> Self {
         KinematicTree {
-            inner: Arc::new(fastik_core::body_plan::KinematicTree::from_json_str(json_str)),
+            inner: Arc::new(fastik_core::body_plan::KinematicTree::from_json_str(
+                json_str,
+            )),
         }
     }
 

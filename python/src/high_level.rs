@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
-use crate::observation::{KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py};
+use crate::observation::{
+    KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
+};
 use crate::solver::SolverConfig;
 use crate::state::State;
 
@@ -30,7 +32,10 @@ impl SequenceSolver {
     ) -> PyResult<Self> {
         let mapper = extract_mapper(mapper.as_ref())?;
         Ok(SequenceSolver {
-            inner: fastik_core::high_level::SequenceSolver::new(kinematic_tree.inner, config.as_rust(mapper)),
+            inner: fastik_core::high_level::SequenceSolver::new(
+                kinematic_tree.inner,
+                config.as_rust(mapper),
+            ),
             config: Py::new(py, config)?,
             mapper,
         })
@@ -38,16 +43,26 @@ impl SequenceSolver {
 
     /// Solves the next frame, warm-started from the current pose, and
     /// returns the converged state (also available as `.state`).
-    fn solve_frame(&mut self, py: Python<'_>, observations: Vec<PyRef<'_, KeypointObservation>>) -> State {
+    fn solve_frame(
+        &mut self,
+        py: Python<'_>,
+        observations: Vec<PyRef<'_, KeypointObservation>>,
+    ) -> State {
         self.sync_config(py);
         let state = self.inner.solve_frame(&extract_observations(observations));
-        State { inner: state.clone() }
+        State {
+            inner: state.clone(),
+        }
     }
 
     /// Solves every frame in `sequence` (a list of per-frame observation
     /// lists) in order, each warm-started from the previous one; returns
     /// the converged pose after each frame.
-    fn solve_sequence(&mut self, py: Python<'_>, sequence: Vec<Vec<PyRef<'_, KeypointObservation>>>) -> Vec<State> {
+    fn solve_sequence(
+        &mut self,
+        py: Python<'_>,
+        sequence: Vec<Vec<PyRef<'_, KeypointObservation>>>,
+    ) -> Vec<State> {
         self.sync_config(py);
         let sequence: Vec<Vec<_>> = sequence.into_iter().map(extract_observations).collect();
         self.inner

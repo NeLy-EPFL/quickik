@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
-use crate::observation::{KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py};
+use crate::observation::{
+    KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
+};
 use crate::state::State;
 
 /// Configuration for the inverse kinematics solver. Does not include the
@@ -33,7 +35,10 @@ pub(crate) struct SolverConfig {
 }
 
 impl SolverConfig {
-    pub(crate) fn as_rust(&self, mapper: Option<Mapper>) -> fastik_core::solver::SolverConfig<Mapper> {
+    pub(crate) fn as_rust(
+        &self,
+        mapper: Option<Mapper>,
+    ) -> fastik_core::solver::SolverConfig<Mapper> {
         fastik_core::solver::SolverConfig {
             n_iterations: self.n_iterations,
             damping: self.damping,
@@ -113,9 +118,15 @@ impl Solver {
     /// `state`, given one `KeypointObservation` per joint (in
     /// `kinematic_tree.joints` order; use `KeypointObservation.missing()`
     /// for keypoints not observed this frame).
-    fn solve(&mut self, py: Python<'_>, mut state: PyRefMut<'_, State>, observations: Vec<PyRef<'_, KeypointObservation>>) {
+    fn solve(
+        &mut self,
+        py: Python<'_>,
+        mut state: PyRefMut<'_, State>,
+        observations: Vec<PyRef<'_, KeypointObservation>>,
+    ) {
         self.sync_config(py);
-        self.inner.solve(&mut state.inner, &extract_observations(observations));
+        self.inner
+            .solve(&mut state.inner, &extract_observations(observations));
     }
 
     /// The live config; see the class docstring for mutation semantics.

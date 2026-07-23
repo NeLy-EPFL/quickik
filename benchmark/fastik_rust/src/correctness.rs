@@ -17,10 +17,14 @@ use crate::fixtures::{Fixtures, RealFrame, SyntheticFrame};
 pub(crate) fn build_observations(target_ego: &[[f32; 3]]) -> Vec<KeypointObservation> {
     let mut obs = Vec::with_capacity(target_ego.len() + 1);
     obs.push(KeypointObservation::Missing);
-    obs.extend(target_ego.iter().map(|&[x, y, z]| KeypointObservation::Position3D {
-        obs_pos: Vector3::new(x, y, z),
-        weight: 1.0,
-    }));
+    obs.extend(
+        target_ego
+            .iter()
+            .map(|&[x, y, z]| KeypointObservation::Position3D {
+                obs_pos: Vector3::new(x, y, z),
+                weight: 1.0,
+            }),
+    );
     obs
 }
 
@@ -107,7 +111,8 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
 pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
 
-    let mut sequence_solver: SequenceSolver = SequenceSolver::new(tree.clone(), SolverConfig::default());
+    let mut sequence_solver: SequenceSolver =
+        SequenceSolver::new(tree.clone(), SolverConfig::default());
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
 
     let mut fastik_rms_all = Vec::new();

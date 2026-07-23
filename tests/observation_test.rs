@@ -4,11 +4,7 @@ use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
 #[test]
 fn xyview_drops_z_and_passes_through_xy() {
     let mapper = XYView;
-    let jacobian_world3d = DMatrix::from_row_slice(
-        3,
-        2,
-        &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-    );
+    let jacobian_world3d = DMatrix::from_row_slice(3, 2, &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     let (pos2d, jac2d) = mapper.project_3d_to_2d(&Vector3::new(1.0, 2.0, 3.0), &jacobian_world3d);
 
     assert_eq!(pos2d, Vector2::new(1.0, 2.0));
