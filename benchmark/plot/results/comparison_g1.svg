@@ -1,0 +1,1111 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="868.0325pt" height="506.236328pt" viewBox="0 0 868.0325 506.236328" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-23T03:45:14.217836</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 506.236328 
+L 868.0325 506.236328 
+L 868.0325 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 100.5125 231.591325 
+L 424.052926 231.591325 
+L 424.052926 77.76 
+L 100.5125 77.76 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 100.5125 224.598992 
+L 424.052926 224.598992 
+L 424.052926 214.411487 
+L 100.5125 214.411487 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #888888"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 100.5125 206.076256 
+L 208.359309 206.076256 
+L 208.359309 195.888751 
+L 100.5125 195.888751 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #888888"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 100.5125 187.55352 
+L 149.76274 187.55352 
+L 149.76274 177.366015 
+L 100.5125 177.366015 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #888888"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 100.5125 169.030783 
+L 130.577414 169.030783 
+L 130.577414 158.843278 
+L 100.5125 158.843278 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #888888"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 100.5125 150.508047 
+L 129.548401 150.508047 
+L 129.548401 140.320542 
+L 100.5125 140.320542 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #888888"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 100.5125 131.985311 
+L 112.265122 131.985311 
+L 112.265122 121.797806 
+L 100.5125 121.797806 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 100.5125 113.462574 
+L 110.635758 113.462574 
+L 110.635758 103.275069 
+L 100.5125 103.275069 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 100.5125 94.939838 
+L 110.302188 94.939838 
+L 110.302188 84.752333 
+L 100.5125 84.752333 
+z
+" clip-path="url(#pbcf356a192)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="m1ea9d02f23" d="M 0 0 
+L 0 3.5 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="100.5125" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="100.5125" y="249.279802" transform="rotate(-0 100.5125 249.279802)">0.0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="156.92356" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="156.92356" y="249.279802" transform="rotate(-0 156.92356 249.279802)">0.5</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_3">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="213.334619" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="213.334619" y="249.279802" transform="rotate(-0 213.334619 249.279802)">1.0</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="269.745679" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="269.745679" y="249.279802" transform="rotate(-0 269.745679 249.279802)">1.5</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_5">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="326.156738" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="326.156738" y="249.279802" transform="rotate(-0 326.156738 249.279802)">2.0</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="382.567798" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="382.567798" y="249.279802" transform="rotate(-0 382.567798 249.279802)">2.5</text>
+     </g>
+    </g>
+    <g id="text_7">
+     <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="262.282713" y="266.897966" transform="rotate(-0 262.282713 266.897966)">Latency (ms)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_7">
+      <defs>
+       <path id="mbad1f9fbf2" d="M 0 0 
+L -3.5 0 
+" style="stroke: #000000; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="219.50524" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="224.849478" transform="rotate(-0 93.5125 224.849478)">KDL</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="200.982503" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="206.326742" transform="rotate(-0 93.5125 206.326742)">Pinocchio (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_9">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="182.459767" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="187.804005" transform="rotate(-0 93.5125 187.804005)">Pinocchio (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="163.937031" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_11">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="169.281269" transform="rotate(-0 93.5125 169.281269)">RBDL (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_11">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="145.414294" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_12">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="150.758533" transform="rotate(-0 93.5125 150.758533)">RBDL (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="126.891558" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_13">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="132.235796" transform="rotate(-0 93.5125 132.235796)">FastIK (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_13">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="108.368822" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_14">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="113.71306" transform="rotate(-0 93.5125 113.71306)">FastIK (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="89.846085" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_15">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="95.190324" transform="rotate(-0 93.5125 95.190324)">FastIK (Rust)</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_11">
+    <path d="M 100.5125 231.591325 
+L 100.5125 77.76 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 100.5125 231.591325 
+L 424.052926 231.591325 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end; fill: #ffffff" x="420.052926" y="222.608755" transform="rotate(-0 420.052926 222.608755)">52.0 ms (capped in chart)</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="212.359309" y="204.086019" transform="rotate(-0 212.359309 204.086019)">956 μs</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="153.76274" y="185.563283" transform="rotate(-0 153.76274 185.563283)">437 μs</text>
+   </g>
+   <g id="text_19">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="134.577414" y="167.040546" transform="rotate(-0 134.577414 167.040546)">266 μs</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="133.548401" y="148.51781" transform="rotate(-0 133.548401 148.51781)">257 μs</text>
+   </g>
+   <g id="text_21">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="116.265122" y="129.995074" transform="rotate(-0 116.265122 129.995074)">104 μs</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="114.635758" y="111.472337" transform="rotate(-0 114.635758 111.472337)">89.7 μs</text>
+   </g>
+   <g id="text_23">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="114.302188" y="92.949601" transform="rotate(-0 114.302188 92.949601)">86.8 μs</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 12px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="262.282713" y="71.76" transform="rotate(-0 262.282713 71.76)">Mean single-frame latency (with early stopping)</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_13">
+    <path d="M 537.292074 231.591325 
+L 860.8325 231.591325 
+L 860.8325 77.76 
+L 537.292074 77.76 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 537.292074 224.598992 
+L 538.215427 224.598992 
+L 538.215427 214.411487 
+L 537.292074 214.411487 
+z
+" clip-path="url(#pef7923a735)" style="fill: #888888"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 537.292074 206.076256 
+L 561.739341 206.076256 
+L 561.739341 195.888751 
+L 537.292074 195.888751 
+z
+" clip-path="url(#pef7923a735)" style="fill: #888888"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 537.292074 187.55352 
+L 593.409578 187.55352 
+L 593.409578 177.366015 
+L 537.292074 177.366015 
+z
+" clip-path="url(#pef7923a735)" style="fill: #888888"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 537.292074 169.030783 
+L 676.465224 169.030783 
+L 676.465224 158.843278 
+L 537.292074 158.843278 
+z
+" clip-path="url(#pef7923a735)" style="fill: #888888"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 537.292074 150.508047 
+L 679.421745 150.508047 
+L 679.421745 140.320542 
+L 537.292074 140.320542 
+z
+" clip-path="url(#pef7923a735)" style="fill: #888888"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 537.292074 131.985311 
+L 778.632056 131.985311 
+L 778.632056 121.797806 
+L 537.292074 121.797806 
+z
+" clip-path="url(#pef7923a735)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 537.292074 113.462574 
+L 809.286278 113.462574 
+L 809.286278 103.275069 
+L 537.292074 103.275069 
+z
+" clip-path="url(#pef7923a735)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 537.292074 94.939838 
+L 818.631575 94.939838 
+L 818.631575 84.752333 
+L 537.292074 84.752333 
+z
+" clip-path="url(#pef7923a735)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_7">
+     <g id="line2d_15">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="537.292074" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_25">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="537.292074" y="249.279802" transform="rotate(-0 537.292074 249.279802)">0</text>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="598.550375" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_26">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="598.550375" y="249.279802" transform="rotate(-0 598.550375 249.279802)">1</text>
+     </g>
+    </g>
+    <g id="xtick_9">
+     <g id="line2d_17">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="659.808675" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_27">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="659.808675" y="249.279802" transform="rotate(-0 659.808675 249.279802)">2</text>
+     </g>
+    </g>
+    <g id="xtick_10">
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="721.066975" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_28">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="721.066975" y="249.279802" transform="rotate(-0 721.066975 249.279802)">3</text>
+     </g>
+    </g>
+    <g id="xtick_11">
+     <g id="line2d_19">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="782.325275" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_29">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="782.325275" y="249.279802" transform="rotate(-0 782.325275 249.279802)">4</text>
+     </g>
+    </g>
+    <g id="xtick_12">
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="843.583575" y="231.591325" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_30">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="843.583575" y="249.279802" transform="rotate(-0 843.583575 249.279802)">5</text>
+     </g>
+    </g>
+    <g id="text_31">
+     <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="699.062287" y="266.897966" transform="rotate(-0 699.062287 266.897966)">Throughput (kFPS)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4">
+    <g id="ytick_9">
+     <g id="line2d_21">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="219.50524" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_32">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="224.849478" transform="rotate(-0 530.292074 224.849478)">KDL</text>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="200.982503" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_33">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="206.326742" transform="rotate(-0 530.292074 206.326742)">Pinocchio (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_23">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="182.459767" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_34">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="187.804005" transform="rotate(-0 530.292074 187.804005)">Pinocchio (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_24">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="163.937031" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_35">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="169.281269" transform="rotate(-0 530.292074 169.281269)">RBDL (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_25">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="145.414294" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_36">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="150.758533" transform="rotate(-0 530.292074 150.758533)">RBDL (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_26">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="126.891558" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_37">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="132.235796" transform="rotate(-0 530.292074 132.235796)">FastIK (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_15">
+     <g id="line2d_27">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="108.368822" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_38">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="113.71306" transform="rotate(-0 530.292074 113.71306)">FastIK (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_16">
+     <g id="line2d_28">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="89.846085" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_39">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="95.190324" transform="rotate(-0 530.292074 95.190324)">FastIK (Rust)</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_22">
+    <path d="M 537.292074 231.591325 
+L 537.292074 77.76 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 537.292074 231.591325 
+L 860.8325 231.591325 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_40">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="542.215427" y="222.608755" transform="rotate(-0 542.215427 222.608755)">15.1 FPS</text>
+   </g>
+   <g id="text_41">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="565.739341" y="204.086019" transform="rotate(-0 565.739341 204.086019)">399 FPS</text>
+   </g>
+   <g id="text_42">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="597.409578" y="185.563283" transform="rotate(-0 597.409578 185.563283)">916 FPS</text>
+   </g>
+   <g id="text_43">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="680.465224" y="167.040546" transform="rotate(-0 680.465224 167.040546)">2.27 kFPS</text>
+   </g>
+   <g id="text_44">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="683.421745" y="148.51781" transform="rotate(-0 683.421745 148.51781)">2.32 kFPS</text>
+   </g>
+   <g id="text_45">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="782.632056" y="129.995074" transform="rotate(-0 782.632056 129.995074)">3.94 kFPS</text>
+   </g>
+   <g id="text_46">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="813.286278" y="111.472337" transform="rotate(-0 813.286278 111.472337)">4.44 kFPS</text>
+   </g>
+   <g id="text_47">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="822.631575" y="92.949601" transform="rotate(-0 822.631575 92.949601)">4.59 kFPS</text>
+   </g>
+   <g id="text_48">
+    <text style="font-size: 12px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="699.062287" y="71.76" transform="rotate(-0 699.062287 71.76)">Throughput (sequential frames, single thread)</text>
+   </g>
+  </g>
+  <g id="axes_3">
+   <g id="patch_24">
+    <path d="M 100.5125 460.8 
+L 424.052926 460.8 
+L 424.052926 306.968675 
+L 100.5125 306.968675 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 100.5125 453.807667 
+L 381.852 453.807667 
+L 381.852 443.620162 
+L 100.5125 443.620162 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #888888"/>
+   </g>
+   <g id="patch_26">
+    <path d="M 100.5125 435.284931 
+L 201.445635 435.284931 
+L 201.445635 425.097426 
+L 100.5125 425.097426 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #888888"/>
+   </g>
+   <g id="patch_27">
+    <path d="M 100.5125 416.762194 
+L 146.381415 416.762194 
+L 146.381415 406.574689 
+L 100.5125 406.574689 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #888888"/>
+   </g>
+   <g id="patch_28">
+    <path d="M 100.5125 398.239458 
+L 119.236669 398.239458 
+L 119.236669 388.051953 
+L 100.5125 388.051953 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #888888"/>
+   </g>
+   <g id="patch_29">
+    <path d="M 100.5125 379.716722 
+L 118.641804 379.716722 
+L 118.641804 369.529217 
+L 100.5125 369.529217 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #888888"/>
+   </g>
+   <g id="patch_30">
+    <path d="M 100.5125 361.193985 
+L 111.470566 361.193985 
+L 111.470566 351.00648 
+L 100.5125 351.00648 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_31">
+    <path d="M 100.5125 342.671249 
+L 109.869533 342.671249 
+L 109.869533 332.483744 
+L 100.5125 332.483744 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_32">
+    <path d="M 100.5125 324.148513 
+L 109.999989 324.148513 
+L 109.999989 313.961008 
+L 100.5125 313.961008 
+z
+" clip-path="url(#p6a354cd6e2)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="matplotlib.axis_5">
+    <g id="xtick_13">
+     <g id="line2d_29">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="100.5125" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_49">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="100.5125" y="478.488477" transform="rotate(-0 100.5125 478.488477)">0</text>
+     </g>
+    </g>
+    <g id="xtick_14">
+     <g id="line2d_30">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="142.951102" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_50">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="142.951102" y="478.488477" transform="rotate(-0 142.951102 478.488477)">1</text>
+     </g>
+    </g>
+    <g id="xtick_15">
+     <g id="line2d_31">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="185.389705" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_51">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="185.389705" y="478.488477" transform="rotate(-0 185.389705 478.488477)">2</text>
+     </g>
+    </g>
+    <g id="xtick_16">
+     <g id="line2d_32">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="227.828307" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_52">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="227.828307" y="478.488477" transform="rotate(-0 227.828307 478.488477)">3</text>
+     </g>
+    </g>
+    <g id="xtick_17">
+     <g id="line2d_33">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="270.26691" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_53">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="270.26691" y="478.488477" transform="rotate(-0 270.26691 478.488477)">4</text>
+     </g>
+    </g>
+    <g id="xtick_18">
+     <g id="line2d_34">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="312.705512" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_54">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="312.705512" y="478.488477" transform="rotate(-0 312.705512 478.488477)">5</text>
+     </g>
+    </g>
+    <g id="xtick_19">
+     <g id="line2d_35">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="355.144115" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_55">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="355.144115" y="478.488477" transform="rotate(-0 355.144115 478.488477)">6</text>
+     </g>
+    </g>
+    <g id="xtick_20">
+     <g id="line2d_36">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="397.582717" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_56">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="397.582717" y="478.488477" transform="rotate(-0 397.582717 478.488477)">7</text>
+     </g>
+    </g>
+    <g id="text_57">
+     <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="262.282713" y="496.106641" transform="rotate(-0 262.282713 496.106641)">Latency (ms)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_6">
+    <g id="ytick_17">
+     <g id="line2d_37">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="448.713915" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_58">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="454.058153" transform="rotate(-0 93.5125 454.058153)">KDL</text>
+     </g>
+    </g>
+    <g id="ytick_18">
+     <g id="line2d_38">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="430.191178" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_59">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="435.535416" transform="rotate(-0 93.5125 435.535416)">Pinocchio (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_19">
+     <g id="line2d_39">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="411.668442" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_60">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="417.01268" transform="rotate(-0 93.5125 417.01268)">Pinocchio (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_20">
+     <g id="line2d_40">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="393.145706" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_61">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="398.489944" transform="rotate(-0 93.5125 398.489944)">RBDL (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_21">
+     <g id="line2d_41">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="374.622969" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_62">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="379.967207" transform="rotate(-0 93.5125 379.967207)">RBDL (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_22">
+     <g id="line2d_42">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="356.100233" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_63">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="361.444471" transform="rotate(-0 93.5125 361.444471)">FastIK (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_23">
+     <g id="line2d_43">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="337.577497" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_64">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="342.921735" transform="rotate(-0 93.5125 342.921735)">FastIK (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_24">
+     <g id="line2d_44">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="100.5125" y="319.05476" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_65">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="93.5125" y="324.398998" transform="rotate(-0 93.5125 324.398998)">FastIK (Rust)</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_33">
+    <path d="M 100.5125 460.8 
+L 100.5125 306.968675 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_34">
+    <path d="M 100.5125 460.8 
+L 424.052926 460.8 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_66">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="385.852" y="451.81743" transform="rotate(-0 385.852 451.81743)">6.63 ms</text>
+   </g>
+   <g id="text_67">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="205.445635" y="433.294694" transform="rotate(-0 205.445635 433.294694)">2.38 ms</text>
+   </g>
+   <g id="text_68">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="150.381415" y="414.771957" transform="rotate(-0 150.381415 414.771957)">1.08 ms</text>
+   </g>
+   <g id="text_69">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="123.236669" y="396.249221" transform="rotate(-0 123.236669 396.249221)">441 μs</text>
+   </g>
+   <g id="text_70">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="122.641804" y="377.726485" transform="rotate(-0 122.641804 377.726485)">427 μs</text>
+   </g>
+   <g id="text_71">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="115.470566" y="359.203748" transform="rotate(-0 115.470566 359.203748)">258 μs</text>
+   </g>
+   <g id="text_72">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="113.869533" y="340.681012" transform="rotate(-0 113.869533 340.681012)">220 μs</text>
+   </g>
+   <g id="text_73">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="113.999989" y="322.158276" transform="rotate(-0 113.999989 322.158276)">224 μs</text>
+   </g>
+   <g id="text_74">
+    <text style="font-size: 12px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="262.282713" y="300.968675" transform="rotate(-0 262.282713 300.968675)">Single-frame latency (fixed 10 iters)</text>
+   </g>
+  </g>
+  <g id="axes_4">
+   <g id="patch_35">
+    <path d="M 537.292074 460.8 
+L 860.8325 460.8 
+L 860.8325 306.968675 
+L 537.292074 306.968675 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="patch_36">
+    <path d="M 537.292074 453.807667 
+L 538.46586 453.807667 
+L 538.46586 443.620162 
+L 537.292074 443.620162 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #888888"/>
+   </g>
+   <g id="patch_37">
+    <path d="M 537.292074 435.284931 
+L 559.704122 435.284931 
+L 559.704122 425.097426 
+L 537.292074 425.097426 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #888888"/>
+   </g>
+   <g id="patch_38">
+    <path d="M 537.292074 416.762194 
+L 590.566956 416.762194 
+L 590.566956 406.574689 
+L 537.292074 406.574689 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #888888"/>
+   </g>
+   <g id="patch_39">
+    <path d="M 537.292074 398.239458 
+L 667.37314 398.239458 
+L 667.37314 388.051953 
+L 537.292074 388.051953 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #888888"/>
+   </g>
+   <g id="patch_40">
+    <path d="M 537.292074 379.716722 
+L 673.769806 379.716722 
+L 673.769806 369.529217 
+L 537.292074 369.529217 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #888888"/>
+   </g>
+   <g id="patch_41">
+    <path d="M 537.292074 361.193985 
+L 818.631575 361.193985 
+L 818.631575 351.00648 
+L 537.292074 351.00648 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_42">
+    <path d="M 537.292074 342.671249 
+L 792.450276 342.671249 
+L 792.450276 332.483744 
+L 537.292074 332.483744 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="patch_43">
+    <path d="M 537.292074 324.148513 
+L 789.545031 324.148513 
+L 789.545031 313.961008 
+L 537.292074 313.961008 
+z
+" clip-path="url(#pf3c299723a)" style="fill: #ff7f0e"/>
+   </g>
+   <g id="matplotlib.axis_7">
+    <g id="xtick_21">
+     <g id="line2d_45">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="537.292074" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_75">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="537.292074" y="478.488477" transform="rotate(-0 537.292074 478.488477)">0</text>
+     </g>
+    </g>
+    <g id="xtick_22">
+     <g id="line2d_46">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="591.314848" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_76">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="591.314848" y="478.488477" transform="rotate(-0 591.314848 478.488477)">5</text>
+     </g>
+    </g>
+    <g id="xtick_23">
+     <g id="line2d_47">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="645.337621" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_77">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="645.337621" y="478.488477" transform="rotate(-0 645.337621 478.488477)">10</text>
+     </g>
+    </g>
+    <g id="xtick_24">
+     <g id="line2d_48">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="699.360394" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_78">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="699.360394" y="478.488477" transform="rotate(-0 699.360394 478.488477)">15</text>
+     </g>
+    </g>
+    <g id="xtick_25">
+     <g id="line2d_49">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="753.383167" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_79">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="753.383167" y="478.488477" transform="rotate(-0 753.383167 478.488477)">20</text>
+     </g>
+    </g>
+    <g id="xtick_26">
+     <g id="line2d_50">
+      <g>
+       <use xlink:href="#m1ea9d02f23" x="807.40594" y="460.8" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_80">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="807.40594" y="478.488477" transform="rotate(-0 807.40594 478.488477)">25</text>
+     </g>
+    </g>
+    <g id="text_81">
+     <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="699.062287" y="496.106641" transform="rotate(-0 699.062287 496.106641)">Throughput (kFPS)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_8">
+    <g id="ytick_25">
+     <g id="line2d_51">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="448.713915" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_82">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="454.058153" transform="rotate(-0 530.292074 454.058153)">KDL</text>
+     </g>
+    </g>
+    <g id="ytick_26">
+     <g id="line2d_52">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="430.191178" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_83">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="435.535416" transform="rotate(-0 530.292074 435.535416)">Pinocchio (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_27">
+     <g id="line2d_53">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="411.668442" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_84">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="417.01268" transform="rotate(-0 530.292074 417.01268)">Pinocchio (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_28">
+     <g id="line2d_54">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="393.145706" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_85">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="398.489944" transform="rotate(-0 530.292074 398.489944)">RBDL (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_29">
+     <g id="line2d_55">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="374.622969" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_86">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="379.967207" transform="rotate(-0 530.292074 379.967207)">RBDL (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_30">
+     <g id="line2d_56">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="356.100233" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_87">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="361.444471" transform="rotate(-0 530.292074 361.444471)">FastIK (Python)</text>
+     </g>
+    </g>
+    <g id="ytick_31">
+     <g id="line2d_57">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="337.577497" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_88">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="342.921735" transform="rotate(-0 530.292074 342.921735)">FastIK (C++)</text>
+     </g>
+    </g>
+    <g id="ytick_32">
+     <g id="line2d_58">
+      <g>
+       <use xlink:href="#mbad1f9fbf2" x="537.292074" y="319.05476" style="stroke: #000000; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_89">
+      <text style="font-size: 10px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: end" x="530.292074" y="324.398998" transform="rotate(-0 530.292074 324.398998)">FastIK (Rust)</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_44">
+    <path d="M 537.292074 460.8 
+L 537.292074 306.968675 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_45">
+    <path d="M 537.292074 460.8 
+L 860.8325 460.8 
+" style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_90">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="542.46586" y="451.81743" transform="rotate(-0 542.46586 451.81743)">109 FPS</text>
+   </g>
+   <g id="text_91">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="563.704122" y="433.294694" transform="rotate(-0 563.704122 433.294694)">2.07 kFPS</text>
+   </g>
+   <g id="text_92">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="594.566956" y="414.771957" transform="rotate(-0 594.566956 414.771957)">4.93 kFPS</text>
+   </g>
+   <g id="text_93">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="671.37314" y="396.249221" transform="rotate(-0 671.37314 396.249221)">12.0 kFPS</text>
+   </g>
+   <g id="text_94">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="677.769806" y="377.726485" transform="rotate(-0 677.769806 377.726485)">12.6 kFPS</text>
+   </g>
+   <g id="text_95">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="822.631575" y="359.203748" transform="rotate(-0 822.631575 359.203748)">26.0 kFPS</text>
+   </g>
+   <g id="text_96">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="796.450276" y="340.681012" transform="rotate(-0 796.450276 340.681012)">23.6 kFPS</text>
+   </g>
+   <g id="text_97">
+    <text style="font-size: 8px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: start" x="793.545031" y="322.158276" transform="rotate(-0 793.545031 322.158276)">23.3 kFPS</text>
+   </g>
+   <g id="text_98">
+    <text style="font-size: 12px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="699.062287" y="300.968675" transform="rotate(-0 699.062287 300.968675)">Throughput (sequential frames, 8 threads)</text>
+   </g>
+  </g>
+  <g id="text_99">
+   <text style="font-weight: 700; font-size: 14px; font-family: 'Open Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica', 'Arial', 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Avant Garde', sans-serif; text-anchor: middle" x="454.7525" y="22.163867" transform="rotate(-0 454.7525 22.163867)">Unitree G1 (29-DOF humanoid)</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pbcf356a192">
+   <rect x="100.5125" y="77.76" width="323.540426" height="153.831325"/>
+  </clipPath>
+  <clipPath id="pef7923a735">
+   <rect x="537.292074" y="77.76" width="323.540426" height="153.831325"/>
+  </clipPath>
+  <clipPath id="p6a354cd6e2">
+   <rect x="100.5125" y="306.968675" width="323.540426" height="153.831325"/>
+  </clipPath>
+  <clipPath id="pf3c299723a">
+   <rect x="537.292074" y="306.968675" width="323.540426" height="153.831325"/>
+  </clipPath>
+ </defs>
+</svg>

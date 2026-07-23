@@ -178,8 +178,12 @@ target/
 # cxx-generated header, copied out of OUT_DIR by cpp/build.rs
 cpp/include/
 
-# generated benchmark results/charts (regenerate via benchmark/plot/plot_comparison.py / plot_scaling.py)
-benchmark/plot/results/
+# generated benchmark results (regenerate via benchmark/plot/plot_comparison.py /
+# plot_scaling.py) -- except the *.svg charts themselves, which are committed
+# so the docs site has working images even without a local benchmark run
+# (e.g. in CI, which doesn't run the actual cross-library benchmarks)
+benchmark/plot/results/*
+!benchmark/plot/results/*.svg
 
 # raw third-party inputs fetched by benchmark/preprocessing/ -- see its
 # README.md for the exact fetch commands; g1_body_plan.json/fixtures_g1.json
