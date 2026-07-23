@@ -53,9 +53,10 @@ pathlib.Path("docs/api/cpp-staging/fastik.h").write_text(src)
 doxygen docs/doxygen/Doxyfile
 
 # --- Benchmark charts ---
+rm -rf docs/assets/benchmarks
 mkdir -p docs/assets/benchmarks
-if compgen -G "benchmark/plot/results/*.png" > /dev/null; then
-    cp benchmark/plot/results/*.png docs/assets/benchmarks/
+if compgen -G "benchmark/plot/results/*.svg" > /dev/null; then
+    cp benchmark/plot/results/*.svg docs/assets/benchmarks/
 else
     echo "docs/build.sh: no charts in benchmark/plot/results/ yet -- see benchmark/README.md" >&2
 fi

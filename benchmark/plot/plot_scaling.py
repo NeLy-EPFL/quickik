@@ -25,9 +25,10 @@ Usage:
 import json
 from pathlib import Path
 
+from plot_comparison import register_fonts
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 COLOR = "tab:orange"
-FONT_FAMILY = "DejaVu Sans"  # the only open-source sans-serif shipped inside matplotlib itself (also its default)
 
 
 def load_points():
@@ -74,7 +75,11 @@ def plot_chart(points):
         print("\n(matplotlib not installed -- skipping chart; the table above is still complete)")
         return
 
-    plt.rcParams["font.family"] = FONT_FAMILY
+    plt.rcParams["font.family"] = register_fonts()
+    # SVG, not PNG -- smaller file size, crisp at any zoom; fonttype="none"
+    # keeps text as real <text> elements (see plot_comparison.py's own
+    # savefig comment for why).
+    plt.rcParams["svg.fonttype"] = "none"
 
     n_threads = [p["n_threads"] for p in points]
     baseline = next(p["throughput_fps"] for p in points if p["n_threads"] == 1)
@@ -106,8 +111,8 @@ def plot_chart(points):
     despine(ax)
 
     fig.tight_layout()
-    out_path = RESULTS_DIR / "scaling.png"
-    fig.savefig(out_path, dpi=100, bbox_inches="tight")
+    out_path = RESULTS_DIR / "scaling.svg"
+    fig.savefig(out_path, bbox_inches="tight")
     print(f"\nWrote chart to {out_path}")
 
 

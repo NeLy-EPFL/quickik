@@ -3,7 +3,7 @@ comparison table (always) and a bar chart (if matplotlib is available), one
 of each per body -- currently `neuromechfly` (a fly) and `g1` (a Unitree G1
 humanoid; see ../preprocessing/README.md for how its assets are generated).
 Every result JSON carries a `"body"` field; this script groups by it and
-writes `comparison_<body>.png` for each body found.
+writes `comparison_<body>.svg` for each body found.
 
 Only `formulation: "whole-tree"` results are compared here -- results
 solving the body's actual problem (floating base + every limb/keypoint,
@@ -311,6 +311,14 @@ def plot_chart(results, body):
         return
 
     plt.rcParams["font.family"] = register_fonts()
+    # SVG output, not PNG: a vector chart is a fraction of the file size and
+    # stays crisp at any zoom. fonttype="none" keeps text as real <text>
+    # elements (referencing the Open Sans family by name) instead of
+    # converting every glyph to its own vector path, which would bloat a
+    # text-heavy chart like this one past the PNG's size -- the docs site
+    # loads Open Sans itself (see zensical.toml) so the family resolves
+    # correctly in the browser.
+    plt.rcParams["svg.fonttype"] = "none"
 
     # results is already in ORDER; reversed for barh so it reads top-to-bottom.
     ordered = list(reversed(results))
@@ -347,8 +355,8 @@ def plot_chart(results, body):
         ax.set_xlim(0, widest if is_capped else widest * XLIM_PAD)
 
     fig.suptitle(BODY_TITLES.get(body, body), fontsize=14, fontweight="bold")
-    out_path = RESULTS_DIR / f"comparison_{body}.png"
-    fig.savefig(out_path, dpi=100, bbox_inches="tight")
+    out_path = RESULTS_DIR / f"comparison_{body}.svg"
+    fig.savefig(out_path, bbox_inches="tight")
     print(f"\nWrote chart to {out_path}")
 
 

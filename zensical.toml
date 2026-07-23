@@ -39,6 +39,14 @@ features = [
 [project.theme.icon]
 repo = "fontawesome/brands/github"
 
+# Matches the font the benchmark charts are rendered with (see
+# benchmark/plot/plot_comparison.py's register_fonts()), so their SVG
+# <text> elements -- which reference "Open Sans" by name rather than
+# embedding it -- render correctly instead of falling back to a generic
+# sans-serif.
+[project.theme.font]
+text = "Open Sans"
+
 [[project.theme.palette]]
 scheme = "default"
 toggle.icon = "lucide/sun"

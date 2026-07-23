@@ -19,14 +19,14 @@ FastIK is compared against three other whole-tree IK libraries – [KDL](https:/
 
 === "NeuroMechFly (biomechanical model)"
 
-    ![Benchmark comparison on the NeuroMechFly fly body](assets/benchmarks/comparison_neuromechfly.png)
+    ![Benchmark comparison on the NeuroMechFly fly body](assets/benchmarks/comparison_neuromechfly.svg)
 
 === "G1 (humanoid robot)"
 
-    ![Benchmark comparison on the Unitree G1 humanoid body](assets/benchmarks/comparison_g1.png)
+    ![Benchmark comparison on the Unitree G1 humanoid body](assets/benchmarks/comparison_g1.svg)
 
 
-??? Note "Implementation note on external benchmarked libraries"
+??? Note "Implementation notes on external benchmarked libraries"
     === "RBDL"
         RBDL's native floating-base joint crashes its `InverseKinematicsConstraintSet` solver (an upstream dimension-mismatch bug), so FastIK's floating base is represented as a translation plus Euler-angle joint in series instead, matching KDL's workaround for the same underlying reason. Its solver is a joint-space damped Levenberg-Marquardt normal-equations solve, tuned to match FastIK's own iteration count and tolerance for a fair comparison. Python bindings wrap the same native C++ solver (via Cython), so Python and C++ perform almost identically on latency and single-thread throughput; multi-thread throughput uses `multiprocessing` in Python versus in-process threads in C++, which accounts for the modest gap there.
 
@@ -40,6 +40,6 @@ FastIK is compared against three other whole-tree IK libraries – [KDL](https:/
 
 A separate [weak-scaling test](https://hpc-wiki.info/hpc/Scaling#Weak_Scaling) (FastIK's Rust API, using NeuroMechFly) measures how throughput grows as both thread count and total workload grow together.
 
-![Speedup vs. worker threads](assets/benchmarks/scaling.png)
+![Speedup vs. worker threads](assets/benchmarks/scaling.svg)
 
 See [`benchmark/README.md`](https://github.com/sibocw/fastik/blob/main/benchmark/README.md) to reproduce these numbers.
