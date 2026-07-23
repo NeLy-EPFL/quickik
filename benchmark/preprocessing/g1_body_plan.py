@@ -34,8 +34,6 @@ Usage:
     python g1_body_plan.py
 """
 
-import csv
-import itertools
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -43,12 +41,10 @@ from pathlib import Path
 PREPROCESSING_DIR = Path(__file__).resolve().parent
 BENCHMARK_DIR = PREPROCESSING_DIR.parent
 URDF_PATH = BENCHMARK_DIR / "assets" / "g1_raw" / "g1_29dof.urdf"
-RETARGETED_CSV_PATH = BENCHMARK_DIR / "assets" / "g1_raw" / "walk1_subject1.csv"
 OUT_PATH = BENCHMARK_DIR / "assets" / "g1_body_plan.json"
 
-# (name, parent_link) for each revolute joint, in the exact order the LAFAN1
-# retargeting dataset's CSV columns use (see its README.md's "Order of
-# Configuration" for G1) -- this is also the natural URDF kinematic order.
+# (name, parent_link) for each revolute joint, in the URDF's own kinematic
+# order (root to leaves, left leg/right leg/waist/left arm/right arm).
 REVOLUTE_JOINT_ORDER = [
     "left_hip_pitch_joint",
     "left_hip_roll_joint",
@@ -93,17 +89,11 @@ LEAF_KEYPOINTS = {
 
 ROOT_LINK = "pelvis"
 
-
-def load_neutral_angles(csv_path, frame=0):
-    """Reads one frame's 29 joint angles (columns 7:36, in
-    `REVOLUTE_JOINT_ORDER`) from the LAFAN1-retargeted G1 CSV, used as each
-    DOF's `neutral_angle` -- the solver's regularization anchor
-    (`SolverConfig::neutral_pose_weight`) and `State::neutral_pose`'s
-    starting guess. Frame 0 of a walk clip is a natural standing-ish pose, a
-    better anchor than an arbitrary 0.0 (straight-legged) for every joint."""
-    with open(csv_path) as f:
-        row = next(itertools.islice(csv.reader(f), frame, frame + 1))
-    return [float(v) for v in row[7:]]
+# Each DOF's `neutral_angle` -- the solver's regularization anchor
+# (`SolverConfig::neutral_pose_weight`) and `State::neutral_pose`'s starting
+# guess. The URDF's own zero configuration (no retargeted motion data feeds
+# this anymore -- see g1_fixtures.py's module docstring for why).
+NEUTRAL_ANGLES = [0.0] * len(REVOLUTE_JOINT_ORDER)
 
 
 def rpy_to_wxyz(rpy):
@@ -208,7 +198,7 @@ def build_g1_body_plan(neutral_angles):
 
 
 if __name__ == "__main__":
-    body_plan = build_g1_body_plan(load_neutral_angles(RETARGETED_CSV_PATH))
+    body_plan = build_g1_body_plan(NEUTRAL_ANGLES)
     OUT_PATH.write_text(json.dumps(body_plan, indent=2))
     n_dofs = sum(len(j["dofs"]) for j in body_plan["joints"])
     print(f"Wrote {len(body_plan['joints'])} joints ({n_dofs} DOFs) to {OUT_PATH}")

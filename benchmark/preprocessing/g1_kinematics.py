@@ -12,9 +12,9 @@ before-child order,
                                                          # forward.rs's header
                                                          # comment)
 
-Used both to generate G1's synthetic exact-fit frames (from self-sampled
-angles) and to convert the LAFAN1-retargeted CSV's (root pose, 29 joint
-angles) rows into world-frame keypoint positions for `target_ego`.
+Used to generate G1's synthetic exact-fit frames (from self-sampled angles)
+-- see `lafan1_bvh.py` for the raw motion capture's own from-scratch FK,
+used to turn *its* joint angles into `target_ego` keypoint positions.
 
 This is a from-scratch reimplementation (does not call into fastik), same
 role as ../fastik_python/bench.py's own `forward_kinematics` cross-check
