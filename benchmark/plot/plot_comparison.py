@@ -224,11 +224,22 @@ def despine(ax, hidden=("top", "right")):
         ax.spines[side].set_visible(False)
 
 
+# Charts are saved as SVG with fonttype="none" (see plot_chart()), so this
+# family list -- not just its first entry -- ends up verbatim in the SVG's
+# font-family CSS: matplotlib writes the whole list, and its own generic
+# "sans-serif" keyword expands to a further list of real font names. That
+# matters because the SVG is displayed in the *viewer's* browser, which may
+# not have Open Sans available (blocked/failed webfont fetch, no matching
+# local install) -- with only "Open Sans" and no fallback, a failed match
+# falls through to the browser's own document default, which is commonly a
+# *serif* font, not a generic sans one.
+FONT_FALLBACK_CHAIN = ["-apple-system", "BlinkMacSystemFont", "Helvetica", "Arial", "sans-serif"]
+
+
 def register_fonts():
     """Registers the locally-fetched Open Sans TTFs with matplotlib's font
-    manager, if present; falls back to DejaVu Sans (matplotlib's own
-    bundled default) otherwise, rather than silently rendering with
-    whatever matplotlib happens to fall back to. Not vendored -- fetch
+    manager, if present, and returns the font family list (Open Sans first,
+    if found) to assign to `rcParams["font.family"]`. Not vendored -- fetch
     once with:
 
         mkdir -p fonts
@@ -237,15 +248,23 @@ def register_fonts():
         curl -sL -o fonts/OpenSans-Bold.ttf \\
             "https://fonts.gstatic.com/s/opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsg-1y4n.ttf"
     """
+    import logging
+
     import matplotlib.font_manager as fm
+
+    # Every fallback name past the first is expected to be missing on
+    # whatever machine renders this chart -- they're for the SVG's viewer,
+    # not this process -- so the resulting "findfont: Font family ... not
+    # found" spam is noise, not something to fix.
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
     ttfs = list(FONTS_DIR.glob("OpenSans-*.ttf"))
     if not ttfs:
         print(f"({FONT_FAMILY} not found under {FONTS_DIR} -- falling back to DejaVu Sans; see register_fonts()'s docstring to fetch it)")
-        return "DejaVu Sans"
+        return ["DejaVu Sans"] + FONT_FALLBACK_CHAIN
     for ttf in ttfs:
         fm.fontManager.addfont(str(ttf))
-    return FONT_FAMILY
+    return [FONT_FAMILY] + FONT_FALLBACK_CHAIN
 
 
 def draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_name=None):
