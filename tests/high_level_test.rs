@@ -2,13 +2,15 @@ mod common;
 
 use std::sync::Arc;
 
+use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+use quickik::high_level::{
+    SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel,
+};
 use quickik::observation::KeypointObservation;
 use quickik::solver::SolverConfig;
 use quickik::state::State;
-use nalgebra::Vector3;
 
 fn keypoints_at(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<Vector3<f32>> {
     let mut state = State::neutral_pose(tree.clone());

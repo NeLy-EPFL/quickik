@@ -1,8 +1,8 @@
 mod common;
 
+use nalgebra::Vector3;
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use quickik::state::State;
-use nalgebra::Vector3;
 
 #[test]
 fn neutral_pose_positions() {

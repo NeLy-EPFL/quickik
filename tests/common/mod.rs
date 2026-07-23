@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use quickik::body_plan::{Dof, Joint, KinematicTree};
 use nalgebra::{UnitQuaternion, Vector3};
+use quickik::body_plan::{Dof, Joint, KinematicTree};
 
 pub fn two_joint_chain() -> Arc<KinematicTree> {
     let root = Joint {

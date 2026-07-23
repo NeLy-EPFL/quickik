@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use quickik::high_level::SequenceSolver;
 use quickik::observation::KeypointObservation;
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
-use nalgebra::Vector3;
 
 use crate::fixtures::{Fixtures, RealFrame, SyntheticFrame};
 

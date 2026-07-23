@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
-use quickik::high_level::{SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+use quickik::high_level::{
+    SegmentedSolveConfig, SequenceSolver, solve_sequence_segmented_parallel,
+};
 use quickik::observation::KeypointObservation;
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;

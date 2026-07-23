@@ -1,10 +1,10 @@
 mod common;
 
+use nalgebra::{Matrix3, Vector3};
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
-use nalgebra::{Matrix3, Vector3};
 
 fn keypoints_at(
     tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,

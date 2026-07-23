@@ -1,7 +1,7 @@
 mod common;
 
-use quickik::state::State;
 use nalgebra::DVector;
+use quickik::state::State;
 
 #[test]
 fn apply_delta_clamps_limited_dofs_but_not_unbounded_ones() {

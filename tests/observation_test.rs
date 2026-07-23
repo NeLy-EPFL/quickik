@@ -1,5 +1,5 @@
-use quickik::observation::{Camera, Mapper3Dto2D, XYView};
 use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
+use quickik::observation::{Camera, Mapper3Dto2D, XYView};
 
 #[test]
 fn xyview_drops_z_and_passes_through_xy() {
