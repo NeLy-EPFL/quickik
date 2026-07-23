@@ -15,8 +15,9 @@ fn valid_body_json() -> &'static str {
                 "parent": "root",
                 "offset_pos": [1.0, 0.0, 0.0],
                 "offset_quat": [1.0, 0.0, 0.0, 0.0],
+                "weight_scaler": 0.5,
                 "dofs": [
-                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.0, "limits": null}
+                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": null}
                 ]
             },
             {
@@ -25,7 +26,8 @@ fn valid_body_json() -> &'static str {
                 "offset_pos": [1.0, 0.0, 0.0],
                 "offset_quat": [1.0, 0.0, 0.0, 0.0],
                 "dofs": [
-                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.1, "limits": [-0.5, 0.5]}
+                    {"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.1,
+                     "weight_scaler": 0.25, "limits": [-0.5, 0.5]}
                 ]
             }
         ]
@@ -46,8 +48,14 @@ fn parses_joints_parents_and_dof_offsets() {
 
     assert_eq!(tree.joints[1].dof_offset, 0);
     assert_eq!(tree.joints[2].dof_offset, 1);
-    assert_eq!(tree.joints[2].dofs[0].neutral_angle, 0.1);
+    assert_eq!(tree.joints[2].dofs[0].neutral, 0.1);
     assert_eq!(tree.joints[2].dofs[0].limits, Some([-0.5, 0.5]));
+
+    // weight_scaler: explicit values parse through, and omitted ones default
+    // to 1.0.
+    assert_eq!(tree.joints[0].weight_scaler, 1.0);
+    assert_eq!(tree.joints[1].weight_scaler, 0.5);
+    assert_eq!(tree.joints[2].dofs[0].weight_scaler, 0.25);
 
     assert_eq!(tree.children_indices(0), &[1]);
     assert_eq!(tree.children_indices(1), &[2]);
@@ -109,7 +117,7 @@ fn rejects_dof_missing_type() {
         "joints": [
             {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
             {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
-             "dofs": [{"axis": [0,0,1], "neutral_angle": 0.0, "limits": null}]}
+             "dofs": [{"axis": [0,0,1], "neutral": 0.0, "limits": null}]}
         ]
     }"#;
     KinematicTree::from_json_str(json);
@@ -122,33 +130,7 @@ fn rejects_slide_dofs() {
         "joints": [
             {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
             {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
-             "dofs": [{"axis": [0,0,1], "type": "slide", "neutral_angle": 0.0, "limits": null}]}
-        ]
-    }"#;
-    KinematicTree::from_json_str(json);
-}
-
-#[test]
-#[should_panic(expected = "Joint::residual_weight other than 1.0 is not yet implemented")]
-fn rejects_non_default_joint_residual_weight() {
-    let json = r#"{
-        "joints": [
-            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0],
-             "residual_weight": 0.5, "dofs": []}
-        ]
-    }"#;
-    KinematicTree::from_json_str(json);
-}
-
-#[test]
-#[should_panic(expected = "Dof::neutral_weight other than 1.0 is not yet implemented")]
-fn rejects_non_default_dof_neutral_weight() {
-    let json = r#"{
-        "joints": [
-            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
-            {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
-             "dofs": [{"axis": [0,0,1], "type": "hinge", "neutral_angle": 0.0, "neutral_weight": 0.5,
-                       "limits": null}]}
+             "dofs": [{"axis": [0,0,1], "type": "slide", "neutral": 0.0, "limits": null}]}
         ]
     }"#;
     KinematicTree::from_json_str(json);
@@ -156,11 +138,11 @@ fn rejects_non_default_dof_neutral_weight() {
 
 #[test]
 #[should_panic(expected = "invalid type")]
-fn rejects_explicit_null_residual_weight() {
+fn rejects_explicit_null_weight_scaler() {
     let json = r#"{
         "joints": [
             {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0],
-             "residual_weight": null, "dofs": []}
+             "weight_scaler": null, "dofs": []}
         ]
     }"#;
     KinematicTree::from_json_str(json);

@@ -234,7 +234,7 @@ std::vector<double> load_neutral_angles(const std::string &path) {
   Json root = parse_json_file(path);
   std::vector<double> out;
   for (auto &j : root["joints"].as_array())
-    for (auto &d : j["dofs"].as_array()) out.push_back(d["neutral_angle"].as_number());
+    for (auto &d : j["dofs"].as_array()) out.push_back(d["neutral"].as_number());
   return out;
 }
 

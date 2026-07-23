@@ -26,7 +26,7 @@ fn recovers_pose_from_3d_observations() {
         .iter()
         .map(|&obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight_scale: 1.0,
+            weight: 1.0,
         })
         .collect();
 
@@ -36,7 +36,7 @@ fn recovers_pose_from_3d_observations() {
     let mut solver: Solver = Solver::new(
         &tree,
         SolverConfig {
-            neutral_pose_weight: 0.0,
+            weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -55,7 +55,7 @@ fn recovers_pose_from_xyview_observations() {
         .iter()
         .map(|pos| KeypointObservation::Position2D {
             obs_pos: nalgebra::Vector2::new(pos.x, pos.y),
-            weight_scale: 1.0,
+            weight: 1.0,
         })
         .collect();
 
@@ -63,7 +63,7 @@ fn recovers_pose_from_xyview_observations() {
     let mut solver = Solver::new(
         &tree,
         SolverConfig {
-            neutral_pose_weight: 0.0,
+            weight: 0.0,
             mapper: Some(XYView),
             ..SolverConfig::default()
         },
@@ -96,7 +96,7 @@ fn recovers_pose_from_camera_observations() {
             let (obs_pos, _) = camera.project_3d_to_2d(pos, &jac_placeholder);
             KeypointObservation::Position2D {
                 obs_pos,
-                weight_scale: 1.0,
+                weight: 1.0,
             }
         })
         .collect();
@@ -105,7 +105,7 @@ fn recovers_pose_from_camera_observations() {
     let mut solver = Solver::new(
         &tree,
         SolverConfig {
-            neutral_pose_weight: 0.0,
+            weight: 0.0,
             mapper: Some(camera),
             ..SolverConfig::default()
         },
@@ -161,15 +161,15 @@ fn solve_respects_joint_limits() {
         KeypointObservation::Missing,
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(1.0, 0.0, 0.0),
-            weight_scale: 1.0,
+            weight: 1.0,
         },
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(2.0, 0.0, 0.0),
-            weight_scale: 1.0,
+            weight: 1.0,
         },
         KeypointObservation::Position3D {
             obs_pos: Vector3::new(2.3624, 0.9320, 0.0),
-            weight_scale: 1.0,
+            weight: 1.0,
         },
     ];
 
@@ -199,7 +199,7 @@ fn convergence_tolerance_stops_iterating_early() {
         .iter()
         .map(|&obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight_scale: 1.0,
+            weight: 1.0,
         })
         .collect();
 
@@ -207,7 +207,7 @@ fn convergence_tolerance_stops_iterating_early() {
     // this toy problem, so every solve below should stop after exactly one
     // iteration regardless of its n_iterations cap.
     let generous_tolerance_config = SolverConfig {
-        neutral_pose_weight: 0.0,
+        weight: 0.0,
         position_tolerance: 10.0,
         angle_tolerance: 10.0,
         ..SolverConfig::default()
@@ -241,6 +241,86 @@ fn convergence_tolerance_stops_iterating_early() {
 }
 
 #[test]
+fn joint_weight_scaler_zero_matches_missing_observation() {
+    let tree = common::two_joint_chain();
+    // joint2's own keypoint (index 2) gets its weight_scaler zeroed out --
+    // whatever it's observed at should then have no effect on the solve.
+    let mut zero_weight_joints = tree.joints.clone();
+    zero_weight_joints[2].weight_scaler = 0.0;
+    let zero_weight_tree = std::sync::Arc::new(quickik::body_plan::KinematicTree {
+        joints: zero_weight_joints,
+        root_idx: tree.root_idx,
+    });
+
+    let tip_target = keypoints_at(&tree, &[0.4, 0.3])[3];
+    let mut observations = vec![KeypointObservation::Missing; 4];
+    // Deliberately conflicts with tip_target, so it would pull the solve
+    // toward a different pose if joint2's weight_scaler didn't zero it out.
+    observations[2] = KeypointObservation::Position3D {
+        obs_pos: Vector3::new(5.0, 5.0, 5.0),
+        weight: 1.0,
+    };
+    observations[3] = KeypointObservation::Position3D {
+        obs_pos: tip_target,
+        weight: 1.0,
+    };
+
+    let config = SolverConfig {
+        weight: 0.0,
+        ..SolverConfig::default()
+    };
+
+    let mut state_zero_weight = State::neutral_pose(zero_weight_tree.clone());
+    let mut solver_zero_weight: Solver = Solver::new(&zero_weight_tree, config);
+    solver_zero_weight.solve(&mut state_zero_weight, &observations);
+
+    let mut observations_missing = observations;
+    observations_missing[2] = KeypointObservation::Missing;
+    let mut state_missing = State::neutral_pose(tree.clone());
+    let mut solver_missing: Solver = Solver::new(&tree, config);
+    solver_missing.solve(&mut state_missing, &observations_missing);
+
+    assert_eq!(state_zero_weight.dof_angles, state_missing.dof_angles);
+}
+
+#[test]
+fn dof_weight_scaler_zero_recovers_exact_target_despite_nonzero_global_neutral_weight() {
+    let tree = common::two_independent_single_dof_branches();
+    // branch_b_joint's DOF (flattened index 1) gets its neutral-pose
+    // contribution zeroed out, while branch_a_joint's DOF (index 0) keeps the
+    // default nonzero global neutral-pose weight active. The two branches
+    // share no keypoints, so each DOF's fit is otherwise independent.
+    let mut joints = tree.joints.clone();
+    joints[3].dofs[0].weight_scaler = 0.0;
+    let zero_weight_tree = std::sync::Arc::new(quickik::body_plan::KinematicTree {
+        joints,
+        root_idx: tree.root_idx,
+    });
+
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    // Unlike `recovers_pose_from_3d_observations`, the global neutral-pose
+    // weight is deliberately left at its default nonzero value here.
+    let mut state = State::neutral_pose(zero_weight_tree.clone());
+    let mut solver: Solver = Solver::new(&zero_weight_tree, SolverConfig::default());
+    solver.solve(&mut state, &observations);
+
+    // dof1 (branch_b_joint's), with its neutral-pose contribution zeroed
+    // out, recovers the exact target...
+    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+    // ...while dof0 (branch_a_joint's), still pulled toward neutral by the
+    // nonzero global weight, is measurably biased away from its exact target.
+    assert!((state.dof_angles[0] - 0.4).abs() > 1e-3);
+}
+
+#[test]
 #[should_panic(expected = "Solver constructed with mapper: None")]
 fn position2d_observation_on_mapperless_solver_panics() {
     let tree = common::two_joint_chain();
@@ -248,7 +328,7 @@ fn position2d_observation_on_mapperless_solver_panics() {
     let mut observations = vec![KeypointObservation::Missing; tree.n_joints()];
     observations[1] = KeypointObservation::Position2D {
         obs_pos: nalgebra::Vector2::new(1.0, 0.0),
-        weight_scale: 1.0,
+        weight: 1.0,
     };
 
     let mut solver: Solver = Solver::new(&tree, SolverConfig::default());

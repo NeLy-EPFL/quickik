@@ -30,7 +30,7 @@ impl State {
         let mut dof_angles = vec![0.0; kinematic_tree.n_dofs()];
         for joint in &kinematic_tree.joints {
             for (i, dof) in joint.dofs.iter().enumerate() {
-                dof_angles[joint.dof_offset + i] = dof.neutral_angle;
+                dof_angles[joint.dof_offset + i] = dof.neutral;
             }
         }
         Self {

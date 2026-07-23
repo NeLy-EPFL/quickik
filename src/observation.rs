@@ -18,27 +18,21 @@ pub enum KeypointObservation {
     /// Not observed this frame (e.g. occluded).
     Missing,
     /// A 3D world position, e.g. triangulated from multiple calibrated
-    /// cameras. `weight_scale` is multiplied together with the keypoint's
-    /// [`Joint::residual_weight`] to give this observation's overall weight
-    /// in the solve.
+    /// cameras. `weight` is multiplied together with the keypoint's
+    /// [`Joint::weight_scaler`] to give this observation's overall weight in
+    /// the solve.
     ///
-    /// [`Joint::residual_weight`]: crate::body_plan::Joint::residual_weight
-    Position3D {
-        obs_pos: Vector3<f32>,
-        weight_scale: f32,
-    },
+    /// [`Joint::weight_scaler`]: crate::body_plan::Joint::weight_scaler
+    Position3D { obs_pos: Vector3<f32>, weight: f32 },
     /// A 2D pixel position from the single calibrated camera (or other
     /// mapper) that the consuming [`Solver`] was constructed with.
-    /// `weight_scale` is multiplied together with the keypoint's
-    /// [`Joint::residual_weight`] to give this observation's overall weight
-    /// in the solve.
+    /// `weight` is multiplied together with the keypoint's
+    /// [`Joint::weight_scaler`] to give this observation's overall weight in
+    /// the solve.
     ///
     /// [`Solver`]: crate::solver::Solver
-    /// [`Joint::residual_weight`]: crate::body_plan::Joint::residual_weight
-    Position2D {
-        obs_pos: Vector2<f32>,
-        weight_scale: f32,
-    },
+    /// [`Joint::weight_scaler`]: crate::body_plan::Joint::weight_scaler
+    Position2D { obs_pos: Vector2<f32>, weight: f32 },
 }
 
 /// Mapping 3D keypoint positions in world coordinates and their Jacobians to

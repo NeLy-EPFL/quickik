@@ -16,10 +16,13 @@ pub struct SolverConfig<M: Mapper3Dto2D = NoMapper> {
     /// This term is used only to improve numerical stability and should be set
     /// to a very small number (e.g. 1e-6).
     pub damping: f32,
-    /// Tikhonov weight pulling every joint angle toward the neutral pose.
-    /// This regularization term improves robustness when keypoints are missing
-    /// or noisy, but can also bias the solution away from the true pose.
-    pub neutral_pose_weight: f32,
+    /// Tikhonov weight pulling every joint angle toward the neutral pose,
+    /// multiplied together with each DOF's own [`Dof::weight_scaler`]. This
+    /// regularization term improves robustness when keypoints are missing or
+    /// noisy, but can also bias the solution away from the true pose.
+    ///
+    /// [`Dof::weight_scaler`]: crate::body_plan::Dof::weight_scaler
+    pub weight: f32,
     /// Stop iterating early once an update step's largest root-position
     /// component drops below this value, *and* the largest angle update drops
     /// below [`angle_tolerance`](Self::angle_tolerance). In other words,
@@ -44,7 +47,7 @@ impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
         SolverConfig {
             n_iterations: 10,
             damping: 1e-6,
-            neutral_pose_weight: 1e-3,
+            weight: 1e-3,
             position_tolerance: 1e-3,
             angle_tolerance: 1e-3,
             mapper: None,
@@ -63,6 +66,12 @@ impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
 pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     workspace: ForwardKinematicsWorkspace,
     neutral_joint_angles: Vec<f32>,
+    /// Per-DOF [`Dof::weight_scaler`](crate::body_plan::Dof::weight_scaler),
+    /// same indexing as `neutral_joint_angles`.
+    dof_weight_scalers: Vec<f32>,
+    /// Per-keypoint [`Joint::weight_scaler`](crate::body_plan::Joint::weight_scaler),
+    /// one per joint/keypoint in tree order.
+    joint_weight_scalers: Vec<f32>,
     jtj: DMatrix<f32>,
     jtr: DVector<f32>,
     /// Per-keypoint Jacobian slice, copied out of `workspace.kpt_jacobian`
@@ -79,11 +88,16 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
 
 impl<M: Mapper3Dto2D> Solver<M> {
     pub fn new(kinematic_tree: &KinematicTree, config: SolverConfig<M>) -> Self {
-        // Populate neutral joint angles
+        // Populate neutral joint angles, per-DOF weight scalers, and
+        // per-joint weight scalers
         let mut neutral_joint_angles = vec![0.0; kinematic_tree.n_dofs()];
+        let mut dof_weight_scalers = vec![1.0; kinematic_tree.n_dofs()];
+        let mut joint_weight_scalers = Vec::with_capacity(kinematic_tree.n_joints());
         for joint in &kinematic_tree.joints {
+            joint_weight_scalers.push(joint.weight_scaler);
             for (i, dof) in joint.dofs.iter().enumerate() {
-                neutral_joint_angles[joint.dof_offset + i] = dof.neutral_angle;
+                neutral_joint_angles[joint.dof_offset + i] = dof.neutral;
+                dof_weight_scalers[joint.dof_offset + i] = dof.weight_scaler;
             }
         }
 
@@ -92,6 +106,8 @@ impl<M: Mapper3Dto2D> Solver<M> {
         Self {
             workspace: ForwardKinematicsWorkspace::new(kinematic_tree),
             neutral_joint_angles,
+            dof_weight_scalers,
+            joint_weight_scalers,
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
             jacobian_buffer: DMatrix::zeros(3, state_dim),
@@ -129,6 +145,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
                     self.config.mapper.as_ref(),
                     &self.workspace.kpt_positions[k],
                     &self.jacobian_buffer,
+                    self.joint_weight_scalers[k],
                     &mut self.jtj,
                     &mut self.jtr,
                     &mut self.jacobian_transpose_buffer,
@@ -140,7 +157,8 @@ impl<M: Mapper3Dto2D> Solver<M> {
             accumulate_neutral_pose_prior(
                 state,
                 &self.neutral_joint_angles,
-                self.config.neutral_pose_weight,
+                &self.dof_weight_scalers,
+                self.config.weight,
                 &mut self.jtj,
                 &mut self.jtr,
             );
@@ -188,6 +206,7 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     mapper: Option<&M>,
     fwdkin_pos3d: &Vector3<f32>,
     jacobian_3d: &DMatrix<f32>,
+    joint_weight_scaler: f32,
     jtj: &mut DMatrix<f32>,
     jtr: &mut DVector<f32>,
     jacobian_transpose_buffer: &mut DMatrix<f32>,
@@ -196,31 +215,27 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
 ) {
     match *obs {
         KeypointObservation::Missing => {}
-        KeypointObservation::Position3D {
-            obs_pos,
-            weight_scale,
-        } => {
+        KeypointObservation::Position3D { obs_pos, weight } => {
+            let weight = weight * joint_weight_scaler;
             let residual = obs_pos - fwdkin_pos3d;
             // Writes into preallocated buffers instead of allocating a
             // temporary for the transpose and the product.
             jacobian_3d.transpose_to(jacobian_transpose_buffer);
             jacobian_transpose_buffer.mul_to(jacobian_3d, jtj_buffer);
-            accumulate_scaled(jtj, jtj_buffer, weight_scale);
+            accumulate_scaled(jtj, jtj_buffer, weight);
             jacobian_transpose_buffer.mul_to(&residual, jtr_buffer);
-            accumulate_scaled(jtr, jtr_buffer, weight_scale);
+            accumulate_scaled(jtr, jtr_buffer, weight);
         }
-        KeypointObservation::Position2D {
-            obs_pos,
-            weight_scale,
-        } => {
+        KeypointObservation::Position2D { obs_pos, weight } => {
+            let weight = weight * joint_weight_scaler;
             // The mapper always allocates its own Jacobian, so there's no
             // allocation-free path here regardless.
             let mapper = mapper
                 .expect("Position2D observation given to a Solver constructed with mapper: None");
             let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
             let residual = obs_pos - fwdkin_pos2d;
-            *jtj += jacobian_2d.transpose() * &jacobian_2d * weight_scale;
-            *jtr += jacobian_2d.transpose() * residual * weight_scale;
+            *jtj += jacobian_2d.transpose() * &jacobian_2d * weight;
+            *jtr += jacobian_2d.transpose() * residual * weight;
         }
     }
 }
@@ -242,6 +257,7 @@ fn accumulate_scaled<R: nalgebra::Dim, C: nalgebra::Dim, S, SB>(
 fn accumulate_neutral_pose_prior(
     state: &State,
     neutral_joint_angles: &[f32],
+    dof_weight_scalers: &[f32],
     weight: f32,
     jtj: &mut DMatrix<f32>,
     jtr: &mut DVector<f32>,
@@ -249,11 +265,13 @@ fn accumulate_neutral_pose_prior(
     if weight == 0.0 {
         return;
     }
-    for (i, (&curr_angle, &neutral_angle)) in (state.dof_angles)
+    for (i, ((&curr_angle, &neutral_angle), &dof_weight_scaler)) in (state.dof_angles)
         .iter()
         .zip(neutral_joint_angles)
+        .zip(dof_weight_scalers)
         .enumerate()
     {
+        let weight = weight * dof_weight_scaler;
         let state_idx = N_ROOT_DOFS + i;
         jtj[(state_idx, state_idx)] += weight; // only contributor is self
         jtr[state_idx] += weight * (neutral_angle - curr_angle);

@@ -218,14 +218,14 @@ mod tests {
                 dofs: vec![Dof {
                     axis: Vector3::z(),
                     dof_type: DofType::Hinge,
-                    neutral_angle: 0.0,
+                    neutral: 0.0,
                     limits: None,
-                    neutral_weight: 1.0,
+                    weight_scaler: 1.0,
                 }],
                 parent: None,
                 children: Vec::new(),
                 dof_offset: 0,
-                residual_weight: 1.0,
+                weight_scaler: 1.0,
             }],
             0,
         ))

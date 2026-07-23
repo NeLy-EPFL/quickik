@@ -98,7 +98,7 @@ def build_full_model(body_plan_path):
             assertion in the caller.
         q_neutral: `model.nq`-sized neutral configuration (root at the
             origin/identity orientation, each DOF at its own JSON
-            `neutral_angle`, sign-adjusted per `_axis_to_joint`).
+            `neutral`, sign-adjusted per `_axis_to_joint`).
         dof_signs: array of +-1, one per DOF, in JSON DOF-flatten order
             (matches `state.dof_angles` / `ground_truth_dof_angles_per_leg`
             convention used by QuickIK's own benchmarks) -- needed to convert
@@ -153,7 +153,7 @@ def build_full_model(body_plan_path):
             )
             model.appendBodyToJoint(joint_id, pin.Inertia.Zero(), pin.SE3.Identity())
             dof_signs.append(sign)
-            dof_neutral_json.append(dof["neutral_angle"])
+            dof_neutral_json.append(dof["neutral"])
             dof_names.append(dof["name"])
             current_parent = joint_id
             placement = pin.SE3.Identity()

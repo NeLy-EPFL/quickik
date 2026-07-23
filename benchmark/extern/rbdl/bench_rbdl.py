@@ -86,7 +86,7 @@ def build_model(body_plan_path):
             point on `keypoint_body[i]` representing joint i's own
             (pre-own-rotation) position.
         q_neutral: `model.q_size`-sized neutral configuration (root at the
-            origin, each leg DOF at its own JSON `neutral_angle`).
+            origin, each leg DOF at its own JSON `neutral`).
     """
     body_plan = json.loads(Path(body_plan_path).read_text())
     joints = body_plan["joints"]
@@ -153,7 +153,7 @@ def build_model(body_plan_path):
             if first_body is None:
                 first_body = b
             dof_q_index.append(model.mJoints[b].q_index)
-            neutral_angles.append(dof["neutral_angle"])
+            neutral_angles.append(dof["neutral"])
 
         keypoint_body[i] = first_body
         keypoint_point[i] = np.zeros(3)

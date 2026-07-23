@@ -23,7 +23,7 @@ pub(crate) struct SolverConfig {
     /// Weight pulling every joint angle toward the neutral pose. Improves
     /// robustness to missing/noisy keypoints, at the cost of some bias.
     #[pyo3(get, set)]
-    neutral_pose_weight: f32,
+    weight: f32,
     /// Stop iterating early once an update step's largest root-position
     /// component drops below this value, and the largest angle update drops
     /// below `angle_tolerance`. 0 disables early termination.
@@ -42,7 +42,7 @@ impl SolverConfig {
         quickik_core::solver::SolverConfig {
             n_iterations: self.n_iterations,
             damping: self.damping,
-            neutral_pose_weight: self.neutral_pose_weight,
+            weight: self.weight,
             position_tolerance: self.position_tolerance,
             angle_tolerance: self.angle_tolerance,
             mapper,
@@ -55,18 +55,18 @@ impl SolverConfig {
     /// All arguments are optional; see the attributes above for their
     /// defaults and meaning.
     #[new]
-    #[pyo3(signature = (n_iterations=10, damping=1e-6, neutral_pose_weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3))]
+    #[pyo3(signature = (n_iterations=10, damping=1e-6, weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3))]
     fn new(
         n_iterations: usize,
         damping: f32,
-        neutral_pose_weight: f32,
+        weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
     ) -> Self {
         SolverConfig {
             n_iterations,
             damping,
-            neutral_pose_weight,
+            weight,
             position_tolerance,
             angle_tolerance,
         }

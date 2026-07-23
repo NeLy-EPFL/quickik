@@ -137,9 +137,7 @@ def run_correctness(ctx):
         f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}"
     )
     default_solver = quickik.Solver(tree, quickik.SolverConfig())
-    zero_reg_solver = quickik.Solver(
-        tree, quickik.SolverConfig(neutral_pose_weight=0.0)
-    )
+    zero_reg_solver = quickik.Solver(tree, quickik.SolverConfig(weight=0.0))
     for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
         ground_truth = np.concatenate(
@@ -169,7 +167,7 @@ def run_correctness(ctx):
     print(
         "(kpt rms/max: 3D distance to target, via an independent from-JSON FK "
         f"replica, model units. angle err: max abs error over all {tree.n_dofs} "
-        'DOFs, degrees, mod 2*pi. "w=0" = neutral_pose_weight=0.)\n'
+        'DOFs, degrees, mod 2*pi. "w=0" = weight=0.)\n'
     )
 
     print("== Real mocap frames (cross-solver vs. flygym.ik) ==")

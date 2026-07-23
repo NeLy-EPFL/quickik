@@ -26,9 +26,9 @@ TWO_JOINT_CHAIN_JSON = """
     "joints": [
         {"name": "root", "parent": null, "offset_pos": [0.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []},
         {"name": "joint1", "parent": "root", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.0, "limits": null}]},
+         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": null}]},
         {"name": "joint2", "parent": "joint1", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral_angle": 0.0, "limits": [-0.5, 0.5]}]},
+         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": [-0.5, 0.5]}]},
         {"name": "tip", "parent": "joint2", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []}
     ]
 }
@@ -60,7 +60,7 @@ def observations_for(a1, a2):
 
 
 def no_prior_config():
-    return quickik.SolverConfig(neutral_pose_weight=0.0)
+    return quickik.SolverConfig(weight=0.0)
 
 
 def test_malformed_json_raises():

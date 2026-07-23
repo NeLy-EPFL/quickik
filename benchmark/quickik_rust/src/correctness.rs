@@ -22,7 +22,7 @@ pub(crate) fn build_observations(target_ego: &[[f32; 3]]) -> Vec<KeypointObserva
             .iter()
             .map(|&[x, y, z]| KeypointObservation::Position3D {
                 obs_pos: Vector3::new(x, y, z),
-                weight_scale: 1.0,
+                weight: 1.0,
             }),
     );
     obs
@@ -71,7 +71,7 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
     let mut zero_reg_solver: Solver = Solver::new(
         tree,
         SolverConfig {
-            neutral_pose_weight: 0.0,
+            weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -97,7 +97,7 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
     }
     println!(
         "(kpt rms/max: 3D distance to target, model units. angle err: max abs error over all \
-         {} DOFs, degrees, mod 2*pi. \"w=0\" = neutral_pose_weight=0, isolating solver/FK \
+         {} DOFs, degrees, mod 2*pi. \"w=0\" = weight=0, isolating solver/FK \
          correctness from the intentional regularization bias.)\n",
         tree.state_dim()
     );

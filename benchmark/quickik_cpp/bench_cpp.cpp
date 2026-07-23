@@ -97,7 +97,7 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
 
   quickik::SolverConfig default_config = quickik::default_solver_config();
   quickik::SolverConfig zero_reg_config = default_config;
-  zero_reg_config.neutral_pose_weight = 0.0f;
+  zero_reg_config.weight = 0.0f;
   auto default_solver = quickik::new_solver(*tree, default_config, quickik::no_mapper());
   auto zero_reg_solver = quickik::new_solver(*tree, zero_reg_config, quickik::no_mapper());
 
@@ -126,7 +126,7 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
   std::printf(
       "(kpt rms/max: 3D distance to target, via an independent from-JSON FK replica, model "
       "units. angle err: max abs error over all %zu DOFs, degrees, mod 2*pi. \"w=0\" = "
-      "neutral_pose_weight=0.)\n\n",
+      "weight=0.)\n\n",
       tree->n_dofs());
 
   std::printf("== Real mocap frames (cross-solver vs. flygym.ik) ==\n");

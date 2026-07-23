@@ -15,7 +15,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
           "parent": null,
           "offset_pos": [0.0, 0.0, 0.0],
           "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "residual_weight": 1.0,
+          "weight_scaler": 1.0,
           "dofs": []
         },
         {
@@ -23,13 +23,13 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
           "parent": "root",
           "offset_pos": [1.0, 0.0, 0.0],
           "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "residual_weight": 1.0,
+          "weight_scaler": 1.0,
           "dofs": [
             {
               "axis": [0.0, 0.0, 1.0],
               "type": "hinge",
-              "neutral_angle": 0.0,
-              "neutral_weight": 1.0,
+              "neutral": 0.0,
+              "weight_scaler": 1.0,
               "limits": [-3.0, 3.0]
             }
           ]
@@ -39,7 +39,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
           "parent": "elbow",
           "offset_pos": [1.0, 0.0, 0.0],
           "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "residual_weight": 1.0,
+          "weight_scaler": 1.0,
           "dofs": []
         }
       ]
@@ -48,13 +48,13 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
 
     - `parent`: joint name, or `null` for the root.
     - `offset_pos`/`offset_quat`: this joint's offset from its parent.
-    - `residual_weight`: multiplied together with each frame's `KeypointObservation`'s `weight_scale` for this joint's keypoint. Optional, defaults to `1.0`; only `1.0` is currently implemented.
+    - `weight_scaler`: multiplied together with each frame's `KeypointObservation`'s `weight` for this joint's keypoint. Optional, defaults to `1.0`.
     - `dofs`: this joint's degrees of freedom, each with:
         - `type`: `"hinge"` (rotational) or `"slide"` (translational). Only `"hinge"` is currently implemented.
         - `axis`: rotation/translation axis in local frame.
-        - `neutral_angle`: neutral angle in radians.
-        - `limits`: optional `[min, max]` angle limits; unbounded if omitted or `null`.
-        - `neutral_weight`: scales this DOF's contribution to the deviation-from-neutral penalty. Optional, defaults to `1.0`; only `1.0` is currently implemented.
+        - `neutral`: neutral angle (radians) or position.
+        - `limits`: optional `[min, max]` limits; unbounded if omitted or `null`.
+        - `weight_scaler`: multiplied together with `SolverConfig`'s `weight` for this DOF's deviation-from-neutral penalty. Optional, defaults to `1.0`.
 
     See the [API reference](api/rust/quickik/body_plan/index.html) for the full schema.
 
@@ -77,9 +77,9 @@ QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObse
     let mut solver: Solver = Solver::new(&kinematic_tree, SolverConfig::default());
 
     let observations = vec![
-        KeypointObservation::Position3D { obs_pos: Vector3::new(0.0, 0.0, 0.0), weight_scale: 1.0 },
-        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 0.0, 0.0), weight_scale: 1.0 },
-        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 1.0, 0.0), weight_scale: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(0.0, 0.0, 0.0), weight: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 0.0, 0.0), weight: 1.0 },
+        KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 1.0, 0.0), weight: 1.0 },
     ];
     solver.solve(&mut state, &observations);
     println!("{:?}", state.dof_angles);
@@ -127,7 +127,7 @@ QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObse
 
 - `n_iterations`: how many Gauss-Newton steps to run per `solve` call, and the cap early stopping can cut short.
 - `damping`: Levenberg-Marquardt damping added to the normal equations' diagonal, for numerical stability only – keep it very small (the default is `1e-6`).
-- `neutral_pose_weight`: how strongly every joint angle is pulled toward its neutral pose. This is what keeps `Missing` keypoints (and, more generally, under-constrained DOFs) from drifting to an arbitrary angle instead of a sensible default, at the cost of some bias on frames where that DOF *is* observed.
+- `weight`: how strongly every joint angle is pulled toward its neutral pose, multiplied together with each DOF's own `weight_scaler` from the body plan. This is what keeps `Missing` keypoints (and, more generally, under-constrained DOFs) from drifting to an arbitrary angle instead of a sensible default, at the cost of some bias on frames where that DOF *is* observed.
 - `position_tolerance`/`angle_tolerance`: stop iterating early once an update step's largest position and angle components both drop below these; `0` disables early stopping.
 
 It's set via `Solver::new`/`Solver(...)`, though `solver.config` stays mutable for retuning between calls (Python: `solver.config` is the same object every time, so `solver.config.n_iterations = 5` takes effect on the next `solve`, just like Rust). C++'s `SolverConfig` is a plain value struct instead (no shared live handle): mutate a copy and call `solver->set_config(config)` to apply it.

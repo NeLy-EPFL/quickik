@@ -73,7 +73,7 @@ BODIES = {
         "padding": 1.02,
         "up_reference": None,
         "missing_keypoints": [],
-        "neutral_pose_weight": None,  # library default (SolverConfig's own)
+        "weight": None,  # library default (SolverConfig's own)
     },
     "g1": {
         "body_plan": "g1_body_plan.json",
@@ -134,7 +134,7 @@ BODIES = {
         # empirically it also *improves* every other keypoint's fit
         # (including two 30+cm outlier residuals on the unweighted default),
         # so this isn't accuracy traded away for looks.
-        "neutral_pose_weight": 0.01,
+        "weight": 0.01,
     },
 }
 
@@ -210,21 +210,21 @@ def build_observations(target_ego, missing_indices=frozenset()):
     return obs
 
 
-def solve_sequence(tree, fixtures, missing_keypoints=(), neutral_pose_weight=None):
+def solve_sequence(tree, fixtures, missing_keypoints=(), weight=None):
     """Warm-started solve over `native_rate_frames`, exactly like the
     throughput benchmark (see `../quickik_python/bench.py`'s
     `bench_solve_sequence`) -- returns one solved `State` per frame.
     `missing_keypoints` (body-plan joint names) are given a `Missing`
     observation instead of their fixture target every frame; see `BODIES`'
-    own `missing_keypoints` comment for why G1 needs this. `neutral_pose_weight`
+    own `missing_keypoints` comment for why G1 needs this. `weight`
     overrides `SolverConfig`'s own default when given; see `BODIES`' own
     comment for why G1 needs a stronger one."""
     leg_joint_names = fixtures["leg_joint_names"]
     missing_indices = {leg_joint_names.index(name) for name in missing_keypoints}
     config = (
         quickik.SolverConfig()
-        if neutral_pose_weight is None
-        else quickik.SolverConfig(neutral_pose_weight=neutral_pose_weight)
+        if weight is None
+        else quickik.SolverConfig(weight=weight)
     )
     seq = quickik.SequenceSolver(tree, config)
     return [
@@ -266,9 +266,7 @@ def prepare_body(name):
     the fitted root every frame) and, for G1, up-realigned (see
     `up_alignment_rotation`)."""
     cfg, joints, dof_offsets, tree, fixtures, edges = load_body(name)
-    states = solve_sequence(
-        tree, fixtures, cfg["missing_keypoints"], cfg["neutral_pose_weight"]
-    )
+    states = solve_sequence(tree, fixtures, cfg["missing_keypoints"], cfg["weight"])
     native_frames = fixtures["native_rate_frames"]
     full_names = [j["name"] for j in joints]
     full_name_idx = {n: i for i, n in enumerate(full_names)}

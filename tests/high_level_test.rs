@@ -23,7 +23,7 @@ fn observations_for(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<KeypointOb
         .into_iter()
         .map(|obs_pos| KeypointObservation::Position3D {
             obs_pos,
-            weight_scale: 1.0,
+            weight: 1.0,
         })
         .collect()
 }
@@ -33,7 +33,7 @@ fn solve_frame_warm_starts_from_previous_pose() {
     let tree = common::two_joint_chain();
     let config = SolverConfig {
         n_iterations: 1,
-        neutral_pose_weight: 0.0,
+        weight: 0.0,
         ..SolverConfig::default()
     };
     let target = observations_for(&tree, &[0.4, 0.3]);

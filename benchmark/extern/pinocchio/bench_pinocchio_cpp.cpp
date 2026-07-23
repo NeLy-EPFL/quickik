@@ -26,7 +26,7 @@
 //     solve, then `pinocchio::integrate` (respects the free-flyer's
 //     quaternion manifold). Same QuickIK SolverConfig::default() tuning as
 //     every other benchmark in this repo (n_iterations=10, damping=1e-6,
-//     neutral_pose_weight=1e-3, position/angle_tolerance=1e-3).
+//     weight=1e-3, position/angle_tolerance=1e-3).
 
 #include <algorithm>
 #include <chrono>
@@ -104,7 +104,7 @@ std::vector<JointNode> load_joint_nodes(const std::string &path) {
       DofSpec dof;
       auto &axis = d["axis"].as_array();
       dof.axis = Eigen::Vector3d(axis[0].as_number(), axis[1].as_number(), axis[2].as_number());
-      dof.neutral_angle = d["neutral_angle"].as_number();
+      dof.neutral_angle = d["neutral"].as_number();
       node.dofs.push_back(dof);
     }
     nodes.push_back(std::move(node));
