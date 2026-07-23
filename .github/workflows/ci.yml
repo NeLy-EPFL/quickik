@@ -13,9 +13,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Also exercises the python/ (pyo3) and cpp/ (cxx) crates, since they're
-      # workspace members -- this just builds them, as neither has its own
-      # #[test]s (see the cpp-test job below for the C++ bindings' own suite).
+      # Also exercises the cpp/ (cxx) crate, since it's a workspace member --
+      # this just builds it, as it has no #[test]s of its own (see the
+      # cpp-test job below for the C++ bindings' own suite). python/'s
+      # bindings have their own pytest suite -- see the python-test job below.
       - run: cargo test --workspace
 
   cpp-test:
@@ -27,3 +28,16 @@ jobs:
       - run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build cpp/build -j
       - run: ./cpp/build/quickik_cpp_tests
+
+  python-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin pytest
+      - run: cd python && maturin develop --release
+      - run: pytest python/tests/

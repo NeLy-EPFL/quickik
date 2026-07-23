@@ -23,6 +23,7 @@ git clone https://github.com/NeLy-EPFL/quickik
     cd quickik/python
     pip install maturin
     maturin develop --release
+    pip install pytest && pytest tests/   # runs the binding's own test suite
     ```
 
     `maturin develop` builds the Rust extension and installs it into your active environment in editable mode, so it rebuilds in place as you change the Rust source.
