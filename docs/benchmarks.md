@@ -5,6 +5,8 @@ hide:
 
 # Benchmarks
 
+The following results are obtained usings an 8-core (16-thread) Intel® Core™ i9-11900K processor. See [`benchmark/README.md`](https://github.com/NeLy-EPFL/quickik/blob/main/benchmark/README.md) to reproduce these numbers.
+
 ## Comparison with other libraries
 
 QuickIK is compared against three other whole-tree IK libraries – [KDL](https://github.com/orocos/orocos_kinematics_dynamics), [Pinocchio](https://github.com/stack-of-tasks/pinocchio), and [RBDL](https://github.com/rbdl/rbdl) – on the same task, across QuickIK's Rust API, Python bindings, and C++ bindings. Two inverse kinematics tasks are benchmarked: [**NeuroMechFly**](https://neuromechfly.org/) (biomechanical model of a fruit fly with 42 leg DOFs with real behavior recording data), and **G1** (a Unitree humanoid with 29 DOFs, driven by raw human walking data from the [LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) dataset, rescaled onto G1's proportions -- retargeting a human skeleton onto a robot is itself an IK problem, so each compared solver does that retarget too, rather than starting from a pre-retargeted dataset; expect a real, nonzero fit residual, same as the fly's own mocap).
@@ -41,5 +43,3 @@ QuickIK is compared against three other whole-tree IK libraries – [KDL](https:
 A separate [weak-scaling test](https://hpc-wiki.info/hpc/Scaling#Weak_Scaling) (QuickIK's Rust API, using NeuroMechFly) measures how throughput grows as both thread count and total workload grow together.
 
 ![Speedup vs. worker threads](assets/benchmarks/scaling.svg)
-
-See [`benchmark/README.md`](https://github.com/NeLy-EPFL/quickik/blob/main/benchmark/README.md) to reproduce these numbers.

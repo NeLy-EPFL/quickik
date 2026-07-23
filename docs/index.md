@@ -1,5 +1,5 @@
 ---
-icon: lucide/rocket
+icon: lucide/house
 ---
 
 # QuickIK
@@ -12,7 +12,10 @@ It provides high-level APIs for processing consecutive frames with warm starts a
 
 ## Example
 
-QuickIK fitting real motion-capture recordings for the two bodies in the [benchmarks](benchmarks.md): NeuroMechFly (a fly) and a Unitree G1 humanoid.
+The following video shows QuickIK's solution to two inverse kinematics tasks used in the [benchmarks](benchmarks.md):
+
+- **Biomechanics:** [Behavior recording](https://nely-epfl.github.io/spotlight-poseforge-paper/) of a fruit fly retargeted to [NeuroMechFly](https://neuromechfly.org/)
+- **Robotics:** [LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) walking kinematics retargeted to a [Unitree G1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) humanoid robot (larger keypoint mismatch is expected due to greater difference between robotic and human bodies)
 
 <video controls style="width: 100%">
   <source src="https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/example_clips.mp4" type="video/mp4">
