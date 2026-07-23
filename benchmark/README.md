@@ -18,4 +18,6 @@ python plot/plot_comparison.py
 
 `fastik_scaling/` is a separate weak-scaling sweep (1/2/4/8/16 threads, fly body only, Rust only) -- see `run_sweep.sh` and `plot/plot_scaling.py`.
 
+To visually sanity-check a fit, `plot/render_video.py` renders a side-by-side comparison video (both bodies) overlaying real mocap keypoints against fastik's solved skeleton over a contiguous warm-started sequence -- see that script's own header comment for the run command.
+
 To rebuild the docs site (including these charts and the Rust API reference) after running any of the above, run `../docs/build.sh` from the repo root.
