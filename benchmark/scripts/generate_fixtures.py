@@ -50,7 +50,12 @@ BODYPLAN_NAME = "neuromechfly_ypr_legs"
 
 sys.path.insert(0, str(FLYGYM_ROOT / "src"))
 
-JOINT_KEYS = ["thorax_coxa", "coxa_trochanterfemur", "trochanterfemur_tibia", "tibia_tarsus"]
+JOINT_KEYS = [
+    "thorax_coxa",
+    "coxa_trochanterfemur",
+    "trochanterfemur_tibia",
+    "tibia_tarsus",
+]
 LEGS = ["lf", "lm", "lh", "rf", "rm", "rh"]
 
 SYNTHETIC_FRAMES = [50, 120, 200, 280, 350, 420, 490, 560]
@@ -73,7 +78,9 @@ def compose_model():
     from flygym.compose import KinematicPosePreset, NeuroMechFly
 
     fly = NeuroMechFly()
-    skeleton = Skeleton(joint_preset=JointPreset.ALL_BIOLOGICAL, axis_order=AxisOrder.YAW_PITCH_ROLL)
+    skeleton = Skeleton(
+        joint_preset=JointPreset.ALL_BIOLOGICAL, axis_order=AxisOrder.YAW_PITCH_ROLL
+    )
     fly.add_joints(skeleton, KinematicPosePreset.NEUTRAL)
     fly.mjcf_root.compiler.fusestatic = False
     mj_model, mj_data = fly.compile()
@@ -168,7 +175,9 @@ def main():
     assert snippet.legs == LEGS
     npz_to_bp = npz_to_bp_index_map(snippet.dofs_per_leg, bp_axis_order)
 
-    thorax_id = [i for i in range(mj_model.nbody) if mj_model.body(i).name.endswith("thorax")][0]
+    thorax_id = [
+        i for i in range(mj_model.nbody) if mj_model.body(i).name.endswith("thorax")
+    ][0]
     mj.mj_kinematics(mj_model, mj_data)
     thorax_world_pos = mj_data.xpos[thorax_id].copy()
     thorax_world_mat = mj_data.xmat[thorax_id].reshape(3, 3).copy()
@@ -229,8 +238,13 @@ def main():
         target_ego = to_template_ego(snippet.rawpred_egoxyz[frame])
         target_world = target_ego + thorax_world_pos
         result = fit_qpos_to_keypoints(
-            mj_model, mj_data, keypoints, target_world,
-            initial_qpos=mj_qpos_warm, max_iters=200, ftol=1e-12,
+            mj_model,
+            mj_data,
+            keypoints,
+            target_world,
+            initial_qpos=mj_qpos_warm,
+            max_iters=200,
+            ftol=1e-12,
         )
         mj_qpos_warm = result.qpos.copy()
         flygym_reconstructed_ego = ego(mj_world_keypoints(result.qpos))
@@ -246,7 +260,10 @@ def main():
 
     # ---- native-rate frames (contiguous, for a real warm-start benchmark) ----
     native_rate_frames = [
-        {"frame": frame, "target_ego": to_template_ego(snippet.rawpred_egoxyz[frame]).tolist()}
+        {
+            "frame": frame,
+            "target_ego": to_template_ego(snippet.rawpred_egoxyz[frame]).tolist(),
+        }
         for frame in range(NATIVE_RATE_START, NATIVE_RATE_START + NATIVE_RATE_LENGTH)
     ]
 

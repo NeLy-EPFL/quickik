@@ -24,9 +24,9 @@ the video ends as soon as either panel's own sequence runs out.
 
 Writes `results/example_clips.mp4` (requires ffmpeg on PATH).
 
-Usage (with python-devtools/'s shared venv active -- see its own README.md --
-plus QuickIK's Python extension built for that same interpreter; see
-`../quickik_python/bench.py`'s own docstring):
+Usage (with devtools-pyenv/'s shared venv active, plus QuickIK's Python
+extension built for that same interpreter; see `../quickik_python/bench.py`'s
+own docstring):
 
     python render_video.py
 """
@@ -93,7 +93,10 @@ BODIES = {
         # so it's corrected here for display only: `up_reference` names the
         # keypoints used to empirically measure "up" (head above the ankles'
         # midpoint), see `up_alignment_rotation`.
-        "up_reference": {"head": "head", "ankles": ["left_ankle_roll", "right_ankle_roll"]},
+        "up_reference": {
+            "head": "head",
+            "ankles": ["left_ankle_roll", "right_ankle_roll"],
+        },
         # LAFAN1 has one raw mocap landmark per hand ("LeftHand"/"RightHand"),
         # but G1 splits the wrist into 3 single-axis DOFs plus the hand
         # keypoint itself -- all 4 get that same single target position (see
@@ -237,7 +240,9 @@ def up_alignment_rotation(fitted_frames, full_name_idx, up_reference):
     why this is needed for G1."""
     head_idx = full_name_idx[up_reference["head"]]
     ankle_idxs = [full_name_idx[n] for n in up_reference["ankles"]]
-    up_vecs = [frame[head_idx] - frame[ankle_idxs].mean(axis=0) for frame in fitted_frames]
+    up_vecs = [
+        frame[head_idx] - frame[ankle_idxs].mean(axis=0) for frame in fitted_frames
+    ]
     up_dir = np.mean(up_vecs, axis=0)
     up_dir /= np.linalg.norm(up_dir)
     rotation, _rmsd = R.align_vectors([[0.0, 0.0, 1.0]], [up_dir])
@@ -247,7 +252,9 @@ def up_alignment_rotation(fitted_frames, full_name_idx, up_reference):
 def axis_limits(*point_sets, padding=1.1):
     """A single fixed, equal-aspect bounding box covering every frame in
     every point set, so the camera never zooms or pans mid-video."""
-    all_pts = np.concatenate([np.concatenate(pts, axis=0) for pts in point_sets], axis=0)
+    all_pts = np.concatenate(
+        [np.concatenate(pts, axis=0) for pts in point_sets], axis=0
+    )
     center = (all_pts.max(axis=0) + all_pts.min(axis=0)) / 2
     half_range = (all_pts.max(axis=0) - all_pts.min(axis=0)).max() / 2 * padding
     return center - half_range, center + half_range
@@ -259,13 +266,18 @@ def prepare_body(name):
     the fitted root every frame) and, for G1, up-realigned (see
     `up_alignment_rotation`)."""
     cfg, joints, dof_offsets, tree, fixtures, edges = load_body(name)
-    states = solve_sequence(tree, fixtures, cfg["missing_keypoints"], cfg["neutral_pose_weight"])
+    states = solve_sequence(
+        tree, fixtures, cfg["missing_keypoints"], cfg["neutral_pose_weight"]
+    )
     native_frames = fixtures["native_rate_frames"]
     full_names = [j["name"] for j in joints]
     full_name_idx = {n: i for i, n in enumerate(full_names)}
 
     fitted_positions = [
-        forward_kinematics_full(joints, dof_offsets, s.dof_angles, s.root_pos, s.root_rot) for s in states
+        forward_kinematics_full(
+            joints, dof_offsets, s.dof_angles, s.root_pos, s.root_rot
+        )
+        for s in states
     ]
     # Chase-cam: recenter every frame on the fitted root position. G1's root
     # genuinely translates meters across the whole clip (a walking human), so
@@ -291,7 +303,9 @@ def prepare_body(name):
         align = up_alignment_rotation(fitted_frames, full_name_idx, cfg["up_reference"])
         mocap_frames = [align.apply(f) for f in mocap_frames]
         fitted_frames = [align.apply(f) for f in fitted_frames]
-        fitted_bones = [align.apply(b.reshape(-1, 3)).reshape(b.shape) for b in fitted_bones]
+        fitted_bones = [
+            align.apply(b.reshape(-1, 3)).reshape(b.shape) for b in fitted_bones
+        ]
 
     lo, hi = axis_limits(mocap_frames, fitted_frames, padding=cfg["padding"])
 
@@ -301,7 +315,9 @@ def prepare_body(name):
     # it next to a QuickIK fit that correctly ignores it just looks like an
     # unexplained extra bend sprouting from a single mocap dot.
     if cfg["missing_keypoints"]:
-        missing_idx = [fixtures["leg_joint_names"].index(name) for name in cfg["missing_keypoints"]]
+        missing_idx = [
+            fixtures["leg_joint_names"].index(name) for name in cfg["missing_keypoints"]
+        ]
         for frame in mocap_frames:
             frame[missing_idx] = np.nan
 
@@ -334,20 +350,38 @@ def setup_panel(ax, body, show_legend):
     fit_scatter = ax.scatter([], [], [], c=FIT_COLOR, s=15, depthshade=False)
     # add_collection3d computes its own axis bounds from the initial segments,
     # so it must be seeded with real data (frame 0), not an empty list.
-    fit_bones = Line3DCollection(body["fitted_bones"][0], colors=FIT_COLOR, linewidths=1.5)
+    fit_bones = Line3DCollection(
+        body["fitted_bones"][0], colors=FIT_COLOR, linewidths=1.5
+    )
     ax.add_collection3d(fit_bones)
     if show_legend:
         # Proxy handles, not the scatters' own auto-generated legend entries:
         # a scatter-only handle would draw "QuickIK fit" as a bare dot, hiding
         # that it's also a connected skeleton (the bones have no label of
         # their own to contribute a line to the legend).
-        mocap_handle = Line2D([0], [0], marker="o", linestyle="None", color=MOCAP_COLOR, label="MoCap keypoints")
-        fit_handle = Line2D([0], [0], marker="o", linestyle="-", color=FIT_COLOR, label="QuickIK fit")
+        mocap_handle = Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="None",
+            color=MOCAP_COLOR,
+            label="MoCap keypoints",
+        )
+        fit_handle = Line2D(
+            [0], [0], marker="o", linestyle="-", color=FIT_COLOR, label="QuickIK fit"
+        )
         ax.legend(handles=[mocap_handle, fit_handle], loc="upper left", frameon=False)
     # text2D pins this to the axes' own 2D display space (top right corner),
     # unaffected by the 3D view/rotation -- unlike ax.text, which would place
     # it at a fixed *data* point instead.
-    ax.text2D(0.98, 0.98, f"{cfg['playback_speed']:g}x speed", transform=ax.transAxes, ha="right", va="top")
+    ax.text2D(
+        0.98,
+        0.98,
+        f"{cfg['playback_speed']:g}x speed",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+    )
     return mocap_scatter, fit_scatter, fit_bones
 
 
@@ -369,12 +403,17 @@ def render_comparison():
     fig = plt.figure(figsize=(9.6, 5.2), frameon=False)
     fig.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.02, wspace=0.02)
     axes = [fig.add_subplot(1, 2, i + 1, projection="3d") for i in range(len(bodies))]
-    panels = [setup_panel(ax, body, show_legend=(i == 0)) for i, (ax, body) in enumerate(zip(axes, bodies, strict=True))]
+    panels = [
+        setup_panel(ax, body, show_legend=(i == 0))
+        for i, (ax, body) in enumerate(zip(axes, bodies, strict=True))
+    ]
 
     def update(k):
         t = k / output_fps
         artists = []
-        for (mocap_scatter, fit_scatter, fit_bones), body in zip(panels, bodies, strict=True):
+        for (mocap_scatter, fit_scatter, fit_bones), body in zip(
+            panels, bodies, strict=True
+        ):
             idx = min(int(t * body["display_fps"]), body["n_frames"] - 1)
             mocap_scatter._offsets3d = tuple(body["mocap_frames"][idx].T)
             fit_scatter._offsets3d = tuple(body["fitted_frames"][idx].T)
@@ -389,10 +428,14 @@ def render_comparison():
     # compression ratio, which shows up as blur/ringing around sharp edges
     # like text -- an encoding artifact, not a font or rendering issue (a
     # static savefig() at the same dpi comes out crisp). A low CRF fixes it.
-    writer = animation.FFMpegWriter(fps=output_fps, extra_args=["-crf", "18", "-preset", "slow"])
+    writer = animation.FFMpegWriter(
+        fps=output_fps, extra_args=["-crf", "18", "-preset", "slow"]
+    )
     anim.save(out_path, writer=writer, dpi=DPI)
     plt.close(fig)
-    print(f"Wrote {total_output_frames} frames ({duration:.2f}s @ {output_fps:.1f}fps) to {out_path}")
+    print(
+        f"Wrote {total_output_frames} frames ({duration:.2f}s @ {output_fps:.1f}fps) to {out_path}"
+    )
 
 
 if __name__ == "__main__":

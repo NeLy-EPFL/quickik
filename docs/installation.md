@@ -21,12 +21,15 @@ git clone https://github.com/NeLy-EPFL/quickik
 
     ```sh
     cd quickik/python
-    pip install maturin
+    pip install maturin  # or use uv etc. if you'are in a managed virtual env
     maturin develop --release
-    pip install pytest && pytest tests/   # runs the binding's own test suite
+    
+    # To run unit tests for the Python bindings:
+    # Run `pip install pytest` if you don't have it already
+    pytest tests/
     ```
 
-    `maturin develop` builds the Rust extension and installs it into your active environment in editable mode, so it rebuilds in place as you change the Rust source. For linting or benchmark plotting rather than the bindings themselves, see [`python-devtools/`](https://github.com/NeLy-EPFL/quickik/blob/main/python-devtools/README.md) instead.
+    `maturin develop` builds the Rust extension and installs it into your active environment in editable mode, so it rebuilds in place as you change the Rust source. For linting or benchmark plotting rather than the bindings themselves, see `devtools-pyenv/` instead.
 
 === "C++"
 
@@ -35,7 +38,9 @@ git clone https://github.com/NeLy-EPFL/quickik
     ```sh
     cmake -S quickik/cpp -B quickik/cpp/build -DCMAKE_BUILD_TYPE=Release
     cmake --build quickik/cpp/build -j
-    ./quickik/cpp/build/quickik_cpp_tests   # runs the binding's own test suite
+
+    # To run unit tests for the C++ bindings:
+    ./quickik/cpp/build/quickik_cpp_tests
     ```
 
-    `cargo build -p quickik-cpp` (driven by `cpp/CMakeLists.txt` as a custom target) compiles the Rust side and copies the generated header and bridge glue into `cpp/include/` and `cpp/lib/`. A consuming project needs `cpp/include/` on its include path, and both `target/release/libquickik_cpp.a` (the crate itself) and `cpp/lib/libquickik-cpp-bridge.a` (the cxx-generated glue) linked in – see `cpp/CMakeLists.txt`'s `quickik_cpp`/`quickik_cpp_bridge` imported targets for the exact setup.
+    The `cmake --build` command above already builds everything needed to run the test suite -- there's nothing extra to do for that. If you're linking QuickIK into your own CMake project instead, add `cpp/include/` to your include path and link against the `quickik_cpp` and `quickik_cpp_bridge` imported targets that `cpp/CMakeLists.txt` defines; both are produced automatically by the same build (a custom target runs `cargo build -p quickik-cpp` and copies the generated header and glue code into `cpp/include/`/`cpp/lib/`).

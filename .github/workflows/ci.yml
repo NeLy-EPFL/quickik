@@ -35,10 +35,20 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install maturin pytest
+      - uses: astral-sh/setup-uv@v7
+      - run: uv venv --python 3.12
+      # Each `run:` step is a fresh shell, so .venv/bin has to be persisted
+      # via GITHUB_PATH for it to resolve `maturin`/`pytest` by bare name in
+      # later steps -- it doesn't happen automatically just by installing
+      # into that venv.
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      # maturin needs an active virtualenv to know where to install the
+      # built extension -- a bare `pip install` with no venv at all doesn't
+      # give it one. `uv pip install` (no explicit --python) auto-targets
+      # the .venv just created above, and maturin's own "look for a .venv
+      # in the current or any parent directory" fallback then finds that
+      # same one from python/, without needing VIRTUAL_ENV set.
+      - run: uv pip install maturin pytest
       - run: cd python && maturin develop --release
       - run: pytest python/tests/
 
@@ -47,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: cd python-devtools && uv sync
+      - run: cd devtools-pyenv && uv sync
       # ruff.toml at the root covers python/tests/, benchmark/, and
-      # python-devtools/ itself.
-      - run: cd python-devtools && uv run ruff check ..
+      # devtools-pyenv/ itself.
+      - run: cd devtools-pyenv && uv run ruff check ..

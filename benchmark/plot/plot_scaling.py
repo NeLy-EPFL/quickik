@@ -17,7 +17,7 @@ threads and work grow together, throughput(n)/throughput(1) ideally equals
 exactly n under that same ideal, so the same "how far below the diagonal"
 reading applies.
 
-Usage (with python-devtools/'s shared venv active -- see its own README.md):
+Usage (with devtools-pyenv/'s shared venv active):
 
     python plot_scaling.py
 """
@@ -45,7 +45,9 @@ def despine(ax):
 
 def print_table(points):
     if not points:
-        print(f"No weak-scaling data found in {RESULTS_DIR}/quickik-scaling.json. Run quickik_scaling/run_sweep.sh first.")
+        print(
+            f"No weak-scaling data found in {RESULTS_DIR}/quickik-scaling.json. Run quickik_scaling/run_sweep.sh first."
+        )
         return
     baseline = next(p["throughput_fps"] for p in points if p["n_threads"] == 1)
     header = ["threads", "total frames", "elapsed (ms)", "throughput (fps)", "speedup"]
@@ -72,7 +74,9 @@ def plot_chart(points):
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("\n(matplotlib not installed -- skipping chart; the table above is still complete)")
+        print(
+            "\n(matplotlib not installed -- skipping chart; the table above is still complete)"
+        )
         return
 
     plt.rcParams["font.family"] = register_fonts()

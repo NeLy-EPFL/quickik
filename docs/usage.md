@@ -2,9 +2,9 @@
 
 ## Body plan
 
-A body plan describes the kinematic tree QuickIK solves against -- a robot's joints, or an animal's skeleton -- loaded once from JSON and reused across every solve. Unlike a typical robotics kinematic tree, which separates joints (that move) from frames or links (that get tracked), here every joint doubles as a keypoint: its world position is always available as a potential target, whether or not it carries a rotational DOF of its own. This is what lets one uniform `KeypointObservation` list -- one entry per joint, in the body plan's own tree order -- describe a whole tracked pose, DOF-bearing joints and fixed leaf keypoints alike.
+A body plan describes the kinematic tree QuickIK solves against – a robot's joints, or an animal's skeleton – loaded once from JSON and reused across every solve. Unlike a typical robotics kinematic tree, which separates joints (that move) from frames or links (that get tracked), here every joint doubles as a keypoint: its world position is always available as a potential target, whether or not it carries a rotational DOF of its own. This is what lets one uniform `KeypointObservation` list – one entry per joint, in the body plan's own tree order – describe a whole tracked pose, DOF-bearing joints and fixed leaf keypoints alike.
 
-One modeling consequence worth knowing: a joint's own DOF reorients its *children*, not itself -- rotating a joint never moves its own keypoint, only the keypoints downstream of it. So every DOF needs at least one keypoint further down its own chain to be observable at all; a chain that ends exactly at its last DOF-bearing joint, with nothing past it, leaves that DOF's angle undetermined by any observation. This is why even a fixed, 0-DOF "tip" joint (a fingertip, a fly's claw, a robot's end effector) is usually worth keeping in the body plan even though it never actuates anything itself.
+One modeling consequence worth knowing: a joint's own DOF reorients its *children*, not itself – rotating a joint never moves its own keypoint, only the keypoints downstream of it. So every DOF needs at least one keypoint further down its own chain to be observable at all; a chain that ends exactly at its last DOF-bearing joint, with nothing past it, leaves that DOF's angle undetermined by any observation. This is why even a fixed, 0-DOF "tip" joint (a fingertip, a fly's claw, a robot's end effector) is usually worth keeping in the body plan even though it never actuates anything itself.
 
 ??? note "Body plan JSON schema"
     ```json
@@ -22,7 +22,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
 
 ## Inverse kinematics on a single frame
 
-QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObservation` per keypoint -- `Missing`, `Position3D`, or `Position2D` (see [below](#keypoint-positions-observed-in-2d)) -- in `kinematic_tree.joints` order, and jointly fits the free-floating root pose and every joint angle at once against all of them. This is what makes it different from solving each limb as its own small IK problem: a keypoint on one limb can still help constrain the root pose (and therefore every other limb) even if that other limb's own keypoints are all `Missing` this frame.
+QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObservation` per keypoint – `Missing`, `Position3D`, or `Position2D` (see [below](#keypoint-positions-observed-in-2d)) – in `kinematic_tree.joints` order, and jointly fits the free-floating root pose and every joint angle at once against all of them. This is what makes it different from solving each limb as its own small IK problem: a keypoint on one limb can still help constrain the root pose (and therefore every other limb) even if that other limb's own keypoints are all `Missing` this frame.
 
 === "Rust"
 
@@ -83,12 +83,12 @@ QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObse
     for (float angle : state->dof_angles()) { /* ... */ }
     ```
 
-`Missing` keypoints (occluded this frame, or simply not tracked by this body plan's data source) don't just get dropped from the residual -- with nothing pulling them away, the solve falls back on `SolverConfig`'s neutral-pose prior for whatever DOFs only those keypoints could otherwise constrain, so a body with everything missing settles at its neutral pose rather than an arbitrary one.
+`Missing` keypoints (occluded this frame, or simply not tracked by this body plan's data source) don't just get dropped from the residual – with nothing pulling them away, the solve falls back on `SolverConfig`'s neutral-pose prior for whatever DOFs only those keypoints could otherwise constrain, so a body with everything missing settles at its neutral pose rather than an arbitrary one.
 
 `SolverConfig` bundles the iteration count, damping, regularization weight, and convergence tolerance:
 
 - `n_iterations`: how many Gauss-Newton steps to run per `solve` call, and the cap early stopping can cut short.
-- `damping`: Levenberg-Marquardt damping added to the normal equations' diagonal, for numerical stability only -- keep it very small (the default is `1e-6`).
+- `damping`: Levenberg-Marquardt damping added to the normal equations' diagonal, for numerical stability only – keep it very small (the default is `1e-6`).
 - `neutral_pose_weight`: how strongly every joint angle is pulled toward its neutral pose. This is what keeps `Missing` keypoints (and, more generally, under-constrained DOFs) from drifting to an arbitrary angle instead of a sensible default, at the cost of some bias on frames where that DOF *is* observed.
 - `position_tolerance`/`angle_tolerance`: stop iterating early once an update step's largest position and angle components both drop below these; `0` disables early stopping.
 
@@ -96,7 +96,7 @@ It's set via `Solver::new`/`Solver(...)`, though `solver.config` stays mutable f
 
 ## Solving IK on continuous sequences of frames
 
-A single `solve()` call always starts from whatever `State` you pass it -- usually the neutral pose, the first time. But real tracking data is a sequence of frames, and the previous frame's solved pose is almost always an excellent starting guess for the next one: real motion is continuous, so warm-starting from it both converges faster (Gauss-Newton starts much closer to the answer) and tracks more smoothly (it doesn't have to re-discover the same pose from scratch every frame, so it's less prone to landing in a different local optimum frame to frame). `SequenceSolver` automates exactly this: it keeps a `Solver` and `State` together and warm-starts each new frame from the last one it solved.
+A single `solve()` call always starts from whatever `State` you pass it – usually the neutral pose, the first time. But real tracking data is a sequence of frames, and the previous frame's solved pose is almost always an excellent starting guess for the next one: real motion is continuous, so warm-starting from it both converges faster (Gauss-Newton starts much closer to the answer) and tracks more smoothly (it doesn't have to re-discover the same pose from scratch every frame, so it's less prone to landing in a different local optimum frame to frame). `SequenceSolver` automates exactly this: it keeps a `Solver` and `State` together and warm-starts each new frame from the last one it solved.
 
 === "Rust"
 
@@ -136,7 +136,7 @@ A single `solve()` call always starts from whatever `State` you pass it -- usual
             rust::Slice<const quickik::KeypointObservation>(frame_observations.data(), frame_observations.size()));
     }
 
-    // flattened_long_recording is n_joints * n_frames long -- see below.
+    // flattened_long_recording is n_joints * n_frames long – see below.
     quickik::SegmentedSolveConfig segmented_config{200, 20, 0.05f};
     auto poses = quickik::solve_sequence_segmented_parallel(
         *tree, quickik::default_solver_config(),
@@ -146,11 +146,11 @@ A single `solve()` call always starts from whatever `State` you pass it -- usual
 
     C++ has no nested-container binding across the FFI, so a "sequence" is one flat `observations` slice of length `n_joints * n_frames` (frame `i` spanning `[i * n_joints, (i + 1) * n_joints)`) rather than a list of lists, and `solve_sequence`/`solve_sequence_segmented_parallel` return a `StateList` handle (`len()`/`at(i)`) instead of a `Vec<State>`/`list[State]`. See `cpp/src/lib.rs`'s module docs.
 
-A plain, sequential `SequenceSolver` only ever uses one thread, and one frame has to finish before the next can start (each one warm-starts from the last, after all). `solve_sequence_segmented_parallel` gets around that for a single long recording: it splits the sequence into segments with a small overlap, solves every segment on its own thread (cold-started at each segment's own first frame, then warm-started within it), and stitches the results back into one continuous sequence. `overlap_tolerance` is a consistency check, not a correctness requirement -- neighboring segments' overlapping frames were solved independently (one cold-started, one warm-started from a different point), so they can disagree slightly even on a real recording; exceeding this per-DOF angle tolerance (radians) just logs a warning; the resulting sequence itself is unaffected. Independent sequences (e.g. one per subject or one per camera) don't need this machinery at all -- just solve each with its own `SequenceSolver` and parallelize however you like (a thread pool, `rayon`, Python's `multiprocessing`, ...).
+A plain, sequential `SequenceSolver` only ever uses one thread, and one frame has to finish before the next can start (each one warm-starts from the last, after all). `solve_sequence_segmented_parallel` gets around that for a single long recording: it splits the sequence into segments with a small overlap, solves every segment on its own thread (cold-started at each segment's own first frame, then warm-started within it), and stitches the results back into one continuous sequence. `overlap_tolerance` is a consistency check, not a correctness requirement – neighboring segments' overlapping frames were solved independently (one cold-started, one warm-started from a different point), so they can disagree slightly even on a real recording; exceeding this per-DOF angle tolerance (radians) just logs a warning; the resulting sequence itself is unaffected. Independent sequences (e.g. one per subject or one per camera) don't need this machinery at all – just solve each with its own `SequenceSolver` and parallelize however you like (a thread pool, `rayon`, Python's `multiprocessing`, ...).
 
 ## Keypoint positions observed in 2D
 
-Not every tracking source gives 3D positions directly. A single camera view only ever gives 2D pixel coordinates, and recovering the underlying 3D pose is itself part of what the solve needs to do. `Position2D` observations cover this: set `SolverConfig`'s mapper to a `Camera` (a pinhole projection model -- focal lengths, principal point, and the camera's own pose relative to the body plan's world frame) and QuickIK projects each candidate 3D keypoint position through it before comparing to the observed pixel coordinates, rather than comparing 3D positions directly. `XYView` covers the simpler case of keypoints already reprojected onto a physical X-Y plane (e.g. a top-down tracking setup) -- no camera intrinsics/extrinsics involved, just the identity projection dropping Z.
+Not every tracking source gives 3D positions directly. A single camera view only ever gives 2D pixel coordinates, and recovering the underlying 3D pose is itself part of what the solve needs to do. `Position2D` observations cover this: set `SolverConfig`'s mapper to a `Camera` (a pinhole projection model – focal lengths, principal point, and the camera's own pose relative to the body plan's world frame) and QuickIK projects each candidate 3D keypoint position through it before comparing to the observed pixel coordinates, rather than comparing 3D positions directly. `XYView` covers the simpler case of keypoints already reprojected onto a physical X-Y plane (e.g. a top-down tracking setup) – no camera intrinsics/extrinsics involved, just the identity projection dropping Z.
 
 === "Rust"
 
@@ -194,6 +194,6 @@ Not every tracking source gives 3D positions directly. A single camera view only
     auto solver = quickik::new_solver(*tree, quickik::default_solver_config(), quickik::camera_mapper(camera));
     ```
 
-Rust's `Solver<M>` is generic over the mapper type at compile time; neither Python nor C++ has an equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper value chosen at runtime instead -- Python takes `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument; C++ takes a `quickik::Mapper` built via `no_mapper()`/`camera_mapper(camera)`/`xyview_mapper()` as an ordinary constructor argument in the same spots. It's deliberately not part of `SolverConfig` in either binding: like Rust's `M`, it's fixed for the solver's lifetime (read-only `mapper`/`solver.mapper` accessor, no setter), whereas `SolverConfig`'s other fields stay freely mutable.
+Rust's `Solver<M>` is generic over the mapper type at compile time; neither Python nor C++ has an equivalent, so every `Solver`/`SequenceSolver` is backed by a single mapper value chosen at runtime instead – Python takes `mapper=None` (the default), a `Camera`, or an `XYView()` as a keyword argument; C++ takes a `quickik::Mapper` built via `no_mapper()`/`camera_mapper(camera)`/`xyview_mapper()` as an ordinary constructor argument in the same spots. It's deliberately not part of `SolverConfig` in either binding: like Rust's `M`, it's fixed for the solver's lifetime (read-only `mapper`/`solver.mapper` accessor, no setter), whereas `SolverConfig`'s other fields stay freely mutable.
 
-Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) don't crash either binding -- both raise a catchable error instead. In C++, that's a `rust::Error` (a normal `std::exception`). In Python, it's `pyo3_runtime.PanicException`, which -- deliberately, on PyO3's part -- subclasses `BaseException`, not `Exception`; a bare `except Exception:` won't catch it, so code that needs to handle these needs `except BaseException:` (or the specific `PanicException` type) instead.
+Errors from malformed input (bad JSON, wrong-sized vectors, a `Position2D` observation with no mapper set) don't crash either binding – both raise a catchable error instead. In C++, that's a `rust::Error` (a normal `std::exception`). In Python, it's `pyo3_runtime.PanicException`, which – deliberately, on PyO3's part – subclasses `BaseException`, not `Exception`; a bare `except Exception:` won't catch it, so code that needs to handle these needs `except BaseException:` (or the specific `PanicException` type) instead.

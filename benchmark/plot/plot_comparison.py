@@ -12,7 +12,7 @@ single-chain-only library that can't be reformulated to solve the whole-tree
 problem) is excluded entirely, not just visually de-emphasized, and listed
 separately in the printed table.
 
-Usage (with python-devtools/'s shared venv active -- see its own README.md):
+Usage (with devtools-pyenv/'s shared venv active):
 
     python plot_comparison.py
 """
@@ -142,7 +142,9 @@ def load_results():
             all_results.append(data)
     included = [r for r in all_results if r.get("formulation") == "whole-tree"]
     excluded = [r for r in all_results if r not in included]
-    included.sort(key=lambda r: ORDER.index(r["name"]) if r["name"] in ORDER else len(ORDER))
+    included.sort(
+        key=lambda r: ORDER.index(r["name"]) if r["name"] in ORDER else len(ORDER)
+    )
     return included, excluded
 
 
@@ -155,7 +157,9 @@ def group_by_body(results):
 
 def print_table(results, excluded):
     if not results:
-        print(f"No whole-tree results found in {RESULTS_DIR}. Run the benchmarks first.")
+        print(
+            f"No whole-tree results found in {RESULTS_DIR}. Run the benchmarks first."
+        )
         return
 
     header = ["library"] + [m["title"] for m in METRICS]
@@ -233,7 +237,13 @@ def despine(ax, hidden=("top", "right")):
 # local install) -- with only "Open Sans" and no fallback, a failed match
 # falls through to the browser's own document default, which is commonly a
 # *serif* font, not a generic sans one.
-FONT_FALLBACK_CHAIN = ["-apple-system", "BlinkMacSystemFont", "Helvetica", "Arial", "sans-serif"]
+FONT_FALLBACK_CHAIN = [
+    "-apple-system",
+    "BlinkMacSystemFont",
+    "Helvetica",
+    "Arial",
+    "sans-serif",
+]
 
 
 def register_fonts():
@@ -260,14 +270,18 @@ def register_fonts():
 
     ttfs = list(FONTS_DIR.glob("OpenSans-*.ttf"))
     if not ttfs:
-        print(f"({FONT_FAMILY} not found under {FONTS_DIR} -- falling back to DejaVu Sans; see register_fonts()'s docstring to fetch it)")
+        print(
+            f"({FONT_FAMILY} not found under {FONTS_DIR} -- falling back to DejaVu Sans; see register_fonts()'s docstring to fetch it)"
+        )
         return ["DejaVu Sans"] + FONT_FALLBACK_CHAIN
     for ttf in ttfs:
         fm.fontManager.addfont(str(ttf))
     return [FONT_FAMILY] + FONT_FALLBACK_CHAIN
 
 
-def draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_name=None):
+def draw_bars(
+    ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_name=None
+):
     """Draws one horizontal-bar panel on `ax` and annotates each bar with its
     value (see `format_value`) just past its tip -- plain "xxx unit", no
     parens.
@@ -289,7 +303,9 @@ def draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_
     display_values = list(bar_values)
     cap_idx = bar_names.index(cap_name) if cap_name in bar_names else None
     if cap_idx is not None:
-        display_values[cap_idx] = max(v for i, v in enumerate(bar_values) if i != cap_idx) * CAP_MULTIPLE
+        display_values[cap_idx] = (
+            max(v for i, v in enumerate(bar_values) if i != cap_idx) * CAP_MULTIPLE
+        )
 
     bars = ax.barh(bar_names, display_values, color=bar_colors, height=0.55)
     for i, bar in enumerate(bars):
@@ -326,7 +342,9 @@ def plot_chart(results, body):
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("\n(matplotlib not installed -- skipping chart; the table above is still complete)")
+        print(
+            "\n(matplotlib not installed -- skipping chart; the table above is still complete)"
+        )
         return
 
     plt.rcParams["font.family"] = register_fonts()
@@ -342,17 +360,28 @@ def plot_chart(results, body):
     # results is already in ORDER; reversed for barh so it reads top-to-bottom.
     ordered = list(reversed(results))
     names = [DISPLAY_NAMES.get(r["name"], r["name"]) for r in ordered]
-    colors = [QUICKIK_COLOR if r["name"].startswith("quickik-") else OTHER_COLOR for r in ordered]
+    colors = [
+        QUICKIK_COLOR if r["name"].startswith("quickik-") else OTHER_COLOR
+        for r in ordered
+    ]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 7))
     # Manually tuned for this 2x2 layout: top=0.84 leaves room for the
     # suptitle; hspace=0.49 and wspace=0.35 keep panel titles/labels from
     # overlapping their neighbors.
-    fig.subplots_adjust(hspace=0.49, wspace=0.35, left=0.09, right=0.97, top=0.84, bottom=0.08)
+    fig.subplots_adjust(
+        hspace=0.49, wspace=0.35, left=0.09, right=0.97, top=0.84, bottom=0.08
+    )
 
     for metric in METRICS:
         ax = axes[metric["row"], metric["col"]]
-        key, title, xlabel, unit, small_unit = metric["key"], metric["title"], metric["xlabel"], metric["unit"], metric["small_unit"]
+        key, title, xlabel, unit, small_unit = (
+            metric["key"],
+            metric["title"],
+            metric["xlabel"],
+            metric["unit"],
+            metric["small_unit"],
+        )
         values = [r.get(key) for r in ordered]
         bar_names = [n for n, v in zip(names, values, strict=True) if v is not None]
         bar_values = [v * metric["scale"] for v in values if v is not None]
@@ -363,7 +392,9 @@ def plot_chart(results, body):
             continue
 
         cap_name = CAPPED_BARS.get((body, key))
-        _, widest = draw_bars(ax, bar_names, bar_values, bar_colors, unit, small_unit, cap_name=cap_name)
+        _, widest = draw_bars(
+            ax, bar_names, bar_values, bar_colors, unit, small_unit, cap_name=cap_name
+        )
         ax.set_title(title)
         ax.set_xlabel(xlabel)
         despine(ax)

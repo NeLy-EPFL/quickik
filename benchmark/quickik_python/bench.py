@@ -133,19 +133,28 @@ def run_correctness(ctx):
     tree = ctx.tree
 
     print("== Synthetic exact-fit frames (bug hunt) ==")
-    print(f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}")
+    print(
+        f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}"
+    )
     default_solver = quickik.Solver(tree, quickik.SolverConfig())
-    zero_reg_solver = quickik.Solver(tree, quickik.SolverConfig(neutral_pose_weight=0.0))
+    zero_reg_solver = quickik.Solver(
+        tree, quickik.SolverConfig(neutral_pose_weight=0.0)
+    )
     for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
         ground_truth = np.concatenate(
-            [np.asarray(g, dtype=float) for g in frame["ground_truth_dof_angles_per_leg"]]
+            [
+                np.asarray(g, dtype=float)
+                for g in frame["ground_truth_dof_angles_per_leg"]
+            ]
         )
         obs = build_observations(target)
 
         state = quickik.State.neutral_pose(tree)
         default_solver.solve(state, obs)
-        solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
+        solved_pts = forward_kinematics(
+            ctx, state.dof_angles, state.root_pos, state.root_rot
+        )
         residual = np.linalg.norm(solved_pts - target, axis=1)
         angle_err = angle_error_deg(state.dof_angles, ground_truth)
 
@@ -174,7 +183,9 @@ def run_correctness(ctx):
     for frame in ctx.fixtures["real_frames"]:
         target = np.array(frame["target_ego"])
         state = seq.solve_frame(build_observations(target))
-        solved_pts = forward_kinematics(ctx, state.dof_angles, state.root_pos, state.root_rot)
+        solved_pts = forward_kinematics(
+            ctx, state.dof_angles, state.root_pos, state.root_rot
+        )
         dists = np.linalg.norm(solved_pts - target, axis=1)
         quickik_rms.append(np.sqrt((dists**2).mean()))
         quickik_max.append(dists.max())
@@ -196,7 +207,9 @@ def run_correctness(ctx):
             f"rms={np.sqrt((cross_rms**2).mean()):.5f}  mean={cross_rms.mean():.5f}  max={cross_max.max():.5f}\n"
         )
     else:
-        print("  cross-solver agreement (vs flygym.ik): n/a (no reference in fixtures)\n")
+        print(
+            "  cross-solver agreement (vs flygym.ik): n/a (no reference in fixtures)\n"
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -265,14 +278,18 @@ def frames_for_n_segments(n_segments):
 
 
 def tiled_native_rate_sequence(ctx, length):
-    base = [build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]]
+    base = [
+        build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]
+    ]
     return [base[i % len(base)] for i in range(length)]
 
 
 def bench_multithread_sequence_throughput(tree, sequence):
     config = quickik.SolverConfig()
     segmented_config = quickik.SegmentedSolveConfig(SEGMENT_LEN, OVERLAP_LEN, 0.05)
-    quickik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)  # warm up
+    quickik.solve_sequence_segmented_parallel(
+        tree, config, sequence, segmented_config
+    )  # warm up
     t0 = time.perf_counter()
     quickik.solve_sequence_segmented_parallel(tree, config, sequence, segmented_config)
     return time.perf_counter() - t0
@@ -313,19 +330,29 @@ def run_performance(ctx):
     target = np.array(ctx.fixtures["synthetic_frames"][0]["target_ego"])
     print("-- single-frame time (latency), default config (adaptive early stop) --")
     single_frame_latency_us = summarize(
-        "solve()", bench_single_frame_latency(tree, target, 20_000, quickik.SolverConfig())
+        "solve()",
+        bench_single_frame_latency(tree, target, 20_000, quickik.SolverConfig()),
     )
 
     # Early stop disabled (tolerances = 0), so every call runs the full
     # n_iterations -- the worst case if a frame never converges early.
-    max_iterations_config = quickik.SolverConfig(position_tolerance=0.0, angle_tolerance=0.0)
-    print(f"\n-- single-frame time (latency), early stop disabled ({max_iterations_config.n_iterations} iterations) --")
+    max_iterations_config = quickik.SolverConfig(
+        position_tolerance=0.0, angle_tolerance=0.0
+    )
+    print(
+        f"\n-- single-frame time (latency), early stop disabled ({max_iterations_config.n_iterations} iterations) --"
+    )
     single_frame_latency_max_us = summarize(
-        "solve() (forced max iterations)", bench_single_frame_latency(tree, target, 20_000, max_iterations_config)
+        "solve() (forced max iterations)",
+        bench_single_frame_latency(tree, target, 20_000, max_iterations_config),
     )
 
-    print("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --")
-    native_obs = [build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]]
+    print(
+        "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
+    )
+    native_obs = [
+        build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]
+    ]
     single_thread_mean_us = summarize(
         "SequenceSolver.solve_frame",
         bench_solve_sequence(tree, native_obs, quickik.SolverConfig()),
@@ -335,7 +362,9 @@ def run_performance(ctx):
         f"\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, "
         f"{MULTITHREAD_N_THREADS} threads) --"
     )
-    sequence = tiled_native_rate_sequence(ctx, frames_for_n_segments(MULTITHREAD_N_THREADS))
+    sequence = tiled_native_rate_sequence(
+        ctx, frames_for_n_segments(MULTITHREAD_N_THREADS)
+    )
     elapsed = bench_multithread_sequence_throughput(tree, sequence)
     multithread_fps = len(sequence) / elapsed
     print(
@@ -344,7 +373,11 @@ def run_performance(ctx):
     )
 
     write_results_json(
-        ctx.name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
+        ctx.name,
+        single_frame_latency_us,
+        single_frame_latency_max_us,
+        1e6 / single_thread_mean_us,
+        multithread_fps,
     )
 
 

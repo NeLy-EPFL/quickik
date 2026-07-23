@@ -37,7 +37,7 @@ the fly one doesn't. The root keypoint itself is still always given `Missing`
 at solve time (that's a harness-side convention, not a fixtures one -- see
 `build_observations` in each of the 6 harnesses), matching the fly exactly.
 
-Usage (with python-devtools/'s shared venv active -- see its own README.md):
+Usage (with devtools-pyenv/'s shared venv active):
 
     python g1_fixtures.py
 """
@@ -92,9 +92,18 @@ BVH_TO_G1 = {
     "RightShoulder": ["right_shoulder_pitch"],
     "RightArm": ["right_shoulder_roll", "right_shoulder_yaw"],
     "RightForeArm": ["right_elbow"],
-    "RightHand": ["right_wrist_roll", "right_wrist_pitch", "right_wrist_yaw", "right_hand"],
+    "RightHand": [
+        "right_wrist_roll",
+        "right_wrist_pitch",
+        "right_wrist_yaw",
+        "right_hand",
+    ],
 }
-G1_TO_BVH = {g1_name: bvh_name for bvh_name, g1_names in BVH_TO_G1.items() for g1_name in g1_names}
+G1_TO_BVH = {
+    g1_name: bvh_name
+    for bvh_name, g1_names in BVH_TO_G1.items()
+    for g1_name in g1_names
+}
 
 
 def cumulative_offset(body_plan, node_name):
@@ -118,7 +127,9 @@ def compute_scale(body_plan, bvh_joints):
     g1_ankle = cumulative_offset(body_plan, "left_ankle_pitch")
     g1_leg_length = np.linalg.norm(g1_ankle - g1_hip)
 
-    bvh_leg_length = np.linalg.norm(bvh_joints["LeftLeg"].offset + bvh_joints["LeftFoot"].offset)
+    bvh_leg_length = np.linalg.norm(
+        bvh_joints["LeftLeg"].offset + bvh_joints["LeftFoot"].offset
+    )
     bvh_leg_length *= BVH_UNIT_TO_METERS
 
     return g1_leg_length / bvh_leg_length
@@ -138,7 +149,10 @@ def bvh_frame_positions(skeleton, motion_row, scale):
     first."""
     evaluated = skeleton.evaluate(motion_row)
     multiplier = BVH_UNIT_TO_METERS * scale
-    return {name: BVH_TO_G1_AXES.apply(pos) * multiplier for name, (pos, _rot) in evaluated.items()}
+    return {
+        name: BVH_TO_G1_AXES.apply(pos) * multiplier
+        for name, (pos, _rot) in evaluated.items()
+    }
 
 
 def bvh_frame_root_rotation(skeleton, motion_row):
@@ -149,25 +163,37 @@ def bvh_frame_root_rotation(skeleton, motion_row):
 
 
 def target_ego_for_frame(positions, keypoint_names, ref_pos, ref_rot):
-    return [ego(positions[G1_TO_BVH[name]], ref_pos, ref_rot).tolist() for name in keypoint_names]
+    return [
+        ego(positions[G1_TO_BVH[name]], ref_pos, ref_rot).tolist()
+        for name in keypoint_names
+    ]
 
 
 def generate_synthetic_frames(kin, keypoint_names, neutral_angles, rng):
     frames = []
     for i in range(N_SYNTHETIC_FRAMES):
-        dof_angles = [a + rng.uniform(-SYNTHETIC_ANGLE_SPREAD, SYNTHETIC_ANGLE_SPREAD) for a in neutral_angles]
+        dof_angles = [
+            a + rng.uniform(-SYNTHETIC_ANGLE_SPREAD, SYNTHETIC_ANGLE_SPREAD)
+            for a in neutral_angles
+        ]
         root_pos, root_rot = np.zeros(3), R.identity()
         positions = kin.evaluate(root_pos, root_rot, dof_angles)
-        target_ego = [ego(positions[name], root_pos, root_rot).tolist() for name in keypoint_names]
+        target_ego = [
+            ego(positions[name], root_pos, root_rot).tolist() for name in keypoint_names
+        ]
         frames.append(
             {
                 "frame": i,
                 "target_ego": target_ego,
                 "ground_truth_dof_angles_per_leg": [
-                    dof_angles[0:6],  # left leg: hip_pitch/roll/yaw, knee, ankle_pitch/roll
+                    dof_angles[
+                        0:6
+                    ],  # left leg: hip_pitch/roll/yaw, knee, ankle_pitch/roll
                     dof_angles[6:12],  # right leg
                     dof_angles[12:15],  # waist: yaw, roll, pitch
-                    dof_angles[15:22],  # left arm: shoulder_pitch/roll/yaw, elbow, wrist_roll/pitch/yaw
+                    dof_angles[
+                        15:22
+                    ],  # left arm: shoulder_pitch/roll/yaw, elbow, wrist_roll/pitch/yaw
                     dof_angles[22:29],  # right arm
                 ],
             }
@@ -178,16 +204,23 @@ def generate_synthetic_frames(kin, keypoint_names, neutral_angles, rng):
 def generate_real_and_native_frames(skeleton, keypoint_names, motion, scale):
     def frames_for(indices):
         ref_positions = bvh_frame_positions(skeleton, motion[indices[0]], scale)
-        ref_pos, ref_rot = ref_positions["Hips"], bvh_frame_root_rotation(skeleton, motion[indices[0]])
+        ref_pos, ref_rot = (
+            ref_positions["Hips"],
+            bvh_frame_root_rotation(skeleton, motion[indices[0]]),
+        )
         out = []
         for frame in indices:
             positions = bvh_frame_positions(skeleton, motion[frame], scale)
-            target_ego = target_ego_for_frame(positions, keypoint_names, ref_pos, ref_rot)
+            target_ego = target_ego_for_frame(
+                positions, keypoint_names, ref_pos, ref_rot
+            )
             out.append({"frame": frame, "target_ego": target_ego})
         return out
 
     real_frames = frames_for(REAL_FRAMES)
-    native_rate_frames = frames_for(list(range(NATIVE_RATE_START, NATIVE_RATE_START + NATIVE_RATE_LENGTH)))
+    native_rate_frames = frames_for(
+        list(range(NATIVE_RATE_START, NATIVE_RATE_START + NATIVE_RATE_LENGTH))
+    )
     return real_frames, native_rate_frames
 
 
@@ -195,14 +228,20 @@ def main():
     rng = np.random.default_rng(seed=0)
     body_plan = build_g1_body_plan(NEUTRAL_ANGLES)
     kin = G1Kinematics(body_plan)
-    keypoint_names = [j["name"] for j in body_plan["joints"][1:]]  # everything but pelvis
+    keypoint_names = [
+        j["name"] for j in body_plan["joints"][1:]
+    ]  # everything but pelvis
 
     bvh_joints, motion, _frame_time = parse_bvh(BVH_PATH)
     skeleton = Lafan1Skeleton(bvh_joints)
     scale = compute_scale(body_plan, bvh_joints)
 
-    synthetic_frames = generate_synthetic_frames(kin, keypoint_names, NEUTRAL_ANGLES, rng)
-    real_frames, native_rate_frames = generate_real_and_native_frames(skeleton, keypoint_names, motion, scale)
+    synthetic_frames = generate_synthetic_frames(
+        kin, keypoint_names, NEUTRAL_ANGLES, rng
+    )
+    real_frames, native_rate_frames = generate_real_and_native_frames(
+        skeleton, keypoint_names, motion, scale
+    )
 
     fixtures = {
         "metadata": {

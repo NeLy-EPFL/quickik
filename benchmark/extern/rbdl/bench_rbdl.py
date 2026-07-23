@@ -43,7 +43,11 @@ ASSETS_DIR = BENCHMARK_DIR / "assets"
 
 # One body to benchmark: its body plan and matching fixtures file.
 BODIES = [
-    {"name": "neuromechfly", "body_plan": "neuromechfly_ypr_legs.json", "fixtures": "fixtures.json"},
+    {
+        "name": "neuromechfly",
+        "body_plan": "neuromechfly_ypr_legs.json",
+        "fixtures": "fixtures.json",
+    },
     {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
 ]
 
@@ -95,10 +99,16 @@ def build_model(body_plan_path):
     # Floating thorax root: TranslationXYZ + EulerZYX in series (see module
     # docstring / bench_rbdl.cpp for why not JointTypeFloatingBase).
     trans_id = model.AddBody(
-        0, rbdl.SpatialTransform(), rbdl.Joint(joint_type="JointTypeTranslationXYZ"), null_body
+        0,
+        rbdl.SpatialTransform(),
+        rbdl.Joint(joint_type="JointTypeTranslationXYZ"),
+        null_body,
     )
     thorax_id = model.AddBody(
-        trans_id, rbdl.SpatialTransform(), rbdl.Joint(joint_type="JointTypeEulerZYX"), null_body
+        trans_id,
+        rbdl.SpatialTransform(),
+        rbdl.Joint(joint_type="JointTypeEulerZYX"),
+        null_body,
     )
 
     n = len(joints)
@@ -195,7 +205,9 @@ def residual_stats(model, keypoint_body, keypoint_point, q, target):
     via CalcBodyToBaseCoordinates -- an independent check of cs.error_norm."""
     achieved = np.array(
         [
-            rbdl.CalcBodyToBaseCoordinates(model, q, keypoint_body[k + 1], keypoint_point[k + 1], False)
+            rbdl.CalcBodyToBaseCoordinates(
+                model, q, keypoint_body[k + 1], keypoint_point[k + 1], False
+            )
             for k in range(target.shape[0])
         ]
     )
@@ -218,7 +230,9 @@ def run_correctness(model, keypoint_body, keypoint_point, q_neutral, fixtures):
         print(f"{frame['frame']:>6} {cs.num_steps:>10} {rms:>14.3e} {max_d:>14.3e}")
 
     print("\n== Real native-rate frames (warm-started, 300 frames) ==")
-    native_frames = [np.array(f["target_ego"], dtype=float) for f in fixtures["native_rate_frames"]]
+    native_frames = [
+        np.array(f["target_ego"], dtype=float) for f in fixtures["native_rate_frames"]
+    ]
     cs = build_cs(keypoint_body, keypoint_point, native_frames[0])
     q = q_neutral.copy()
     rms_all, max_all = [], []
@@ -255,7 +269,16 @@ def summarize(label, samples_sec):
     return mean
 
 
-def bench_single_frame_latency(model, keypoint_body, keypoint_point, q_neutral, target, n_calls, n_warmup, step_tol=STEP_TOL):
+def bench_single_frame_latency(
+    model,
+    keypoint_body,
+    keypoint_point,
+    q_neutral,
+    target,
+    n_calls,
+    n_warmup,
+    step_tol=STEP_TOL,
+):
     """One IK solve from the fixed neutral configuration against a fixed
     target every call (no warm start)."""
     cs = build_cs(keypoint_body, keypoint_point, target, step_tol)
@@ -271,7 +294,9 @@ def bench_single_frame_latency(model, keypoint_body, keypoint_point, q_neutral, 
     return samples
 
 
-def bench_single_thread_sequence(model, keypoint_body, keypoint_point, q_neutral, frames):
+def bench_single_thread_sequence(
+    model, keypoint_body, keypoint_point, q_neutral, frames
+):
     """Warm-started sequential solve: frame i's initial q is frame i-1's
     converged q."""
     cs = build_cs(keypoint_body, keypoint_point, frames[0])
@@ -344,7 +369,11 @@ def bench_multithread_sequence_throughput(chunks, body_plan_path):
 
 
 def write_results_json(
-    body, single_frame_latency_us, single_frame_latency_max_us, single_thread_throughput_fps, multi_thread_throughput_fps
+    body,
+    single_frame_latency_us,
+    single_frame_latency_max_us,
+    single_thread_throughput_fps,
+    multi_thread_throughput_fps,
 ):
     results = {
         "name": "rbdl-python",
@@ -389,30 +418,53 @@ def write_results_json(
     (out_dir / f"rbdl-python-{body}.json").write_text(json.dumps(results, indent=2))
 
 
-def run_performance(body_name, body_plan_path, model, keypoint_body, keypoint_point, q_neutral, fixtures):
+def run_performance(
+    body_name, body_plan_path, model, keypoint_body, keypoint_point, q_neutral, fixtures
+):
     n_dofs = model.q_size - 6
-    print(f"RBDL model (Python/Cython bindings): q_size={model.q_size} (6 floating-base + {n_dofs} leg dofs)\n")
+    print(
+        f"RBDL model (Python/Cython bindings): q_size={model.q_size} (6 floating-base + {n_dofs} leg dofs)\n"
+    )
 
     target = np.array(fixtures["synthetic_frames"][0]["target_ego"], dtype=float)
     print("-- single-frame time (latency), no warm start --")
     single_frame_latency_us = summarize(
         "InverseKinematicsCS() (cold)",
-        bench_single_frame_latency(model, keypoint_body, keypoint_point, q_neutral, target, 20_000, 1000),
+        bench_single_frame_latency(
+            model, keypoint_body, keypoint_point, q_neutral, target, 20_000, 1000
+        ),
     )
 
     # step_tol=0 disables early stopping, forcing every solve to run the full
     # MAX_STEPS -- the worst case if a frame never converges early.
-    print(f"\n-- single-frame time (latency), early stop disabled ({MAX_STEPS} steps) --")
+    print(
+        f"\n-- single-frame time (latency), early stop disabled ({MAX_STEPS} steps) --"
+    )
     single_frame_latency_max_us = summarize(
         "InverseKinematicsCS() (forced max steps)",
-        bench_single_frame_latency(model, keypoint_body, keypoint_point, q_neutral, target, 20_000, 1000, step_tol=0.0),
+        bench_single_frame_latency(
+            model,
+            keypoint_body,
+            keypoint_point,
+            q_neutral,
+            target,
+            20_000,
+            1000,
+            step_tol=0.0,
+        ),
     )
 
-    print("\n-- single-thread sequence throughput (native-rate frames, warm-started) --")
-    native_targets = [np.array(f["target_ego"], dtype=float) for f in fixtures["native_rate_frames"]]
+    print(
+        "\n-- single-thread sequence throughput (native-rate frames, warm-started) --"
+    )
+    native_targets = [
+        np.array(f["target_ego"], dtype=float) for f in fixtures["native_rate_frames"]
+    ]
     single_thread_mean_us = summarize(
         "InverseKinematicsCS() (warm)",
-        bench_single_thread_sequence(model, keypoint_body, keypoint_point, q_neutral, native_targets),
+        bench_single_thread_sequence(
+            model, keypoint_body, keypoint_point, q_neutral, native_targets
+        ),
     )
 
     print(
@@ -420,7 +472,10 @@ def run_performance(body_name, body_plan_path, model, keypoint_body, keypoint_po
         f"{MULTITHREAD_N_PROCESSES} processes x {CHUNK_LEN} frames each) --"
     )
     chunks = [
-        [native_targets[i % len(native_targets)] for i in range(p * CHUNK_LEN, (p + 1) * CHUNK_LEN)]
+        [
+            native_targets[i % len(native_targets)]
+            for i in range(p * CHUNK_LEN, (p + 1) * CHUNK_LEN)
+        ]
         for p in range(MULTITHREAD_N_PROCESSES)
     ]
     total_frames = sum(len(c) for c in chunks)
@@ -432,7 +487,11 @@ def run_performance(body_name, body_plan_path, model, keypoint_body, keypoint_po
     )
 
     write_results_json(
-        body_name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
+        body_name,
+        single_frame_latency_us,
+        single_frame_latency_max_us,
+        1e6 / single_thread_mean_us,
+        multithread_fps,
     )
     print(f"\nWrote ../../plot/results/rbdl-python-{body_name}.json")
 
@@ -445,11 +504,21 @@ if __name__ == "__main__":
         fixtures_path = ASSETS_DIR / body["fixtures"]
 
         fixtures = json.loads(fixtures_path.read_text())
-        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][1:] == fixtures[
-            "leg_joint_names"
-        ], f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][
+            1:
+        ] == fixtures["leg_joint_names"], (
+            f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+        )
 
         model, keypoint_body, keypoint_point, q_neutral = build_model(body_plan_path)
 
         run_correctness(model, keypoint_body, keypoint_point, q_neutral, fixtures)
-        run_performance(body["name"], body_plan_path, model, keypoint_body, keypoint_point, q_neutral, fixtures)
+        run_performance(
+            body["name"],
+            body_plan_path,
+            model,
+            keypoint_body,
+            keypoint_point,
+            q_neutral,
+            fixtures,
+        )

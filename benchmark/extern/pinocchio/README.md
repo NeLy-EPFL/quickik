@@ -35,4 +35,4 @@ LD_LIBRARY_PATH="$CMEEL/lib" ./bench_pinocchio_cpp
 
 `json.hpp` is a verbatim copy of `../rbdl/json.hpp` (dependency-free JSON reader), kept local so this directory builds standalone. Unlike the RBDL/KDL benchmarks, the JSON body plan is parsed directly in double precision here (not via `../rbdl/forward_kinematics.hpp`'s float-based `BodyPlan`), to match Python's float64 arrays exactly.
 
-`compile_flags.txt` mirrors the same include paths/defines for clangd (or any other compile_flags.txt-aware IDE) -- without it, `pin::JointModel`/`ModelTpl::addJoint` calls show up as unresolved-overload errors, since the editor can't find Pinocchio's headers or the widened `BOOST_MPL_LIMIT_LIST_SIZE` the joint-model variant needs.
+`compile_flags.txt` mirrors the same include paths/defines for clangd (or any other compile_flags.txt-aware IDE) – without it, `pin::JointModel`/`ModelTpl::addJoint` calls show up as unresolved-overload errors, since the editor can't find Pinocchio's headers or the widened `BOOST_MPL_LIMIT_LIST_SIZE` the joint-model variant needs.

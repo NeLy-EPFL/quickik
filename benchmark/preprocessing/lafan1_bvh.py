@@ -59,7 +59,9 @@ def parse_bvh(path):
         i += 1
 
     frame_time = float(lines[i + 2].split()[-1])
-    motion = np.array([[float(v) for v in line.split()] for line in lines[i + 3 :] if line])
+    motion = np.array(
+        [[float(v) for v in line.split()] for line in lines[i + 3 :] if line]
+    )
     return {name: joints[name] for name in order}, motion, frame_time
 
 
@@ -68,7 +70,11 @@ def _local_rotation(channel_names, values_deg):
     intrinsic axis rotations (scipy's uppercase-axis convention matches
     this directly)."""
     axes = "".join(_AXIS_LETTERS[c[0]] for c in channel_names if c.endswith("rotation"))
-    angles = [v for c, v in zip(channel_names, values_deg, strict=True) if c.endswith("rotation")]
+    angles = [
+        v
+        for c, v in zip(channel_names, values_deg, strict=True)
+        if c.endswith("rotation")
+    ]
     return R.from_euler(axes, angles, degrees=True)
 
 
@@ -95,9 +101,13 @@ class Lafan1Skeleton:
 
             if j.parent is None:
                 pos_by_axis = {
-                    c[0]: v for c, v in zip(channels, values, strict=True) if c.endswith("position")
+                    c[0]: v
+                    for c, v in zip(channels, values, strict=True)
+                    if c.endswith("position")
                 }
-                world_pos = np.array([pos_by_axis["X"], pos_by_axis["Y"], pos_by_axis["Z"]])
+                world_pos = np.array(
+                    [pos_by_axis["X"], pos_by_axis["Y"], pos_by_axis["Z"]]
+                )
                 world_rot = _local_rotation(channels, values)
             else:
                 parent_pos, parent_rot = out[j.parent]

@@ -52,8 +52,13 @@ fn jacobian_matches_finite_differences() {
         perturbed.apply_delta(&delta);
 
         evaluate_fwdkin(&mut workspace, &perturbed);
-        for k in 0..tree.n_joints() {
-            let numerical_d = (workspace.kpt_positions[k] - baseline_positions[k]) / eps;
+        for (k, (numerical_position, baseline_position)) in workspace
+            .kpt_positions
+            .iter()
+            .zip(&baseline_positions)
+            .enumerate()
+        {
+            let numerical_d = (numerical_position - baseline_position) / eps;
             let analytical_d = analytical_jacobian.fixed_view::<3, 1>(3 * k, var);
             assert!(
                 (numerical_d - analytical_d).norm() < 1e-2,

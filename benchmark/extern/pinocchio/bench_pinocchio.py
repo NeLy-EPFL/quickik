@@ -43,7 +43,11 @@ ASSETS_DIR = BENCHMARK_DIR / "assets"
 
 # One body to benchmark: its body plan and matching fixtures file.
 BODIES = [
-    {"name": "neuromechfly", "body_plan": "neuromechfly_ypr_legs.json", "fixtures": "fixtures.json"},
+    {
+        "name": "neuromechfly",
+        "body_plan": "neuromechfly_ypr_legs.json",
+        "fixtures": "fixtures.json",
+    },
     {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
 ]
 
@@ -158,7 +162,9 @@ def build_full_model(body_plan_path):
         parent_joint_id[name] = last_joint_id
         # Operational frame at this node's own keypoint (tip of its DOF
         # chain -- position is independent of that chain's own rotations).
-        frame = pin.Frame(name, last_joint_id, 0, pin.SE3.Identity(), pin.FrameType.OP_FRAME)
+        frame = pin.Frame(
+            name, last_joint_id, 0, pin.SE3.Identity(), pin.FrameType.OP_FRAME
+        )
         keypoint_frame_ids.append(model.addFrame(frame))
         keypoint_names.append(name)
 
@@ -173,7 +179,9 @@ def build_full_model(body_plan_path):
 # -----------------------------------------------------------------------------
 # Gauss-Newton/LM inverse kinematics, matching src/solver.rs's math shape.
 # -----------------------------------------------------------------------------
-def solve_ik(model, data, keypoint_frame_ids, target, q0, neutral_q, disable_early_stop=False):
+def solve_ik(
+    model, data, keypoint_frame_ids, target, q0, neutral_q, disable_early_stop=False
+):
     """Runs up to `N_ITERATIONS` Gauss-Newton steps from `q0` toward `target`
     (an (n_keypoints, 3) array of world positions, one per
     `keypoint_frame_ids` entry -- the thorax has no residual term, matching
@@ -242,7 +250,10 @@ def run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtu
         # lengths, so concatenate rather than np.array(...).flatten() (which
         # errors on a ragged list of lists).
         ground_truth = np.concatenate(
-            [np.asarray(group, dtype=float) for group in frame["ground_truth_dof_angles_per_leg"]]
+            [
+                np.asarray(group, dtype=float)
+                for group in frame["ground_truth_dof_angles_per_leg"]
+            ]
         )
 
         q = solve_ik(model, data, keypoint_frame_ids, target, q_neutral, q_neutral)
@@ -282,17 +293,41 @@ def summarize(label, samples_sec):
     return mean
 
 
-def bench_single_frame_latency(model, data, keypoint_frame_ids, q_neutral, target, n_calls, disable_early_stop=False):
+def bench_single_frame_latency(
+    model,
+    data,
+    keypoint_frame_ids,
+    q_neutral,
+    target,
+    n_calls,
+    disable_early_stop=False,
+):
     """One IK solve from the fixed neutral configuration against a fixed
     target every call (no warm start) -- the same fixture-derived target
     used by the Rust/C++/Python QuickIK benchmarks."""
     for _ in range(1000):
-        solve_ik(model, data, keypoint_frame_ids, target, q_neutral, q_neutral, disable_early_stop)
+        solve_ik(
+            model,
+            data,
+            keypoint_frame_ids,
+            target,
+            q_neutral,
+            q_neutral,
+            disable_early_stop,
+        )
 
     samples = []
     for _ in range(n_calls):
         t0 = time.perf_counter()
-        solve_ik(model, data, keypoint_frame_ids, target, q_neutral, q_neutral, disable_early_stop)
+        solve_ik(
+            model,
+            data,
+            keypoint_frame_ids,
+            target,
+            q_neutral,
+            q_neutral,
+            disable_early_stop,
+        )
         samples.append(time.perf_counter() - t0)
     return samples
 
@@ -390,29 +425,45 @@ def write_results_json(
     (out_dir / f"pinocchio-{body}.json").write_text(json.dumps(results, indent=2))
 
 
-def run_performance(body_name, body_plan_path, model, data, keypoint_frame_ids, q_neutral, fixtures):
+def run_performance(
+    body_name, body_plan_path, model, data, keypoint_frame_ids, q_neutral, fixtures
+):
     print(f"Pinocchio benchmark (nq={model.nq}, nv={model.nv})\n")
 
     target = np.array(fixtures["synthetic_frames"][0]["target_ego"])
     print("-- single-frame time (latency), no warm start --")
     single_frame_latency_us = summarize(
         "solve_ik()",
-        bench_single_frame_latency(model, data, keypoint_frame_ids, q_neutral, target, 20_000),
+        bench_single_frame_latency(
+            model, data, keypoint_frame_ids, q_neutral, target, 20_000
+        ),
     )
 
     # Early stop disabled, so every call runs the full N_ITERATIONS -- the
     # worst case if a frame never converges early.
-    print(f"\n-- single-frame time (latency), early stop disabled ({N_ITERATIONS} iterations) --")
+    print(
+        f"\n-- single-frame time (latency), early stop disabled ({N_ITERATIONS} iterations) --"
+    )
     single_frame_latency_max_us = summarize(
         "solve_ik() (forced max iterations)",
-        bench_single_frame_latency(model, data, keypoint_frame_ids, q_neutral, target, 20_000, disable_early_stop=True),
+        bench_single_frame_latency(
+            model,
+            data,
+            keypoint_frame_ids,
+            q_neutral,
+            target,
+            20_000,
+            disable_early_stop=True,
+        ),
     )
 
     print("\n-- single-thread sequence throughput (native-rate frames, warm start) --")
     native_targets = [np.array(f["target_ego"]) for f in fixtures["native_rate_frames"]]
     single_thread_mean_us = summarize(
         "solve_ik() (warm-started)",
-        bench_single_thread_sequence(model, data, keypoint_frame_ids, q_neutral, native_targets),
+        bench_single_thread_sequence(
+            model, data, keypoint_frame_ids, q_neutral, native_targets
+        ),
     )
 
     print(
@@ -420,7 +471,10 @@ def run_performance(body_name, body_plan_path, model, data, keypoint_frame_ids, 
         f"{MULTITHREAD_N_PROCESSES} processes x {CHUNK_LEN} frames each) --"
     )
     chunks = [
-        [native_targets[i % len(native_targets)] for i in range(p * CHUNK_LEN, (p + 1) * CHUNK_LEN)]
+        [
+            native_targets[i % len(native_targets)]
+            for i in range(p * CHUNK_LEN, (p + 1) * CHUNK_LEN)
+        ]
         for p in range(MULTITHREAD_N_PROCESSES)
     ]
     total_frames = sum(len(c) for c in chunks)
@@ -432,7 +486,11 @@ def run_performance(body_name, body_plan_path, model, data, keypoint_frame_ids, 
     )
 
     write_results_json(
-        body_name, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us, multithread_fps
+        body_name,
+        single_frame_latency_us,
+        single_frame_latency_max_us,
+        1e6 / single_thread_mean_us,
+        multithread_fps,
     )
     print(f"\nWrote ../../plot/results/pinocchio-{body_name}.json")
 
@@ -445,12 +503,24 @@ if __name__ == "__main__":
         fixtures_path = ASSETS_DIR / body["fixtures"]
 
         fixtures = json.loads(fixtures_path.read_text())
-        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][1:] == fixtures[
-            "leg_joint_names"
-        ], f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+        assert [j["name"] for j in json.loads(body_plan_path.read_text())["joints"]][
+            1:
+        ] == fixtures["leg_joint_names"], (
+            f"joint order must match {fixtures_path.name}'s leg_joint_names for target_ego indexing to line up"
+        )
 
-        model, keypoint_frame_ids, q_neutral, dof_signs, dof_names = build_full_model(body_plan_path)
+        model, keypoint_frame_ids, q_neutral, dof_signs, dof_names = build_full_model(
+            body_plan_path
+        )
         data = model.createData()
 
         run_correctness(model, data, keypoint_frame_ids, q_neutral, dof_signs, fixtures)
-        run_performance(body["name"], body_plan_path, model, data, keypoint_frame_ids, q_neutral, fixtures)
+        run_performance(
+            body["name"],
+            body_plan_path,
+            model,
+            data,
+            keypoint_frame_ids,
+            q_neutral,
+            fixtures,
+        )

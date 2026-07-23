@@ -41,7 +41,9 @@ class G1Kinematics:
         joints = body_plan["joints"]
         self.names = [j["name"] for j in joints]
         self.index = {name: i for i, name in enumerate(self.names)}
-        self.parent_idx = [self.index[j["parent"]] if j["parent"] is not None else -1 for j in joints]
+        self.parent_idx = [
+            self.index[j["parent"]] if j["parent"] is not None else -1 for j in joints
+        ]
         self.offset_pos = [np.array(j["offset_pos"]) for j in joints]
         self.offset_rot = [quat_wxyz_to_scipy(j["offset_quat"]) for j in joints]
         # Each node has 0 or 1 dof in this body plan; dof_index[i] is this
@@ -52,7 +54,9 @@ class G1Kinematics:
         dof_cursor = 0
         for j in joints:
             if j["dofs"]:
-                assert len(j["dofs"]) == 1, "G1's body plan has exactly one DOF per non-leaf node"
+                assert len(j["dofs"]) == 1, (
+                    "G1's body plan has exactly one DOF per non-leaf node"
+                )
                 self.dof_axis.append(np.array(j["dofs"][0]["axis"]))
                 self.dof_index.append(dof_cursor)
                 dof_cursor += 1
@@ -72,7 +76,10 @@ class G1Kinematics:
             if self.parent_idx[i] == -1:
                 parent_origin, parent_rot = root_pos, root_rot
             else:
-                parent_origin, parent_rot = origins[self.parent_idx[i]], rotations[self.parent_idx[i]]
+                parent_origin, parent_rot = (
+                    origins[self.parent_idx[i]],
+                    rotations[self.parent_idx[i]],
+                )
 
             origin = parent_origin + parent_rot.apply(self.offset_pos[i])
             rotation = parent_rot * self.offset_rot[i]

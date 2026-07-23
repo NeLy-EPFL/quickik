@@ -120,10 +120,22 @@ def parse_joints(urdf_path):
     for j in root.findall("joint"):
         name = j.get("name")
         origin = j.find("origin")
-        xyz = [float(v) for v in origin.get("xyz", "0 0 0").split()] if origin is not None else [0.0, 0.0, 0.0]
-        rpy = [float(v) for v in origin.get("rpy", "0 0 0").split()] if origin is not None else [0.0, 0.0, 0.0]
+        xyz = (
+            [float(v) for v in origin.get("xyz", "0 0 0").split()]
+            if origin is not None
+            else [0.0, 0.0, 0.0]
+        )
+        rpy = (
+            [float(v) for v in origin.get("rpy", "0 0 0").split()]
+            if origin is not None
+            else [0.0, 0.0, 0.0]
+        )
         axis_el = j.find("axis")
-        axis = [float(v) for v in axis_el.get("xyz").split()] if axis_el is not None else None
+        axis = (
+            [float(v) for v in axis_el.get("xyz").split()]
+            if axis_el is not None
+            else None
+        )
         limit_el = j.find("limit")
         limits = (
             [float(limit_el.get("lower")), float(limit_el.get("upper"))]
@@ -160,7 +172,9 @@ def build_g1_body_plan(neutral_angles):
     # a later joint parented on that same link should point at this node).
     link_to_node_name = {ROOT_LINK: ROOT_LINK}
 
-    for joint_name, neutral_angle in zip(REVOLUTE_JOINT_ORDER, neutral_angles, strict=True):
+    for joint_name, neutral_angle in zip(
+        REVOLUTE_JOINT_ORDER, neutral_angles, strict=True
+    ):
         j = joints[joint_name]
         parent_node = link_to_node_name[j["parent"]]
         node_name = joint_name.removesuffix("_joint")

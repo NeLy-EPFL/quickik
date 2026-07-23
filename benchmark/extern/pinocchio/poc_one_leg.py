@@ -56,9 +56,7 @@ def build_leg_model(joints: list[dict], leg_prefix: str) -> tuple[pin.Model, int
         if not node["dofs"]:
             # Leaf keypoint with no DOFs (e.g. the claw tip): add as a fixed
             # operational frame rather than a joint.
-            frame = pin.Frame(
-                name, parent_id, 0, offset, pin.FrameType.OP_FRAME
-            )
+            frame = pin.Frame(name, parent_id, 0, offset, pin.FrameType.OP_FRAME)
             tip_frame_id = model.addFrame(frame)
             continue
 

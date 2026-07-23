@@ -53,7 +53,10 @@ def two_link_positions(a1, a2):
 
 
 def observations_for(a1, a2):
-    return [quickik.KeypointObservation.position_3d(list(pos), 1.0) for pos in two_link_positions(a1, a2)]
+    return [
+        quickik.KeypointObservation.position_3d(list(pos), 1.0)
+        for pos in two_link_positions(a1, a2)
+    ]
 
 
 def no_prior_config():
@@ -89,7 +92,9 @@ def test_position2d_observation_on_mapperless_solver_raises(tree):
 
 def test_recovers_pose_from_xyview_observations(tree):
     positions = two_link_positions(0.35, -0.25)
-    observations = [quickik.KeypointObservation.position_2d([p[0], p[1]], 1.0) for p in positions]
+    observations = [
+        quickik.KeypointObservation.position_2d([p[0], p[1]], 1.0) for p in positions
+    ]
 
     state = quickik.State.neutral_pose(tree)
     solver = quickik.Solver(tree, no_prior_config(), mapper=quickik.XYView())
@@ -188,7 +193,9 @@ def test_sequence_solver_warm_start_converges_faster(tree):
 
 def test_solve_sequence_returns_one_state_per_frame(tree):
     solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    sequence = [observations_for(a1, a2) for a1, a2 in [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]]
+    sequence = [
+        observations_for(a1, a2) for a1, a2 in [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
+    ]
 
     states = solver.solve_sequence(sequence)
 
@@ -207,8 +214,12 @@ def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
         true_angles.append((a, a * 0.5))
         sequence.append(observations_for(a, a * 0.5))
 
-    segmented_config = quickik.SegmentedSolveConfig(segment_len=10, overlap_len=3, overlap_tolerance=0.05)
-    states = quickik.solve_sequence_segmented_parallel(tree, quickik.SolverConfig(), sequence, segmented_config)
+    segmented_config = quickik.SegmentedSolveConfig(
+        segment_len=10, overlap_len=3, overlap_tolerance=0.05
+    )
+    states = quickik.solve_sequence_segmented_parallel(
+        tree, quickik.SolverConfig(), sequence, segmented_config
+    )
 
     assert len(states) == n_frames
     for state, (a1, a2) in zip(states, true_angles, strict=True):
