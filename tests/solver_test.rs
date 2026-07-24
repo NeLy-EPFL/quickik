@@ -87,13 +87,14 @@ fn recovers_pose_from_camera_observations() {
         world2cam_pos: Vector3::new(0.0, 0.0, 5.0),
         world2cam_rot_mat: Matrix3::identity(),
     };
-    // The Jacobian argument only affects the returned projected Jacobian, not
-    // the projected position, so a placeholder shape is fine here.
+    // The Jacobian argument only affects the projected-Jacobian output, not
+    // the projected position, so placeholder shapes are fine here.
     let jac_placeholder = nalgebra::DMatrix::<f32>::zeros(3, 3);
+    let mut jac2d_placeholder = nalgebra::DMatrix::<f32>::zeros(2, 3);
     let observations: Vec<KeypointObservation> = target_positions
         .iter()
         .map(|pos| {
-            let (obs_pos, _) = camera.project_3d_to_2d(pos, &jac_placeholder);
+            let obs_pos = camera.project_3d_to_2d(pos, &jac_placeholder, &mut jac2d_placeholder);
             KeypointObservation::Position2D {
                 obs_pos,
                 weight: 1.0,

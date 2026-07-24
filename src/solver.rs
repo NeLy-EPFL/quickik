@@ -77,6 +77,10 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     /// Per-keypoint Jacobian buffer in compact form: shape is 3 x state_dim,
     /// but nonzero columns are moved to the left, and the rest is ignored.
     jacobian_buffer: DMatrix<f32>,
+    /// Per-keypoint projected-2D-Jacobian scratch buffer (shape 2 x
+    /// state_dim), same compact-column convention as `jacobian_buffer`. Only
+    /// written/read for `Position2D` observations.
+    jacobian_2d_buffer: DMatrix<f32>,
     pub config: SolverConfig<M>,
 }
 
@@ -105,6 +109,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
             jacobian_buffer: DMatrix::zeros(3, state_dim),
+            jacobian_2d_buffer: DMatrix::zeros(2, state_dim),
             config,
         }
     }
@@ -143,6 +148,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
                     self.config.mapper.as_ref(),
                     &self.workspace.kpt_positions[k],
                     &self.jacobian_buffer,
+                    &mut self.jacobian_2d_buffer,
                     self.joint_weight_scalers[k],
                     relevant_idxs,
                     &mut self.jtj,
@@ -223,6 +229,7 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     mapper: Option<&M>,
     fwdkin_pos3d: &Vector3<f32>,
     jacobian_3d: &DMatrix<f32>,
+    jacobian_2d_buffer: &mut DMatrix<f32>,
     joint_weight_scaler: f32,
     relevant_idxs: &[usize],
     jtj: &mut DMatrix<f32>,
@@ -249,23 +256,24 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
         }
         KeypointObservation::Position2D { obs_pos, weight } => {
             let weight = weight * joint_weight_scaler;
-            // The mapper's `&DMatrix<f32>` parameter needs an owned, densely
-            // packed matrix, so unlike the Position3D case above, it can't take
-            // an arbitrary view. For simplicity, let's do a clone every
-            // iteration here for now.
             let mapper = mapper
                 .expect("Position2D observation given to a Solver constructed with mapper: None");
-            let jacobian_3d_compact = jacobian_3d.columns(0, n_relevant_dofs).clone_owned();
-            let (fwdkin_pos2d, jacobian_2d) =
-                mapper.project_3d_to_2d(fwdkin_pos3d, &jacobian_3d_compact);
+            // Same sparse accumulation as the Position3D case above: the
+            // mapper writes its projected Jacobian into a view of the
+            // preallocated `jacobian_2d_buffer` (no allocation), and jtj/jtr
+            // are accumulated via direct dot products rather than a full
+            // matrix multiply.
+            let jacobian_3d_view = jacobian_3d.columns(0, n_relevant_dofs);
+            let mut jacobian_2d_view = jacobian_2d_buffer.columns_mut(0, n_relevant_dofs);
+            let fwdkin_pos2d =
+                mapper.project_3d_to_2d(fwdkin_pos3d, &jacobian_3d_view, &mut jacobian_2d_view);
             let residual = obs_pos - fwdkin_pos2d;
-            let jtj_local = jacobian_2d.transpose() * &jacobian_2d;
-            let jtr_local = jacobian_2d.transpose() * residual;
             for (i, &gi) in relevant_idxs.iter().enumerate() {
+                let col_i = jacobian_2d_view.column(i);
                 for (j, &gj) in relevant_idxs.iter().enumerate() {
-                    jtj[(gi, gj)] += jtj_local[(i, j)] * weight;
+                    jtj[(gi, gj)] += col_i.dot(&jacobian_2d_view.column(j)) * weight;
                 }
-                jtr[gi] += jtr_local[i] * weight;
+                jtr[gi] += col_i.dot(&residual) * weight;
             }
         }
     }

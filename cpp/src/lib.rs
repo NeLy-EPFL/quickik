@@ -286,16 +286,25 @@ enum RuntimeMapper {
 }
 
 impl Mapper3Dto2D for RuntimeMapper {
-    fn project_3d_to_2d(
+    fn project_3d_to_2d<S1, S2>(
         &self,
         pos_world3d: &nalgebra::Vector3<f32>,
-        jacobian_world3d: &nalgebra::DMatrix<f32>,
-    ) -> (nalgebra::Vector2<f32>, nalgebra::DMatrix<f32>) {
+        jacobian_world3d: &nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S1>,
+        jacobian_2d_out: &mut nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S2>,
+    ) -> nalgebra::Vector2<f32>
+    where
+        S1: nalgebra::Storage<f32, nalgebra::Dyn, nalgebra::Dyn>,
+        S2: nalgebra::StorageMut<f32, nalgebra::Dyn, nalgebra::Dyn>,
+    {
         match self {
-            RuntimeMapper::Camera(camera) => camera.project_3d_to_2d(pos_world3d, jacobian_world3d),
-            RuntimeMapper::XYView => {
-                quickik_core::observation::XYView.project_3d_to_2d(pos_world3d, jacobian_world3d)
+            RuntimeMapper::Camera(camera) => {
+                camera.project_3d_to_2d(pos_world3d, jacobian_world3d, jacobian_2d_out)
             }
+            RuntimeMapper::XYView => quickik_core::observation::XYView.project_3d_to_2d(
+                pos_world3d,
+                jacobian_world3d,
+                jacobian_2d_out,
+            ),
         }
     }
 }

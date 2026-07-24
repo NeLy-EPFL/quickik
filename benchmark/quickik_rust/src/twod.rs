@@ -65,11 +65,12 @@ pub fn synthetic_camera(points: impl Iterator<Item = Vector3<f32>>) -> Camera {
     }
 }
 
-/// Projects a single 3D position through `camera`, discarding the Jacobian
-/// half of [`Mapper3Dto2D::project_3d_to_2d`] -- only needed here to build a
-/// 2D observation from a known 3D point, not to solve anything.
+/// Projects a single 3D position through `camera`, discarding the projected
+/// Jacobian output -- only needed here to build a 2D observation from a known
+/// 3D point, not to solve anything.
 fn project_position(camera: &Camera, pos: Vector3<f32>) -> Vector2<f32> {
-    camera.project_3d_to_2d(&pos, &DMatrix::zeros(3, 1)).0
+    let mut jacobian_2d_placeholder = DMatrix::zeros(2, 1);
+    camera.project_3d_to_2d(&pos, &DMatrix::zeros(3, 1), &mut jacobian_2d_placeholder)
 }
 
 /// `target_ego` reprojected through `camera` into `Position2D` observations,
