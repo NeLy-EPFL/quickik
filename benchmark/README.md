@@ -24,10 +24,10 @@ To rebuild the docs site (including these charts and the Rust API reference) aft
 
 ## Reducing measurement noise
 
-On a shared, multi-tasking machine, other processes competing for CPU time can add double-digit percentage noise to these numbers – enough to look like a real regression. `taskset -c <core>` pins a benchmark process to a single CPU core so the scheduler can't migrate it mid-run; pick a currently idle core first (e.g. with `mpstat -P ALL 1 1`):
+On a shared, multi-tasking machine, other processes competing for CPU time can add double-digit percentage noise to these numbers – enough to look like a real regression. `taskset -c <cores>` pins a benchmark process to specific CPU cores so the scheduler can't migrate it mid-run; pick currently idle cores first (e.g. with `mpstat -P ALL 1 1`):
 
 ```sh
-taskset -c 15 ./target/release/quickik-benchmark
+taskset -c 0,5,6,8,10,11,13,15 ./target/release/quickik-benchmark
 ```
 
-This doesn't reserve the core exclusively – without root/cgroups, another process can still land on it – but it removes migration jitter and noticeably tightens the p95/p99 tail latencies. For a real before/after comparison, always pin both runs to the same core.
+Pin to *at least as many cores as the multi-thread benchmark's worker count* (`MULTITHREAD_N_THREADS` in `quickik_rust/src/perf.rs`, 8 by default) – pinning to fewer cores than that forces its worker threads to share them, which serializes the very parallelism that metric is measuring and craters its throughput (the single-frame-latency metrics are single-threaded and unaffected by this). This doesn't reserve the cores exclusively – without root/cgroups, another process can still land on them – but it removes migration jitter and noticeably tightens the p95/p99 tail latencies. For a real before/after comparison, always pin both runs to the same cores.
