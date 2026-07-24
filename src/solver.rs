@@ -166,9 +166,18 @@ impl<M: Mapper3Dto2D> Solver<M> {
             );
 
             // Levenberg-Marquardt-style relative damping to improve numerical
-            // stability. If the existing values in J^T J are large (i.e. larger
-            // than 1, for example when coordinates are pixel coordinates and
-            // can go up to thousands), the damping term is scaled up to match.
+            // stability. `max(1.0)` does two independent jobs, not just one:
+            // - Scales damping up when J^T J's diagonal is large (e.g.
+            //   coordinates in real pixel units, which can run into the
+            //   thousands), so a tiny fixed `damping` isn't swamped and left
+            //   numerically meaningless.
+            // - Floors damping when a DOF's diagonal entry is small or near
+            //   zero (weakly- or entirely-unconstrained DOFs -- routine, and
+            //   unrelated to coordinate units/scale: it happens whenever few
+            //   keypoints constrain a DOF, and is exercised directly by any
+            //   config with `weight: 0.0`), so damping doesn't vanish right
+            //   when it's most needed to keep the Cholesky decomposition
+            //   well-conditioned.
             for i in 0..state_dim {
                 self.jtj[(i, i)] += self.config.damping * self.jtj[(i, i)].max(1.0);
             }
