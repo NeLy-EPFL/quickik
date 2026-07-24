@@ -21,3 +21,13 @@ python plot/plot_comparison.py
 To visually sanity-check a fit, `plot/render_video.py` renders a side-by-side comparison video (both bodies) overlaying real mocap keypoints against QuickIK's solved skeleton over a contiguous warm-started sequence – see that script's own header comment for the run command.
 
 To rebuild the docs site (including these charts and the Rust API reference) after running any of the above, run `../docs/build.sh` from the repo root.
+
+## Reducing measurement noise
+
+On a shared, multi-tasking machine, other processes competing for CPU time can add double-digit percentage noise to these numbers – enough to look like a real regression. `taskset -c <core>` pins a benchmark process to a single CPU core so the scheduler can't migrate it mid-run; pick a currently idle core first (e.g. with `mpstat -P ALL 1 1`):
+
+```sh
+taskset -c 15 ./target/release/quickik-benchmark
+```
+
+This doesn't reserve the core exclusively – without root/cgroups, another process can still land on it – but it removes migration jitter and noticeably tightens the p95/p99 tail latencies. For a real before/after comparison, always pin both runs to the same core.
