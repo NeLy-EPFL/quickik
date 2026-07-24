@@ -130,6 +130,78 @@ def angle_error_deg(solved, ground_truth):
 
 
 # -----------------------------------------------------------------------------
+# 2D observations (mirrors quickik_rust's twod.rs): a synthetic bottom-view
+# pinhole Camera, fixed once per body, plus the trivial XYView. Camera isn't
+# exposed to Python for projecting points (only for use as a Solver mapper),
+# so project_to_2d below reimplements its position-only projection formula
+# directly -- matching quickik_core::observation::Camera::project_3d_to_2d's
+# position half exactly, just without the Jacobian half this doesn't need.
+# -----------------------------------------------------------------------------
+def synthetic_camera(points):
+    """Builds a fixed pinhole camera framing every point in `points` ((N, 3)
+    array): looks straight up (+Z) from below -- a "bottom view" -- at a
+    distance chosen so the whole bounding sphere (with margin) stays inside a
+    60-degree field of view. fx=fy=distance (not a literal focal length):
+    keeps 2D coordinates/Jacobians at the same O(1) scale as the 3D case
+    instead of real pixel units, which would swamp the solver's neutral-pose
+    regularization (tuned for model-unit-scale residuals) -- see
+    quickik_rust's twod.rs for the full derivation. Mirrors that module's
+    synthetic_camera() exactly, so both produce the same task."""
+    centroid = points.mean(axis=0)
+    radius = np.linalg.norm(points - centroid, axis=1).max()
+
+    fov_deg = 60.0
+    margin = 1.5
+    half_fov = np.radians(fov_deg / 2.0)
+    distance = float(radius * margin / np.sin(half_fov))
+
+    forward = np.array([0.0, 0.0, 1.0])
+    cam_pos = centroid - forward * distance
+    world_up = np.array([0.0, 1.0, 0.0])
+    right = np.cross(forward, world_up)
+    right = right / np.linalg.norm(right)
+    up = np.cross(right, forward)
+    rot = np.stack([right, up, forward])  # rows: right, up, forward
+    world2cam_pos = -(rot @ cam_pos)
+
+    return quickik.Camera(
+        fx=distance,
+        fy=distance,
+        cx=0.0,
+        cy=0.0,
+        world2cam_pos=[float(v) for v in world2cam_pos],
+        world2cam_rot_mat=[float(v) for v in rot.flatten()],  # row-major
+    )
+
+
+def project_to_2d(camera, pos_world3d):
+    rot = np.array(camera.world2cam_rot_mat).reshape(3, 3)
+    pos_cam3d = rot @ pos_world3d + np.array(camera.world2cam_pos)
+    return np.array(
+        [
+            camera.fx * pos_cam3d[0] / pos_cam3d[2] + camera.cx,
+            camera.fy * pos_cam3d[1] / pos_cam3d[2] + camera.cy,
+        ]
+    )
+
+
+def build_observations_2d_camera(target_ego, camera):
+    obs = [quickik.KeypointObservation.missing()]
+    for p in target_ego:
+        pos2d = project_to_2d(camera, np.asarray(p))
+        obs.append(quickik.KeypointObservation.position_2d(list(pos2d), 1.0))
+    return obs
+
+
+def build_observations_2d_xyview(target_ego):
+    obs = [quickik.KeypointObservation.missing()]
+    obs += [
+        quickik.KeypointObservation.position_2d([p[0], p[1]], 1.0) for p in target_ego
+    ]
+    return obs
+
+
+# -----------------------------------------------------------------------------
 # Correctness (mirrors correctness.rs)
 # -----------------------------------------------------------------------------
 def run_correctness(ctx):
@@ -213,6 +285,97 @@ def run_correctness(ctx):
         )
 
 
+def run_correctness_2d_for_mapper(ctx, label, mapper, to_2d):
+    """Same checks as run_correctness, but every observation is `to_2d`'s
+    projection of the fixture's usual 3D target. Fit quality is still
+    measured in 3D -- the distance between the solved pose's FK output and
+    the *original* 3D target -- since that's the physical quantity that
+    matters, even though the solver never saw it."""
+    tree = ctx.tree
+
+    print(f"== Synthetic exact-fit frames (bug hunt), 2D via {label} ==")
+    print(
+        f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}"
+    )
+    default_solver = quickik.Solver(tree, quickik.SolverConfig(), mapper)
+    zero_reg_solver = quickik.Solver(tree, quickik.SolverConfig(weight=0.0), mapper)
+    for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
+        target = np.array(frame["target_ego"])
+        ground_truth = np.concatenate(
+            [
+                np.asarray(g, dtype=float)
+                for g in frame["ground_truth_dof_angles_per_leg"]
+            ]
+        )
+        obs = to_2d(target)
+
+        state = quickik.State.neutral_pose(tree)
+        default_solver.solve(state, obs)
+        solved_pts = forward_kinematics(
+            ctx, state.dof_angles, state.root_pos, state.root_rot
+        )
+        residual = np.linalg.norm(solved_pts - target, axis=1)
+        angle_err = angle_error_deg(state.dof_angles, ground_truth)
+
+        state0 = quickik.State.neutral_pose(tree)
+        zero_reg_solver.solve(state0, obs)
+        angle_err0 = angle_error_deg(state0.dof_angles, ground_truth)
+
+        print(
+            f"{i:>6} {np.sqrt((residual**2).mean()):>16.6f} {residual.max():>16.6f} "
+            f"{angle_err:>18.4f} {angle_err0:>20.6f}"
+        )
+    print(
+        "(kpt rms/max: 3D distance between solved FK output and the *original 3D* "
+        f"target -- the solver itself never sees 3D, only its {label} projection. "
+        f"angle err: max abs error over all {tree.n_dofs} DOFs, degrees, mod 2*pi. "
+        '"w=0" = weight=0.)\n'
+    )
+
+    print(f"== Real mocap frames (cross-solver vs. flygym.ik), 2D via {label} ==")
+    seq = quickik.SequenceSolver(tree, quickik.SolverConfig(), mapper)
+    quickik_rms, quickik_max, cross_rms, cross_max = [], [], [], []
+    for frame in ctx.fixtures["real_frames"]:
+        target = np.array(frame["target_ego"])
+        state = seq.solve_frame(to_2d(target))
+        solved_pts = forward_kinematics(
+            ctx, state.dof_angles, state.root_pos, state.root_rot
+        )
+        dists = np.linalg.norm(solved_pts - target, axis=1)
+        quickik_rms.append(np.sqrt((dists**2).mean()))
+        quickik_max.append(dists.max())
+        reconstructed = frame.get("flygym_ik_reconstructed_ego")
+        if reconstructed is not None:
+            cross_dists = np.linalg.norm(solved_pts - np.array(reconstructed), axis=1)
+            cross_rms.append(np.sqrt((cross_dists**2).mean()))
+            cross_max.append(cross_dists.max())
+    quickik_rms, quickik_max = np.array(quickik_rms), np.array(quickik_max)
+    print(f"over {len(ctx.fixtures['real_frames'])} frames:")
+    print(
+        f"  quickik fit residual to target:      "
+        f"rms={np.sqrt((quickik_rms**2).mean()):.5f}  mean={quickik_rms.mean():.5f}  max={quickik_max.max():.5f}"
+    )
+    if cross_rms:
+        cross_rms, cross_max = np.array(cross_rms), np.array(cross_max)
+        print(
+            f"  cross-solver agreement (vs flygym.ik): "
+            f"rms={np.sqrt((cross_rms**2).mean()):.5f}  mean={cross_rms.mean():.5f}  max={cross_max.max():.5f}\n"
+        )
+    else:
+        print(
+            "  cross-solver agreement (vs flygym.ik): n/a (no reference in fixtures)\n"
+        )
+
+
+def run_correctness_2d(ctx, camera):
+    run_correctness_2d_for_mapper(
+        ctx, "Camera", camera, lambda t: build_observations_2d_camera(t, camera)
+    )
+    run_correctness_2d_for_mapper(
+        ctx, "XYView", quickik.XYView(), build_observations_2d_xyview
+    )
+
+
 # -----------------------------------------------------------------------------
 # Performance (mirrors perf.rs)
 # -----------------------------------------------------------------------------
@@ -232,12 +395,11 @@ def summarize(label, samples_sec):
     return mean
 
 
-def bench_single_frame_latency(tree, target, n_calls, config):
+def bench_single_frame_latency(tree, obs, n_calls, config, mapper=None):
     """Single-frame latency: a fresh State.neutral_pose() solved against a
-    fixed real target every call (no warm start) -- the same fixture-derived
-    target used by the Rust and C++ benchmarks."""
-    solver = quickik.Solver(tree, config)
-    obs = build_observations(target)
+    fixed observation set every call (no warm start) -- the same
+    fixture-derived target used by the Rust and C++ benchmarks."""
+    solver = quickik.Solver(tree, config, mapper)
     for _ in range(500):
         state = quickik.State.neutral_pose(tree)
         solver.solve(state, obs)
@@ -359,10 +521,11 @@ def run_performance(ctx):
     # Same fixture-derived target used by the Rust and C++ benchmarks, so
     # this number is directly comparable across all three.
     target = np.array(ctx.fixtures["synthetic_frames"][0]["target_ego"])
+    target_obs = build_observations(target)
     print("-- single-frame time (latency), default config (adaptive early stop) --")
     single_frame_latency_us = summarize(
         "solve()",
-        bench_single_frame_latency(tree, target, 10_000, quickik.SolverConfig()),
+        bench_single_frame_latency(tree, target_obs, 10_000, quickik.SolverConfig()),
     )
 
     # Early stop disabled (tolerances = 0), so every call runs the full
@@ -375,7 +538,7 @@ def run_performance(ctx):
     )
     single_frame_latency_max_us = summarize(
         "solve() (forced max iterations)",
-        bench_single_frame_latency(tree, target, 10_000, max_iterations_config),
+        bench_single_frame_latency(tree, target_obs, 10_000, max_iterations_config),
     )
 
     print(
@@ -421,10 +584,187 @@ def run_performance(ctx):
     )
 
 
+def tiled_native_rate_sequence_2d(frames, length, to_2d):
+    """List-of-observation-lists counterpart to tile_arrays/build_observation_arrays,
+    for mappers whose observations don't fit that array-based path's 3D shape."""
+    base = [to_2d(f["target_ego"]) for f in frames]
+    return [base[i % len(base)] for i in range(length)]
+
+
+def bench_solve_sequence_2d(tree, sequence, config, mapper):
+    """Single-thread sequence throughput, 2D counterpart of
+    bench_solve_sequence: one bulk call to
+    solve_sequence_segmented_parallel_from_observations with n_workers=1."""
+    parallel_config = quickik.ParallelSolveConfig(len(sequence), 0, 0.05, 1)
+    quickik.solve_sequence_segmented_parallel_from_observations(
+        tree, config, sequence, parallel_config, mapper
+    )  # warm up
+    t0 = time.perf_counter()
+    quickik.solve_sequence_segmented_parallel_from_observations(
+        tree, config, sequence, parallel_config, mapper
+    )
+    return time.perf_counter() - t0
+
+
+def bench_multithread_sequence_throughput_2d(tree, sequence, n_workers, mapper):
+    config = quickik.SolverConfig()
+    parallel_config = quickik.ParallelSolveConfig(
+        SEGMENT_LEN, OVERLAP_LEN, 0.05, n_workers
+    )
+    quickik.solve_sequence_segmented_parallel_from_observations(
+        tree, config, sequence, parallel_config, mapper
+    )  # warm up
+    t0 = time.perf_counter()
+    quickik.solve_sequence_segmented_parallel_from_observations(
+        tree, config, sequence, parallel_config, mapper
+    )
+    return time.perf_counter() - t0
+
+
+def write_results_json_2d(
+    body,
+    observation,
+    single_frame_latency_us,
+    single_frame_latency_max_us,
+    single_thread_throughput_fps,
+    multi_thread_throughput_fps,
+):
+    """Writes plot/results/quickik-python-2d-<observation>-<body>.json for
+    plot/plot_2d_comparison.py to pick up. Same schema as write_results_json
+    plus an "observation" field ("camera"/"xyview")."""
+    results = {
+        "name": "quickik-python",
+        "body": body,
+        "language": "python",
+        "formulation": "whole-tree",
+        "observation": observation,
+        "single_frame_latency_us": single_frame_latency_us,
+        "single_frame_latency_max_us": single_frame_latency_max_us,
+        "single_thread_throughput_fps": single_thread_throughput_fps,
+        "multi_thread_throughput_fps": multi_thread_throughput_fps,
+        "multi_thread_n_threads": MULTITHREAD_N_THREADS,
+        "notes": None,
+    }
+    out_dir = BENCHMARK_DIR / "plot" / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"quickik-python-2d-{observation}-{body}.json").write_text(
+        json.dumps(results, indent=2)
+    )
+
+
+def run_performance_2d_for_mapper(ctx, observation, mapper, label, to_2d):
+    tree = ctx.tree
+    print(
+        f"quickik Python-bindings benchmark, 2D via {label} (state_dim={tree.n_dofs + 6})\n"
+    )
+
+    target = np.array(ctx.fixtures["synthetic_frames"][0]["target_ego"])
+    target_obs = to_2d(target)
+    print("-- single-frame time (latency), default config (adaptive early stop) --")
+    single_frame_latency_us = summarize(
+        "solve()",
+        bench_single_frame_latency(
+            tree, target_obs, 10_000, quickik.SolverConfig(), mapper
+        ),
+    )
+
+    max_iterations_config = quickik.SolverConfig(
+        position_tolerance=0.0, angle_tolerance=0.0
+    )
+    print(
+        f"\n-- single-frame time (latency), early stop disabled ({max_iterations_config.n_iterations} iterations) --"
+    )
+    single_frame_latency_max_us = summarize(
+        "solve() (forced max iterations)",
+        bench_single_frame_latency(
+            tree, target_obs, 10_000, max_iterations_config, mapper
+        ),
+    )
+
+    print(
+        "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
+    )
+    single_sequence = tiled_native_rate_sequence_2d(
+        ctx.fixtures["native_rate_frames"], SINGLE_THREAD_N_FRAMES, to_2d
+    )
+    elapsed = bench_solve_sequence_2d(
+        tree, single_sequence, quickik.SolverConfig(), mapper
+    )
+    single_thread_fps = len(single_sequence) / elapsed
+    print(
+        f"solve_sequence_segmented_parallel_from_observations (n_workers=1)   "
+        f"n_frames={len(single_sequence):<6} elapsed={elapsed * 1e3:>9.3f}ms  "
+        f"throughput={single_thread_fps:>10.1f} frames/s"
+    )
+
+    print(
+        f"\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, "
+        f"{MULTITHREAD_N_THREADS} threads) --"
+    )
+    n_frames = frames_for_n_segments(MULTITHREAD_N_THREADS)
+    mt_sequence = tiled_native_rate_sequence_2d(
+        ctx.fixtures["native_rate_frames"], n_frames, to_2d
+    )
+    elapsed = bench_multithread_sequence_throughput_2d(
+        tree, mt_sequence, MULTITHREAD_N_THREADS, mapper
+    )
+    multithread_fps = n_frames / elapsed
+    print(
+        f"solve_sequence_segmented_parallel_from_observations   n_frames={n_frames:<6} "
+        f"elapsed={elapsed * 1e3:>9.3f}ms  throughput={multithread_fps:>10.1f} frames/s\n"
+    )
+
+    write_results_json_2d(
+        ctx.name,
+        observation,
+        single_frame_latency_us,
+        single_frame_latency_max_us,
+        single_thread_fps,
+        multithread_fps,
+    )
+
+
+def run_performance_2d(ctx, camera):
+    run_performance_2d_for_mapper(
+        ctx,
+        "camera",
+        camera,
+        "Camera",
+        lambda t: build_observations_2d_camera(t, camera),
+    )
+    run_performance_2d_for_mapper(
+        ctx, "xyview", quickik.XYView(), "XYView", build_observations_2d_xyview
+    )
+
+
 if __name__ == "__main__":
     for body in BODIES:
         print(f"===== body: {body['name']} =====\n")
         ctx = build_body_context(body["name"], body["body_plan"], body["fixtures"])
         run_correctness(ctx)
         run_performance(ctx)
+
+        # Same task, but observed only in 2D (a synthetic pinhole camera,
+        # bottom view, fixed once per body, plus the trivial XYView) --
+        # mirrors quickik_rust's twod.rs. NeuroMechFly only for now, matching
+        # the Rust benchmark's scope while the 2D fit is still being
+        # validated for G1.
+        if body["name"] == "neuromechfly":
+            all_points = np.concatenate(
+                [
+                    np.array(
+                        [f["target_ego"] for f in ctx.fixtures["synthetic_frames"]]
+                    ).reshape(-1, 3),
+                    np.array(
+                        [f["target_ego"] for f in ctx.fixtures["native_rate_frames"]]
+                    ).reshape(-1, 3),
+                    np.array(
+                        [f["target_ego"] for f in ctx.fixtures["real_frames"]]
+                    ).reshape(-1, 3),
+                ]
+            )
+            camera = synthetic_camera(all_points)
+
+            run_correctness_2d(ctx, camera)
+            run_performance_2d(ctx, camera)
         print()

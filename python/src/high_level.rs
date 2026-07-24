@@ -206,3 +206,35 @@ pub(crate) fn solve_sequence_segmented_parallel(
         .map(|inner| State { inner })
         .collect())
 }
+
+/// Same as [`solve_sequence_segmented_parallel`], but for observations that
+/// don't fit that function's 3D-only array shape (e.g. `Position2D`): takes
+/// a list of per-frame `KeypointObservation` lists instead, same convention
+/// as [`SequenceSolver::solve_sequence`]. Object construction/unwrapping
+/// happens up front, under the GIL; the actual parallel solve runs the same
+/// GIL-released core call as the array-based entry point above.
+#[pyfunction]
+#[pyo3(signature = (kinematic_tree, config, sequence, parallel_config, mapper=None))]
+pub(crate) fn solve_sequence_segmented_parallel_from_observations(
+    py: Python<'_>,
+    kinematic_tree: KinematicTree,
+    config: SolverConfig,
+    sequence: Vec<Vec<PyRef<'_, KeypointObservation>>>,
+    parallel_config: ParallelSolveConfig,
+    mapper: Option<Bound<'_, PyAny>>,
+) -> PyResult<Vec<State>> {
+    let config = config.as_rust(extract_mapper(mapper.as_ref())?);
+    let sequence: Vec<Vec<_>> = sequence.into_iter().map(extract_observations).collect();
+    Ok(py
+        .detach(|| {
+            quickik_core::high_level::solve_sequence_segmented_parallel(
+                &kinematic_tree.inner,
+                config,
+                &sequence,
+                parallel_config.inner,
+            )
+        })
+        .into_iter()
+        .map(|inner| State { inner })
+        .collect())
+}
