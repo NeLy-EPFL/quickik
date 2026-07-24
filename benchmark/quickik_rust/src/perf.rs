@@ -12,12 +12,13 @@ use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
 use quickik::high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
-use quickik::observation::KeypointObservation;
+use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
 
 use crate::correctness::build_observations;
 use crate::fixtures::{Fixtures, NativeRateFrame};
+use crate::twod::{observations_2d_camera, observations_2d_xyview};
 
 /// Frames per segment/thread for both the multi-thread throughput benchmark
 /// and `quickik_scaling`'s weak-scaling sweep.
@@ -90,13 +91,13 @@ pub fn tiled_native_rate_sequence(
 
 /// Single-frame latency: a fresh `State::neutral_pose()` solved against a
 /// fixed real target every call (no warm start).
-fn bench_single_frame_latency(
+fn bench_single_frame_latency<M: Mapper3Dto2D>(
     tree: &Arc<KinematicTree>,
     target_obs: &[KeypointObservation],
     n_calls: usize,
-    config: SolverConfig,
+    config: SolverConfig<M>,
 ) -> Vec<Duration> {
-    let mut solver: Solver = Solver::new(tree, config);
+    let mut solver: Solver<M> = Solver::new(tree, config);
     for _ in 0..500 {
         let mut state = State::neutral_pose(tree.clone());
         solver.solve(&mut state, black_box(target_obs));
@@ -118,18 +119,17 @@ fn bench_single_frame_latency(
 /// actual continuous tracking pipeline would see), default config. A second,
 /// fresh `SequenceSolver` is used for the timed pass after warming up once,
 /// so the sequence's own frame-to-frame warm-starting is what's measured.
-fn bench_single_thread_sequence_throughput(
+fn bench_single_thread_sequence_throughput<M: Mapper3Dto2D>(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
+    config: SolverConfig<M>,
 ) -> Vec<Duration> {
-    let config = SolverConfig::default();
-
-    let mut seq: SequenceSolver = SequenceSolver::new(tree.clone(), config);
+    let mut seq: SequenceSolver<M> = SequenceSolver::new(tree.clone(), config);
     for obs in sequence {
         seq.solve_frame(black_box(obs));
     }
 
-    let mut timed_seq: SequenceSolver = SequenceSolver::new(tree.clone(), config);
+    let mut timed_seq: SequenceSolver<M> = SequenceSolver::new(tree.clone(), config);
     let mut samples = Vec::with_capacity(sequence.len());
     for obs in sequence {
         let t0 = Instant::now();
@@ -148,7 +148,20 @@ pub fn bench_multithread_sequence_throughput(
     sequence: &[Vec<KeypointObservation>],
     n_workers: isize,
 ) -> Duration {
-    let config: SolverConfig = SolverConfig::default();
+    bench_multithread_sequence_throughput_with_config(
+        tree,
+        sequence,
+        n_workers,
+        SolverConfig::<NoMapper>::default(),
+    )
+}
+
+fn bench_multithread_sequence_throughput_with_config<M: Mapper3Dto2D + Sync>(
+    tree: &Arc<KinematicTree>,
+    sequence: &[Vec<KeypointObservation>],
+    n_workers: isize,
+    config: SolverConfig<M>,
+) -> Duration {
     let parallel_config = ParallelSolveConfig {
         segment_len: SEGMENT_LEN,
         overlap_len: OVERLAP_LEN,
@@ -172,7 +185,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
     let single_frame_latency = summarize(
         "solve()",
-        bench_single_frame_latency(tree, &target_obs, 10_000, SolverConfig::default()),
+        bench_single_frame_latency(tree, &target_obs, 10_000, SolverConfig::<NoMapper>::default()),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
@@ -196,7 +209,11 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         tiled_native_rate_sequence(&fixtures.native_rate_frames, SINGLE_THREAD_N_FRAMES);
     let single_thread_mean = summarize(
         "SequenceSolver.solve_frame",
-        bench_single_thread_sequence_throughput(tree, &single_thread_sequence),
+        bench_single_thread_sequence_throughput(
+            tree,
+            &single_thread_sequence,
+            SolverConfig::<NoMapper>::default(),
+        ),
     );
 
     println!(
@@ -250,4 +267,117 @@ fn write_results_json(
     let out_path = out_dir.join(format!("quickik-rust-{body}.json"));
     std::fs::write(&out_path, serde_json::to_string_pretty(&results).unwrap())
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_path.display()));
+}
+
+/// Tiles the native-rate fixture up to `len` frames, reprojecting each
+/// frame's `target_ego` to 2D via `to_2d` -- the 2D counterpart of
+/// [`tiled_native_rate_sequence`].
+fn tiled_native_rate_sequence_2d(
+    native_rate_frames: &[NativeRateFrame],
+    len: usize,
+    to_2d: &impl Fn(&[[f32; 3]]) -> Vec<KeypointObservation>,
+) -> Vec<Vec<KeypointObservation>> {
+    let base: Vec<Vec<KeypointObservation>> = native_rate_frames
+        .iter()
+        .map(|f| to_2d(&f.target_ego))
+        .collect();
+    (0..len).map(|i| base[i % base.len()].clone()).collect()
+}
+
+/// Runs the same latency/throughput suite as [`run_all`], but every
+/// observation is `to_2d`'s projection of the fixture's usual 3D target --
+/// for both a synthetic pinhole [`Camera`] and the trivial [`XYView`], on
+/// both bodies. Prints results only (no `results/*.json` output yet -- this
+/// isn't wired into `plot_comparison.py`).
+pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, camera: Camera) {
+    run_all_2d_for_mapper(tree, fixtures, camera, "Camera", |t| {
+        observations_2d_camera(t, &camera)
+    });
+    run_all_2d_for_mapper(tree, fixtures, XYView, "XYView", |t| observations_2d_xyview(t));
+}
+
+fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
+    tree: &Arc<KinematicTree>,
+    fixtures: &Fixtures,
+    mapper: M,
+    label: &str,
+    to_2d: impl Fn(&[[f32; 3]]) -> Vec<KeypointObservation>,
+) {
+    println!(
+        "quickik Rust benchmark, 2D via {label} (state_dim={})\n",
+        tree.state_dim()
+    );
+
+    let target_obs = to_2d(&fixtures.synthetic_frames[0].target_ego);
+    println!("-- single-frame time (latency), default config (adaptive early stop) --");
+    summarize(
+        "solve()",
+        bench_single_frame_latency(
+            tree,
+            &target_obs,
+            10_000,
+            SolverConfig {
+                mapper: Some(mapper),
+                ..SolverConfig::default()
+            },
+        ),
+    );
+
+    // Early stop disabled (tolerances = 0), so every call runs the full
+    // `n_iterations` -- the worst case if a frame never converges early.
+    let max_iterations_config = SolverConfig {
+        position_tolerance: 0.0,
+        angle_tolerance: 0.0,
+        mapper: Some(mapper),
+        ..SolverConfig::default()
+    };
+    println!(
+        "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
+        max_iterations_config.n_iterations
+    );
+    summarize(
+        "solve() (forced max iterations)",
+        bench_single_frame_latency(tree, &target_obs, 10_000, max_iterations_config),
+    );
+
+    println!(
+        "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
+    );
+    let single_thread_sequence =
+        tiled_native_rate_sequence_2d(&fixtures.native_rate_frames, SINGLE_THREAD_N_FRAMES, &to_2d);
+    summarize(
+        "SequenceSolver.solve_frame",
+        bench_single_thread_sequence_throughput(
+            tree,
+            &single_thread_sequence,
+            SolverConfig {
+                mapper: Some(mapper),
+                ..SolverConfig::default()
+            },
+        ),
+    );
+
+    println!(
+        "\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, {MULTITHREAD_N_THREADS} threads) --"
+    );
+    let sequence = tiled_native_rate_sequence_2d(
+        &fixtures.native_rate_frames,
+        frames_for_n_segments(MULTITHREAD_N_THREADS),
+        &to_2d,
+    );
+    let elapsed = bench_multithread_sequence_throughput_with_config(
+        tree,
+        &sequence,
+        MULTITHREAD_N_THREADS as isize,
+        SolverConfig {
+            mapper: Some(mapper),
+            ..SolverConfig::default()
+        },
+    );
+    let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
+    println!(
+        "solve_sequence_segmented_parallel   n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s\n",
+        sequence.len(),
+        multithread_fps,
+    );
 }

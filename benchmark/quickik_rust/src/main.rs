@@ -5,8 +5,9 @@
 
 use std::sync::Arc;
 
+use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik_benchmark::{correctness, fixtures, perf};
+use quickik_benchmark::{correctness, fixtures, perf, twod};
 
 /// One body to benchmark: its body plan and matching fixtures file.
 struct BodyConfig {
@@ -55,5 +56,24 @@ fn main() {
 
         correctness::run_all(&tree, &fixtures);
         perf::run_all(&tree, &fixtures, body.name);
+
+        // Same task, but observed only in 2D (a synthetic pinhole camera,
+        // bottom view, fixed once per body, plus the trivial XYView) -- see
+        // twod.rs. NeuroMechFly only for now while the 2D fit is still being
+        // validated (G1's more symmetric limb structure makes it even more
+        // prone to the mirror ambiguity of monocular 2D fitting).
+        if body.name == "neuromechfly" {
+            let all_points = fixtures
+                .synthetic_frames
+                .iter()
+                .flat_map(|f| f.target_ego.iter())
+                .chain(fixtures.native_rate_frames.iter().flat_map(|f| f.target_ego.iter()))
+                .chain(fixtures.real_frames.iter().flat_map(|f| f.target_ego.iter()))
+                .map(|&[x, y, z]| Vector3::new(x, y, z));
+            let camera = twod::synthetic_camera(all_points);
+
+            correctness::run_all_2d(&tree, &fixtures, camera);
+            perf::run_all_2d(&tree, &fixtures, camera);
+        }
     }
 }
