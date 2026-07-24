@@ -305,7 +305,7 @@ def bench_single_frame_latency(
     """One IK solve from the fixed neutral configuration against a fixed
     target every call (no warm start) -- the same fixture-derived target
     used by the Rust/C++/Python QuickIK benchmarks."""
-    for _ in range(1000):
+    for _ in range(500):
         solve_ik(
             model,
             data,
@@ -354,6 +354,10 @@ def bench_single_thread_sequence(model, data, keypoint_frame_ids, q_neutral, tar
 # instead of QuickIK's in-process thread pool -- see README.md.
 MULTITHREAD_N_PROCESSES = 8
 CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
+# Frame count for the single-thread sequence-throughput metric, tiled from
+# the 300-frame native-rate fixture -- larger than the multi-thread metric's
+# per-worker chunk since this one has no worker count to divide by.
+SINGLE_THREAD_N_FRAMES = 1000
 
 _worker_state = {}
 
@@ -435,7 +439,7 @@ def run_performance(
     single_frame_latency_us = summarize(
         "solve_ik()",
         bench_single_frame_latency(
-            model, data, keypoint_frame_ids, q_neutral, target, 20_000
+            model, data, keypoint_frame_ids, q_neutral, target, 10_000
         ),
     )
 
@@ -452,17 +456,20 @@ def run_performance(
             keypoint_frame_ids,
             q_neutral,
             target,
-            20_000,
+            10_000,
             disable_early_stop=True,
         ),
     )
 
     print("\n-- single-thread sequence throughput (native-rate frames, warm start) --")
     native_targets = [np.array(f["target_ego"]) for f in fixtures["native_rate_frames"]]
+    single_thread_targets = [
+        native_targets[i % len(native_targets)] for i in range(SINGLE_THREAD_N_FRAMES)
+    ]
     single_thread_mean_us = summarize(
         "solve_ik() (warm-started)",
         bench_single_thread_sequence(
-            model, data, keypoint_frame_ids, q_neutral, native_targets
+            model, data, keypoint_frame_ids, q_neutral, single_thread_targets
         ),
     )
 

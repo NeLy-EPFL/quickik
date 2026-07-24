@@ -199,7 +199,7 @@ std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree>
                                                 const std::vector<quickik::KeypointObservation> &obs, int n_calls,
                                                 quickik::SolverConfig config) {
   auto solver = quickik::new_solver(*tree, config, quickik::no_mapper());
-  for (int i = 0; i < 1000; i++) {
+  for (int i = 0; i < 500; i++) {
     auto state = quickik::state_neutral_pose(*tree);
     solver->solve(*state, slice_of(obs));
   }
@@ -239,6 +239,10 @@ constexpr size_t kOverlapLen = 20;
 // passed explicitly via ParallelSolveConfig::n_workers -- fixed rather than
 // detected, matching perf.rs (see its comment).
 constexpr size_t kMultithreadNThreads = 8;
+// Frame count for the single-thread sequence-throughput metric, tiled from
+// the 300-frame native-rate fixture -- larger than the multi-thread metric's
+// per-worker segment since this one has no worker count to divide by.
+constexpr size_t kSingleThreadNFrames = 1000;
 
 size_t frames_for_n_segments(size_t n_segments) {
   return kSegmentLen + (n_segments > 0 ? n_segments - 1 : 0) * (kSegmentLen - kOverlapLen);
@@ -309,7 +313,7 @@ void run_performance(const std::string &body, rust::Box<quickik::KinematicTree> 
   auto obs = build_observations(target);
   std::printf("-- single-frame time (latency), default config (adaptive early stop) --\n");
   double single_frame_latency_us =
-      summarize("solve()", bench_single_frame_latency(tree, obs, 20000, quickik::default_solver_config()));
+      summarize("solve()", bench_single_frame_latency(tree, obs, 10000, quickik::default_solver_config()));
 
   // Early stop disabled (tolerances = 0), so every call runs the full
   // n_iterations -- the worst case if a frame never converges early.
@@ -319,13 +323,12 @@ void run_performance(const std::string &body, rust::Box<quickik::KinematicTree> 
   std::printf("\n-- single-frame time (latency), early stop disabled (%zu iterations) --\n",
               max_iterations_config.n_iterations);
   double single_frame_latency_max_us =
-      summarize("solve() (forced max iterations)", bench_single_frame_latency(tree, obs, 20000, max_iterations_config));
+      summarize("solve() (forced max iterations)", bench_single_frame_latency(tree, obs, 10000, max_iterations_config));
 
   std::printf("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --\n");
-  std::vector<std::vector<quickik::KeypointObservation>> native_obs;
-  for (auto &f : fixtures["native_rate_frames"].as_array()) native_obs.push_back(build_observations(to_vec3s(f["target_ego"])));
-  double single_thread_mean_us =
-      summarize("SequenceSolver.solve_frame", bench_solve_sequence(tree, native_obs, quickik::default_solver_config()));
+  auto single_thread_sequence = tiled_native_rate_sequence(fixtures, kSingleThreadNFrames);
+  double single_thread_mean_us = summarize(
+      "SequenceSolver.solve_frame", bench_solve_sequence(tree, single_thread_sequence, quickik::default_solver_config()));
 
   std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, %zu threads) --\n",
               kMultithreadNThreads);

@@ -368,6 +368,10 @@ std::vector<double> bench_sequence(const pin::Model &model, pin::Data &data,
 constexpr size_t kNThreads = 8;
 constexpr size_t kSegmentLen = 200;  // matches bench_rbdl.cpp's per-segment frame count
 constexpr size_t kTiledLen = kSegmentLen * kNThreads;
+// Frame count for the single-thread sequence-throughput metric, tiled from
+// the 300-frame native-rate fixture -- larger than the multi-thread metric's
+// per-worker segment since this one has no worker count to divide by.
+constexpr size_t kSingleThreadNFrames = 1000;
 
 std::vector<std::vector<Eigen::Vector3d>> tiled_sequence(const Json &fixtures, size_t length) {
   std::vector<std::vector<Eigen::Vector3d>> base;
@@ -472,19 +476,18 @@ int main() {
     std::printf("-- single-frame time (latency), no warm start --\n");
     double single_frame_latency_us = summarize(
         "solve_ik() (cold)", bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target,
-                                                          scratch, 20000, 1000));
+                                                          scratch, 10000, 500));
 
     // Early stop disabled, so every call runs the full kNIterations -- the
     // worst case if a frame never converges early.
     std::printf("\n-- single-frame time (latency), early stop disabled (%d iterations) --\n", kNIterations);
     double single_frame_latency_max_us = summarize(
         "solve_ik() (forced max iterations)",
-        bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target, scratch, 20000, 1000,
+        bench_single_frame_latency(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, target, scratch, 10000, 500,
                                     /*disable_early_stop=*/true));
 
     std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
-    std::vector<std::vector<Eigen::Vector3d>> native_frames;
-    for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_targets(f["target_ego"]));
+    std::vector<std::vector<Eigen::Vector3d>> native_frames = tiled_sequence(fixtures, kSingleThreadNFrames);
     double single_thread_mean_us =
         summarize("solve_ik() (warm)", bench_sequence(fm.model, data, fm.keypoint_frame_ids, fm.q_neutral, native_frames, scratch));
 

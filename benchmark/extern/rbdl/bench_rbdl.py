@@ -326,6 +326,10 @@ def bench_single_thread_sequence(
 # ../pinocchio/bench_pinocchio.py's bench_multithread_sequence_throughput.
 MULTITHREAD_N_PROCESSES = 8
 CHUNK_LEN = 300  # frames per process, tiled from native_rate_frames if needed
+# Frame count for the single-thread sequence-throughput metric, tiled from
+# the 300-frame native-rate fixture -- larger than the multi-thread metric's
+# per-worker chunk since this one has no worker count to divide by.
+SINGLE_THREAD_N_FRAMES = 1000
 
 _worker_state = {}
 
@@ -431,7 +435,7 @@ def run_performance(
     single_frame_latency_us = summarize(
         "InverseKinematicsCS() (cold)",
         bench_single_frame_latency(
-            model, keypoint_body, keypoint_point, q_neutral, target, 20_000, 1000
+            model, keypoint_body, keypoint_point, q_neutral, target, 10_000, 500
         ),
     )
 
@@ -448,8 +452,8 @@ def run_performance(
             keypoint_point,
             q_neutral,
             target,
-            20_000,
-            1000,
+            10_000,
+            500,
             step_tol=0.0,
         ),
     )
@@ -460,10 +464,13 @@ def run_performance(
     native_targets = [
         np.array(f["target_ego"], dtype=float) for f in fixtures["native_rate_frames"]
     ]
+    single_thread_targets = [
+        native_targets[i % len(native_targets)] for i in range(SINGLE_THREAD_N_FRAMES)
+    ]
     single_thread_mean_us = summarize(
         "InverseKinematicsCS() (warm)",
         bench_single_thread_sequence(
-            model, keypoint_body, keypoint_point, q_neutral, native_targets
+            model, keypoint_body, keypoint_point, q_neutral, single_thread_targets
         ),
     )
 

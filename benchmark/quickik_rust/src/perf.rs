@@ -28,6 +28,11 @@ pub const OVERLAP_LEN: usize = 20;
 /// than detected, so the number is reproducible regardless of the machine's
 /// core count. See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
 const MULTITHREAD_N_THREADS: usize = 8;
+/// Frame count for the single-thread sequence-throughput metric, tiled from
+/// the 300-frame native-rate fixture -- larger than the multi-thread
+/// metric's per-worker segment since this one has no worker count to divide
+/// by.
+const SINGLE_THREAD_N_FRAMES: usize = 1000;
 
 /// Total frame count that `solve_sequence_segmented_parallel`'s own
 /// `segment_bounds` splits into exactly `n_segments` segments of
@@ -92,7 +97,7 @@ fn bench_single_frame_latency(
     config: SolverConfig,
 ) -> Vec<Duration> {
     let mut solver: Solver = Solver::new(tree, config);
-    for _ in 0..1000 {
+    for _ in 0..500 {
         let mut state = State::neutral_pose(tree.clone());
         solver.solve(&mut state, black_box(target_obs));
         black_box(&state);
@@ -109,27 +114,24 @@ fn bench_single_frame_latency(
 }
 
 /// Single-thread sequence throughput: `SequenceSolver::solve_frame` warm
-/// started across the native-rate fixture (a contiguous run of consecutive
-/// recorded frames -- the frame-to-frame motion an actual continuous
-/// tracking pipeline would see), default config. A second, fresh
-/// `SequenceSolver` is used for the timed pass after warming up once, so the
-/// sequence's own frame-to-frame warm-starting is what's measured.
+/// started across a tiled native-rate sequence (the frame-to-frame motion an
+/// actual continuous tracking pipeline would see), default config. A second,
+/// fresh `SequenceSolver` is used for the timed pass after warming up once,
+/// so the sequence's own frame-to-frame warm-starting is what's measured.
 fn bench_single_thread_sequence_throughput(
     tree: &Arc<KinematicTree>,
-    native_rate_frames: &[NativeRateFrame],
+    sequence: &[Vec<KeypointObservation>],
 ) -> Vec<Duration> {
-    let all_obs =
-        observations_from_target_egos(native_rate_frames.iter().map(|f| f.target_ego.as_slice()));
     let config = SolverConfig::default();
 
     let mut seq: SequenceSolver = SequenceSolver::new(tree.clone(), config);
-    for obs in &all_obs {
+    for obs in sequence {
         seq.solve_frame(black_box(obs));
     }
 
     let mut timed_seq: SequenceSolver = SequenceSolver::new(tree.clone(), config);
-    let mut samples = Vec::with_capacity(all_obs.len());
-    for obs in &all_obs {
+    let mut samples = Vec::with_capacity(sequence.len());
+    for obs in sequence {
         let t0 = Instant::now();
         timed_seq.solve_frame(black_box(obs));
         samples.push(t0.elapsed());
@@ -170,7 +172,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
     let single_frame_latency = summarize(
         "solve()",
-        bench_single_frame_latency(tree, &target_obs, 20_000, SolverConfig::default()),
+        bench_single_frame_latency(tree, &target_obs, 10_000, SolverConfig::default()),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
@@ -186,13 +188,15 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     );
     let single_frame_latency_max = summarize(
         "solve() (forced max iterations)",
-        bench_single_frame_latency(tree, &target_obs, 20_000, max_iterations_config),
+        bench_single_frame_latency(tree, &target_obs, 10_000, max_iterations_config),
     );
 
     println!("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --");
+    let single_thread_sequence =
+        tiled_native_rate_sequence(&fixtures.native_rate_frames, SINGLE_THREAD_N_FRAMES);
     let single_thread_mean = summarize(
         "SequenceSolver.solve_frame",
-        bench_single_thread_sequence_throughput(tree, &fixtures.native_rate_frames),
+        bench_single_thread_sequence_throughput(tree, &single_thread_sequence),
     );
 
     println!(

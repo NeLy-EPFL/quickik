@@ -4,18 +4,21 @@ API benchmark) so the two are directly comparable.
 
 Runs against every body listed in `BODIES` below, each with its own
 body-plan + fixtures JSON pair under `assets/` (see `generate_fixtures.py`).
-Requires:
+The real-mocap frames' flygym.ik cross-check reference values are baked into
+that fixtures JSON at generation time -- this script only reads them, so
+unlike `generate_fixtures.py`, it needs neither flygym nor mujoco itself, just:
 
   - quickik's Python extension built for this interpreter (see
     `python/README` or the top-level README's "Python" install section --
     this script does not build it for you).
-  - flygym's own venv (mujoco, scipy, flygym) for the real-frame
-    cross-solver check.
+  - numpy and scipy.
 
-Run with flygym's own venv:
+Run with any venv that has both, e.g. `devtools-pyenv/` (see the top-level
+README) with quickik additionally installed into it:
 
-    cd /path/to/flygym && source .venv/bin/activate
-    python /path/to/quickik/benchmark/quickik_python/bench.py
+    cd devtools-pyenv && uv sync && source .venv/bin/activate
+    cd ../python && maturin develop --release
+    python ../benchmark/quickik_python/bench.py
 
 One thing the Rust benchmark can do that this one can't, since it's not
 exposed to Python: forward kinematics on its own (`quickik::forward` isn't
@@ -235,7 +238,7 @@ def bench_single_frame_latency(tree, target, n_calls, config):
     target used by the Rust and C++ benchmarks."""
     solver = quickik.Solver(tree, config)
     obs = build_observations(target)
-    for _ in range(1000):
+    for _ in range(500):
         state = quickik.State.neutral_pose(tree)
         solver.solve(state, obs)
 
@@ -270,6 +273,10 @@ OVERLAP_LEN = 20
 # passed explicitly via ParallelSolveConfig.n_workers -- fixed rather than
 # detected, matching perf.rs (see its comment).
 MULTITHREAD_N_THREADS = 8
+# Frame count for the single-thread sequence-throughput metric, tiled from
+# the 300-frame native-rate fixture -- larger than the multi-thread metric's
+# per-worker segment since this one has no worker count to divide by.
+SINGLE_THREAD_N_FRAMES = 1000
 
 
 def frames_for_n_segments(n_segments):
@@ -332,7 +339,7 @@ def run_performance(ctx):
     print("-- single-frame time (latency), default config (adaptive early stop) --")
     single_frame_latency_us = summarize(
         "solve()",
-        bench_single_frame_latency(tree, target, 20_000, quickik.SolverConfig()),
+        bench_single_frame_latency(tree, target, 10_000, quickik.SolverConfig()),
     )
 
     # Early stop disabled (tolerances = 0), so every call runs the full
@@ -345,15 +352,13 @@ def run_performance(ctx):
     )
     single_frame_latency_max_us = summarize(
         "solve() (forced max iterations)",
-        bench_single_frame_latency(tree, target, 20_000, max_iterations_config),
+        bench_single_frame_latency(tree, target, 10_000, max_iterations_config),
     )
 
     print(
         "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
     )
-    native_obs = [
-        build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]
-    ]
+    native_obs = tiled_native_rate_sequence(ctx, SINGLE_THREAD_N_FRAMES)
     single_thread_mean_us = summarize(
         "SequenceSolver.solve_frame",
         bench_solve_sequence(tree, native_obs, quickik.SolverConfig()),

@@ -86,6 +86,19 @@ using KDL::diff;
 
 constexpr size_t kFloatingBaseDofs = 6;
 constexpr unsigned int kMaxIter = 100;
+// Lower than QuickIK/RBDL/Pinocchio's shared 10000, since KDL's own per-call
+// latency is 1-2 orders of magnitude higher, making its single-frame-latency
+// sweeps alone take much longer at that count. Not directly comparable
+// sample-count-wise to the other libraries' numbers, but 1000 still gives a
+// stable mean/median/p95 (50 samples in the p95 tail), just a noisier p99
+// (10 samples in the tail vs 100).
+constexpr size_t kLatencyNCalls = 1000;
+// Frame count for the single-thread sequence-throughput metric, tiled from
+// the 300-frame native-rate fixture. Lower than the other libraries' 1000
+// for the same per-call-latency reason as kLatencyNCalls above -- a
+// throughput metric already averages over many frames, so it needs fewer of
+// them than an isolated per-call latency measurement to be stable.
+constexpr size_t kSingleThreadNFrames = 100;
 // Matches QuickIK's own default `position_tolerance`/`angle_tolerance` (see
 // ../../src/solver.rs's `SolverConfig::default()`) -- see file header note 4
 // for why this gates our own step-size check, not `TreeIkSolverPos_NR_JL`'s
@@ -445,21 +458,20 @@ void run_body(const BodyConfig &body, const std::filesystem::path &assets_dir) {
   Frames target_frames = build_target_frames(sb.model, target);
 
   std::printf("-- single-frame time (latency) --\n");
-  double single_frame_latency_us =
-      summarize("CartToJnt() (cold)", bench_single_frame_latency(sb, q_neutral, target_frames, 20000, 1000));
+  double single_frame_latency_us = summarize(
+      "CartToJnt() (cold)", bench_single_frame_latency(sb, q_neutral, target_frames, kLatencyNCalls, 500));
 
   // step_tol=0 disables early stopping; max_iter is forced to 10 here (not
   // this file's own kMaxIter=100) to match QuickIK/RBDL/Pinocchio's shared
   // iteration cap -- the worst case if a frame never converges early.
   std::printf("\n-- single-frame time (latency), early stop disabled (10 iterations) --\n");
-  double single_frame_latency_max_us = summarize(
-      "CartToJnt() (forced max iterations)",
-      bench_single_frame_latency(sb, q_neutral, target_frames, 20000, 1000, /*max_iter=*/10, /*step_tol=*/0.0));
+  double single_frame_latency_max_us =
+      summarize("CartToJnt() (forced max iterations)",
+                 bench_single_frame_latency(sb, q_neutral, target_frames, kLatencyNCalls, 500, /*max_iter=*/10,
+                                             /*step_tol=*/0.0));
 
   std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
-  std::vector<Frames> native_frames;
-  for (auto &f : fixtures["native_rate_frames"].as_array())
-    native_frames.push_back(build_target_frames(sb.model, to_vec3s(f["target_ego"])));
+  std::vector<Frames> native_frames = tiled_sequence(sb.model, fixtures, kSingleThreadNFrames);
   double single_thread_mean_us = summarize("CartToJnt() (warm)", bench_sequence(sb, q_neutral, native_frames));
 
   std::printf("\n-- multi-thread sequence throughput (%zu contiguous chunks, %zu threads) --\n", kNThreads,

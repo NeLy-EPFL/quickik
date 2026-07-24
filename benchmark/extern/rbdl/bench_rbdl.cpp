@@ -314,6 +314,10 @@ std::vector<double> bench_sequence(RbdlModel &m, const rmath::VectorNd &q_neutra
 constexpr size_t kNThreads = 8;
 constexpr size_t kSegmentLen = 200;  // matches perf.rs's/bench_cpp.cpp's per-segment frame count
 constexpr size_t kTiledLen = kSegmentLen * kNThreads;
+// Frame count for the single-thread sequence-throughput metric, tiled from
+// the 300-frame native-rate fixture -- larger than the multi-thread metric's
+// per-worker segment since this one has no worker count to divide by.
+constexpr size_t kSingleThreadNFrames = 1000;
 
 std::vector<std::vector<Vec3>> tiled_sequence(const Json &fixtures, size_t length) {
   std::vector<std::vector<Vec3>> base;
@@ -465,17 +469,16 @@ int main() {
 
     std::printf("-- single-frame time (latency) --\n");
     double single_frame_latency_us =
-        summarize("InverseKinematics() (cold)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000));
+        summarize("InverseKinematics() (cold)", bench_single_frame_latency(m, q_neutral, target, 10000, 500));
 
     // step_tol=0 disables early stopping, forcing every solve to run the full
     // max_steps -- the worst case if a frame never converges early.
     std::printf("\n-- single-frame time (latency), early stop disabled (%u steps) --\n", kMaxSteps);
     double single_frame_latency_max_us = summarize(
-        "InverseKinematics() (forced max steps)", bench_single_frame_latency(m, q_neutral, target, 20000, 1000, 0.0));
+        "InverseKinematics() (forced max steps)", bench_single_frame_latency(m, q_neutral, target, 10000, 500, 0.0));
 
     std::printf("\n-- single-thread sequence throughput (native-rate frames, warm-started) --\n");
-    std::vector<std::vector<Vec3>> native_frames;
-    for (auto &f : fixtures["native_rate_frames"].as_array()) native_frames.push_back(to_vec3s(f["target_ego"]));
+    std::vector<std::vector<Vec3>> native_frames = tiled_sequence(fixtures, kSingleThreadNFrames);
     double single_thread_mean_us =
         summarize("InverseKinematics() (warm)", bench_sequence(m, q_neutral, native_frames));
 

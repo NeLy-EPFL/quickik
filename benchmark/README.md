@@ -4,7 +4,7 @@ Compares QuickIK's IK solve speed against KDL, Pinocchio, and RBDL, across Quick
 
 ## Running it
 
-Each language/library's benchmark loops over both bodies on its own and writes one results file per body under `plot/results/`. See:
+To run everything at once (assuming every benchmark below is already built/set up on your machine) and regenerate both charts, use `scripts/run_all_benchmarks.sh` -- it checks all prerequisites up front and errors out listing whatever's missing before running anything. Otherwise, each language/library's benchmark loops over both bodies on its own and writes one results file per body under `plot/results/`. See:
 
 - `quickik_rust/`, `quickik_python/`, `quickik_cpp/` for QuickIK's own three bindings (each directory's own header comment has the exact run command).
 - `extern/{kdl,pinocchio,rbdl}/README.md` for each external library's build and run steps.
