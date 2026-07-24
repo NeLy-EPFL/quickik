@@ -1,9 +1,10 @@
 """Aggregates every benchmark's results/<name>-<body>.json into a markdown
-comparison table (always) and a bar chart (if matplotlib is available), one
-of each per body -- currently `neuromechfly` (a fly) and `g1` (a Unitree G1
-humanoid; see ../preprocessing/README.md for how its assets are generated).
-Every result JSON carries a `"body"` field; this script groups by it and
-writes `comparison_<body>.svg` for each body found.
+comparison table (one per body, always) and a single bar chart (if
+matplotlib is available) comparing both bodies at once -- currently
+`neuromechfly` (a fly) and `g1` (a Unitree G1 humanoid; see
+../preprocessing/README.md for how its assets are generated). Every result
+JSON carries a `"body"` field; this script groups by it and writes
+`comparison.svg` with each library's bar replaced by a NeuroMechFly/G1 pair.
 
 Only `formulation: "whole-tree"` results are compared here -- results
 solving the body's actual problem (floating base + every limb/keypoint,
@@ -29,16 +30,16 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 # (see extern/kdl/README.md).
 MAX_ITERATIONS_PER_SOLVE = 10
 
-# Padding past the widest bar's tip, as a fraction of that bar's value.
+# Padding past the widest bar's tip, as a fraction of that bar's value --
+# leaves room for that bar's value label.
 XLIM_PAD = 1.15
 
-# 2x2 grid: latency in column 0 (mean-with-early-stop above, fixed-iteration
-# worst-case below), throughput in column 1 (single-thread above, multi-
-# thread below). "scale" converts the raw JSON units (us, fps) to the
-# panel's own axis unit (ms, kFPS); a bar under 1 (in that unit) instead
-# displays its label in "small_unit" (us, FPS) -- see format_value --
-# without changing the bar's own length, which always stays in the panel's
-# one fixed axis unit.
+# One column, one row per metric: mean latency, then fixed-iteration
+# latency, then single-thread throughput, then multi-thread throughput.
+# "scale" converts the raw JSON units (us, fps) to the panel's own axis unit
+# (ms, kFPS); a bar under 1 (in that unit) instead displays its label in
+# "small_unit" (us, FPS) -- see format_value -- without changing the bar's
+# own length, which always stays in the panel's one fixed axis unit.
 METRICS = [
     {
         "key": "single_frame_latency_us",
@@ -48,7 +49,15 @@ METRICS = [
         "small_unit": "μs",
         "scale": 1e-3,
         "row": 0,
-        "col": 0,
+    },
+    {
+        "key": "single_frame_latency_max_us",
+        "title": f"Single-frame latency (fixed {MAX_ITERATIONS_PER_SOLVE} iterations)",
+        "xlabel": "Latency (ms)",
+        "unit": "ms",
+        "small_unit": "μs",
+        "scale": 1e-3,
+        "row": 1,
     },
     {
         "key": "single_thread_throughput_fps",
@@ -57,18 +66,7 @@ METRICS = [
         "unit": "kFPS",
         "small_unit": "FPS",
         "scale": 1e-3,
-        "row": 0,
-        "col": 1,
-    },
-    {
-        "key": "single_frame_latency_max_us",
-        "title": f"Single-frame latency (fixed {MAX_ITERATIONS_PER_SOLVE} iters)",
-        "xlabel": "Latency (ms)",
-        "unit": "ms",
-        "small_unit": "μs",
-        "scale": 1e-3,
-        "row": 1,
-        "col": 0,
+        "row": 2,
     },
     {
         "key": "multi_thread_throughput_fps",
@@ -77,20 +75,19 @@ METRICS = [
         "unit": "kFPS",
         "small_unit": "FPS",
         "scale": 1e-3,
-        "row": 1,
-        "col": 1,
+        "row": 3,
     },
 ]
 
-# (body, metric key) -> the bar's *display* name (matched against
-# `bar_names`, not the JSON "name" field -- see DISPLAY_NAMES) that should be
-# drawn capped at CAP_MULTIPLE-x the next-highest bar's value instead of
-# running out to its true value, which would flatten every other bar down
-# near zero on a linear axis -- see `draw_bars`. Only KDL's g1 mean-latency
-# result is extreme enough (~60x the next-highest bar) to need this;
+# Metric key -> the library whose bar, in *both* bodies, should be drawn
+# capped at CAP_MULTIPLE-x the next-highest bar's value (the max across
+# every other library's bar in either body) instead of running out to its
+# true value, which would flatten every other bar down near zero on a
+# linear axis -- see `draw_body_bars`. Only KDL's mean-latency result is
+# extreme enough (up to ~60x the next-highest bar, for g1) to need this;
 # everywhere else a plain, uncapped bar is clearer.
-CAPPED_BARS = {("g1", "single_frame_latency_us"): "KDL"}
-CAP_MULTIPLE = 3
+CAPPED_METRIC_BARS = {"single_frame_latency_us": "kdl"}
+CAP_MULTIPLE = 2
 
 # Explicit display order (not alphabetical): language variants of the same
 # library grouped together, fastest-per-library first.
@@ -114,8 +111,22 @@ DISPLAY_NAMES = {
     "rbdl": "RBDL (C++)",
     "rbdl-python": "RBDL (Python)",
 }
-QUICKIK_COLOR = "#4051b5"
-OTHER_COLOR = "#888888"
+# Bar color now encodes which body a bar belongs to (every library's bar
+# pair uses the same two colors); QuickIK is instead called out via
+# HIGHLIGHT_COLOR, QUICKIK_ALPHA/OTHER_ALPHA, and bold text below, since it
+# no longer has a color of its own.
+NEUROMECHFLY_COLOR = "#4051b5"
+G1_COLOR = "#2fb170"
+# Background band behind QuickIK's bars (its 3 language variants, 2 bars --
+# one per body -- each), since color no longer distinguishes it. zorder=0,
+# entirely behind the (zorder=3) bars, so it only ever shows through the
+# gaps between and around them.
+HIGHLIGHT_COLOR = "#ffec3d"
+HIGHLIGHT_ALPHA = 0.3
+# QuickIK's bars are fully opaque; every other library's are dimmed, one
+# more way (besides HIGHLIGHT_COLOR and bold text) that QuickIK stands out.
+QUICKIK_ALPHA = 1.0
+OTHER_ALPHA = 0.5
 TEXT_NUMBER_FONTSIZE = 8
 # Open Sans isn't bundled with matplotlib (unlike DejaVu Sans, its default);
 # fetched on demand into fonts/ (gitignored, not vendored) rather than
@@ -124,11 +135,17 @@ FONT_FAMILY = "Open Sans"
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 
 # Every result JSON has a "body" field (see ../preprocessing/README.md for
-# g1, ../scripts/generate_fixtures.py for neuromechfly); this is just the
-# figure suptitle for each.
+# g1, ../scripts/generate_fixtures.py for neuromechfly); used as each
+# printed table's section header.
 BODY_TITLES = {
     "neuromechfly": "NeuroMechFly (42 limb DOFs)",
     "g1": "Unitree G1 (29-DOF humanoid)",
+}
+# Shorter labels for the chart legend's two entries (title-appropriate
+# detail belongs in BODY_TITLES above instead).
+LEGEND_LABELS = {
+    "neuromechfly": "NeuroMechFly (42 DOFs)",
+    "g1": "G1 humanoid (29 DOFs)",
 }
 
 
@@ -279,73 +296,155 @@ def register_fonts():
     return [FONT_FAMILY] + FONT_FALLBACK_CHAIN
 
 
-def draw_bars(
-    ax, bar_names, bar_values, bar_colors, unit, small_unit=None, cap_name=None
+# Within each library's group, the NeuroMechFly bar sits directly above the
+# G1 bar with no gap between them (BAR_HEIGHT must equal 2*BAR_OFFSET for
+# their touching edges to land exactly on the group's integer y-position),
+# leaving a visible gap only between groups.
+BAR_OFFSET = 0.20
+BAR_HEIGHT = 0.40
+
+# A capped bar's "keeps going" dashes past its tip (see draw_body_bars):
+# DASH_COUNT blocks, each DASH_WIDTH*cap_length wide, separated by
+# DASH_GAP*cap_length (also used as the gap right after the bar's tip).
+# Sized so the whole run -- DASH_GAP + DASH_COUNT*DASH_WIDTH +
+# (DASH_COUNT-1)*DASH_GAP, as a fraction of cap_length -- lands comfortably
+# inside XLIM_PAD's headroom past the widest bar.
+DASH_COUNT = 5
+DASH_WIDTH = 0.012
+DASH_GAP = 0.01
+
+
+def dash_positions(cap_length):
+    """Left-edge x-positions for DASH_COUNT dashes continuing a capped bar
+    of length `cap_length` past its own tip."""
+    step = (DASH_WIDTH + DASH_GAP) * cap_length
+    first = cap_length + DASH_GAP * cap_length
+    return [first + i * step for i in range(DASH_COUNT)]
+
+
+def draw_body_bars(
+    ax,
+    lib_names,
+    y_positions,
+    results_by_name,
+    key,
+    scale,
+    unit,
+    small_unit,
+    color,
+    cap_lib=None,
+    cap_length=None,
 ):
-    """Draws one horizontal-bar panel on `ax` and annotates each bar with its
-    value (see `format_value`) just past its tip -- plain "xxx unit", no
-    parens.
+    """Draws one body's bars (one per library in `lib_names`, at the matching
+    `y_positions`) on `ax`, skipping libraries with no value for `key`, and
+    annotates each with its value (see `format_value`) just past its tip --
+    plain "xxx unit", no parens.
 
-    If `cap_name` names one of `bar_names`, that bar is instead drawn at a
-    shortened length -- `CAP_MULTIPLE`x the next-highest bar's value -- since
-    running it out to its true value would flatten every other bar down near
-    zero on a linear axis. Only that one bar's label is different: its true
-    value followed by "(capped in chart)", e.g. "66.7 ms (capped in
-    chart)" -- every other bar keeps the plain format. The caller is
-    expected to set this panel's x-axis limit to exactly this bar's
-    (truncated) length, so the bar runs flush to the plot's right edge
-    rather than stopping short of it -- the visual cue that it's cut off,
-    not actually that short.
+    If `cap_lib` names one of `lib_names` and `cap_length` is given, that
+    bar is instead drawn at the (already-scaled) `cap_length` rather than
+    its true length -- since running it out to its true value would flatten
+    every other bar down near zero on a linear axis. The caller computes
+    `cap_length` once per metric (shared across both bodies -- see
+    CAPPED_METRIC_BARS), so both bodies' bars for `cap_lib` end up the same
+    length even though their true values differ. That one bar's true value
+    plus "(capped in chart)" is written inside it, and a few small
+    same-color, same-height blocks continue past its tip (see
+    dash_positions()) -- a dashed-line cue that the bar keeps going -- in
+    place of the plain label every other bar gets there. Those blocks are
+    deliberately excluded from this function's returned widest extent (they
+    size themselves off of it, via dash_positions(cap_length)), so they land
+    inside the caller's XLIM_PAD headroom rather than pushing it out further.
 
-    Returns `(bars, widest)`, where `widest` is the widest x-extent actually
-    drawn (unpadded, so the caller decides how much room to leave past it).
+    Every QuickIK bar is drawn at QUICKIK_ALPHA with its value label bold;
+    every other library's bar gets OTHER_ALPHA and a plain-weight label.
+
+    Returns the widest x-extent actually drawn (unpadded, so the caller
+    decides how much room to leave past it), or 0.0 if no library had data.
     """
-    display_values = list(bar_values)
-    cap_idx = bar_names.index(cap_name) if cap_name in bar_names else None
-    if cap_idx is not None:
-        display_values[cap_idx] = (
-            max(v for i, v in enumerate(bar_values) if i != cap_idx) * CAP_MULTIPLE
-        )
+    from matplotlib.patches import Rectangle
 
-    bars = ax.barh(bar_names, display_values, color=bar_colors, height=0.55)
-    for i, bar in enumerate(bars):
-        text = format_value(bar_values[i], unit, small_unit)
-        if i == cap_idx:
-            # Inside the bar, right-justified against its (truncated) tip,
-            # in white for contrast against the fill -- not past the tip
-            # like every other bar's label, since the bar itself is already
-            # marked as truncated via "(capped in chart)".
+    present = [
+        (y, lib, results_by_name[lib][key] * scale)
+        for y, lib in zip(y_positions, lib_names, strict=True)
+        if lib in results_by_name and results_by_name[lib].get(key) is not None
+    ]
+    if not present:
+        return 0.0
+
+    ys = [y for y, _, _ in present]
+    values = [v for _, _, v in present]
+    display_values = list(values)
+    cap_idx = next((i for i, (_, lib, _) in enumerate(present) if lib == cap_lib), None)
+    if cap_idx is not None and cap_length is not None:
+        display_values[cap_idx] = cap_length
+
+    bars = ax.barh(ys, display_values, height=BAR_HEIGHT, color=color, zorder=3)
+    for i, (bar, (_, lib, _)) in enumerate(zip(bars, present, strict=True)):
+        is_quickik = lib.startswith("quickik-")
+        bar.set_alpha(QUICKIK_ALPHA if is_quickik else OTHER_ALPHA)
+        weight = "bold" if is_quickik else "normal"
+        text = format_value(values[i], unit, small_unit)
+        if i == cap_idx and cap_length is not None:
             ax.annotate(
                 f"{text} (capped in chart)",
                 (bar.get_width(), bar.get_y() + bar.get_height() / 2),
                 xytext=(-4, 0),
                 fontsize=TEXT_NUMBER_FONTSIZE,
+                fontweight=weight,
                 textcoords="offset points",
-                color="white",
                 ha="right",
                 va="center",
+                zorder=4,
             )
+            for dash_x in dash_positions(cap_length):
+                ax.add_patch(
+                    Rectangle(
+                        (dash_x, bar.get_y()),
+                        DASH_WIDTH * cap_length,
+                        bar.get_height(),
+                        facecolor=color,
+                        alpha=bar.get_alpha(),
+                        edgecolor="none",
+                        zorder=3,
+                    )
+                )
             continue
         ax.annotate(
             text,
             (bar.get_width(), bar.get_y() + bar.get_height() / 2),
             xytext=(4, 0),
             fontsize=TEXT_NUMBER_FONTSIZE,
+            fontweight=weight,
             textcoords="offset points",
             ha="left",
             va="center",
+            zorder=4,
         )
-    return bars, max(display_values)
+    return max(display_values)
 
 
-def plot_chart(results, body):
+def plot_chart(results_by_body):
     try:
         import matplotlib.pyplot as plt
+        from matplotlib.patches import Patch
     except ImportError:
         print(
             "\n(matplotlib not installed -- skipping chart; the table above is still complete)"
         )
         return
+
+    nmf_by_name = {r["name"]: r for r in results_by_body.get("neuromechfly", [])}
+    g1_by_name = {r["name"]: r for r in results_by_body.get("g1", [])}
+    # ORDER, filtered to libraries actually present in either body; reversed
+    # for barh so it reads top-to-bottom in ORDER (fastest-per-library
+    # first).
+    lib_names = [n for n in ORDER if n in nmf_by_name or n in g1_by_name]
+    if not lib_names:
+        print("\n(no whole-tree results found -- skipping chart)")
+        return
+    ordered_libs = list(reversed(lib_names))
+    display_names = [DISPLAY_NAMES.get(n, n) for n in ordered_libs]
+    group_ys = list(range(len(ordered_libs)))
 
     plt.rcParams["font.family"] = register_fonts()
     # SVG output, not PNG: a vector chart is a fraction of the file size and
@@ -357,55 +456,115 @@ def plot_chart(results, body):
     # correctly in the browser.
     plt.rcParams["svg.fonttype"] = "none"
 
-    # results is already in ORDER; reversed for barh so it reads top-to-bottom.
-    ordered = list(reversed(results))
-    names = [DISPLAY_NAMES.get(r["name"], r["name"]) for r in ordered]
-    colors = [
-        QUICKIK_COLOR if r["name"].startswith("quickik-") else OTHER_COLOR
-        for r in ordered
-    ]
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 7))
-    # Manually tuned for this 2x2 layout: top=0.84 leaves room for the
-    # suptitle; hspace=0.49 and wspace=0.35 keep panel titles/labels from
-    # overlapping their neighbors.
+    # Width matches plot_scaling.py's chart (figsize=(8, 4)); height is
+    # taller, one row per metric instead of 2x2.
+    fig, axes = plt.subplots(4, 1, figsize=(8, 17))
+    # Manually tuned for this 4x1 layout: top=0.94 leaves room for the
+    # legend (no suptitle); hspace=0.4 keeps panel titles/labels from
+    # overlapping their neighbors; left=0.24 fits the longest library label
+    # ("Pinocchio (Python)") in this figure.
     fig.subplots_adjust(
-        hspace=0.49, wspace=0.35, left=0.09, right=0.97, top=0.84, bottom=0.08
+        hspace=0.4, wspace=0.35, left=0.24, right=0.97, top=0.94, bottom=0.045
     )
 
+    # QuickIK's 3 language variants (6 bars: NeuroMechFly + G1 each) sit last
+    # in ordered_libs (ORDER's first 3, after the top-to-bottom reversal),
+    # i.e. the topmost groups in every panel.
+    quickik_count = sum(1 for n in ordered_libs if n.startswith("quickik-"))
+
     for metric in METRICS:
-        ax = axes[metric["row"], metric["col"]]
-        key, title, xlabel, unit, small_unit = (
+        ax = axes[metric["row"]]
+        key, title, xlabel, unit, small_unit, scale = (
             metric["key"],
             metric["title"],
             metric["xlabel"],
             metric["unit"],
             metric["small_unit"],
+            metric["scale"],
         )
-        values = [r.get(key) for r in ordered]
-        bar_names = [n for n, v in zip(names, values, strict=True) if v is not None]
-        bar_values = [v * metric["scale"] for v in values if v is not None]
-        bar_colors = [c for c, v in zip(colors, values, strict=True) if v is not None]
 
-        if not bar_values:
+        cap_lib = CAPPED_METRIC_BARS.get(key)
+        cap_length = None
+        if cap_lib:
+            other_values = [
+                r[key]
+                for by_name in (nmf_by_name, g1_by_name)
+                for name, r in by_name.items()
+                if name != cap_lib and r.get(key) is not None
+            ]
+            if other_values:
+                cap_length = CAP_MULTIPLE * max(other_values) * scale
+
+        nmf_ys = [y + BAR_OFFSET for y in group_ys]
+        g1_ys = [y - BAR_OFFSET for y in group_ys]
+        widest_nmf = draw_body_bars(
+            ax,
+            ordered_libs,
+            nmf_ys,
+            nmf_by_name,
+            key,
+            scale,
+            unit,
+            small_unit,
+            NEUROMECHFLY_COLOR,
+            cap_lib,
+            cap_length,
+        )
+        widest_g1 = draw_body_bars(
+            ax,
+            ordered_libs,
+            g1_ys,
+            g1_by_name,
+            key,
+            scale,
+            unit,
+            small_unit,
+            G1_COLOR,
+            cap_lib,
+            cap_length,
+        )
+        widest = max(widest_nmf, widest_g1)
+        if widest == 0.0:
             ax.set_title(f"{title}\n(no data)")
             continue
 
-        cap_name = CAPPED_BARS.get((body, key))
-        _, widest = draw_bars(
-            ax, bar_names, bar_values, bar_colors, unit, small_unit, cap_name=cap_name
-        )
+        if quickik_count:
+            ax.axhspan(
+                len(ordered_libs) - quickik_count - 0.5,
+                len(ordered_libs) - 1 + 0.5,
+                color=HIGHLIGHT_COLOR,
+                alpha=HIGHLIGHT_ALPHA,
+                zorder=0,
+            )
+
         ax.set_title(title)
         ax.set_xlabel(xlabel)
+        ax.set_yticks(group_ys, labels=display_names, va="center")
+        # QuickIK's groups sit last in ordered_libs (see quickik_count
+        # above); bold their labels the same way their bar values are bold.
+        for label in ax.get_yticklabels()[len(ordered_libs) - quickik_count :]:
+            label.set_fontweight("bold")
+        ax.set_ylim(-0.5, len(ordered_libs) - 1 + 0.5)
         despine(ax)
-        # No padding past a capped bar's tip: running the axis flush to its
-        # (truncated) length is what visually shows it's cut off rather than
-        # actually that short, instead of adding a triangle or other marker.
-        is_capped = cap_name in bar_names
-        ax.set_xlim(0, widest if is_capped else widest * XLIM_PAD)
+        # Even a capped bar's tip gets the usual padding now: its "..."
+        # label past the tip (see draw_body_bars) needs the room, and the
+        # in-bar "(capped in chart)" text already marks it as truncated, so
+        # a flush-to-the-edge tip is no longer the only cue for that.
+        ax.set_xlim(0, widest * XLIM_PAD)
 
-    fig.suptitle(BODY_TITLES.get(body, body), fontsize=14, fontweight="bold")
-    out_path = RESULTS_DIR / f"comparison_{body}.svg"
+    legend_handles = [
+        Patch(facecolor=NEUROMECHFLY_COLOR, label=LEGEND_LABELS["neuromechfly"]),
+        Patch(facecolor=G1_COLOR, label=LEGEND_LABELS["g1"]),
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.985),
+        ncol=2,
+        frameon=False,
+        fontsize=11,
+    )
+    out_path = RESULTS_DIR / "comparison.svg"
     fig.savefig(out_path, bbox_inches="tight")
     print(f"\nWrote chart to {out_path}")
 
@@ -417,4 +576,4 @@ if __name__ == "__main__":
     for body, body_results in results_by_body.items():
         print(f"\n=== {BODY_TITLES.get(body, body)} ===")
         print_table(body_results, excluded_by_body.get(body, []))
-        plot_chart(body_results, body)
+    plot_chart(results_by_body)

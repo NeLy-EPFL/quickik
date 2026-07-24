@@ -97,7 +97,7 @@ def plot_chart(points):
         ax.annotate(
             f"{y:.2f}x",
             (x, y),
-            xytext=(9, -4),
+            xytext=(5, -8),
             textcoords="offset points",
             ha="left",
             va="center",
@@ -105,6 +105,7 @@ def plot_chart(points):
 
     ax.set_xscale("log", base=2)
     ax.set_yscale("log", base=2)
+    ax.set_ylim(0.7, ax.get_ylim()[1])
     ax.set_xticks(n_threads)
     ax.get_xaxis().set_major_formatter(plt.ScalarFormatter())
     ax.get_yaxis().set_major_formatter(plt.ScalarFormatter())
