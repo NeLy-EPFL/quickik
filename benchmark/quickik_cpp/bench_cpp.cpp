@@ -5,11 +5,13 @@
 // used here too (FK isn't exposed to C++, same as Python).
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -47,6 +49,91 @@ std::vector<quickik::KeypointObservation> build_observations(const std::vector<V
   for (auto &p : target_ego) {
     obs.push_back(quickik::keypoint_position_3d({p.x, p.y, p.z}, 1.0f));
   }
+  return obs;
+}
+
+// =============================================================================
+//  2D observations (mirrors quickik_rust's twod.rs): a synthetic bottom-view
+//  pinhole Camera, fixed once per body, plus the trivial XYView. Camera isn't
+//  exposed to C++ for projecting points directly (only as a Solver mapper),
+//  so project_to_2d below reimplements its position-only projection formula.
+// =============================================================================
+
+Vec3 cross(const Vec3 &a, const Vec3 &b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+Vec3 normalized(const Vec3 &v) {
+  float n = v.norm();
+  return {v.x / n, v.y / n, v.z / n};
+}
+
+// Row-major 3x3, matching quickik::Camera::world2cam_rot_mat's convention.
+Vec3 matvec(const std::array<float, 9> &m, const Vec3 &v) {
+  return {m[0] * v.x + m[1] * v.y + m[2] * v.z, m[3] * v.x + m[4] * v.y + m[5] * v.z,
+          m[6] * v.x + m[7] * v.y + m[8] * v.z};
+}
+
+/// Builds a fixed pinhole camera framing every point in `points`: looks
+/// straight up (+Z) from below -- a "bottom view" -- at a distance chosen so
+/// the whole bounding sphere (with margin) stays inside a 60-degree field of
+/// view. fx=fy=distance (not a literal focal length): keeps 2D
+/// coordinates/Jacobians at the same O(1) scale as the 3D case instead of
+/// real pixel units, which would swamp the solver's neutral-pose
+/// regularization (tuned for model-unit-scale residuals) -- see
+/// quickik_rust's twod.rs for the full derivation. Mirrors that module's
+/// synthetic_camera() exactly, so all three bindings produce the same task.
+quickik::Camera synthetic_camera(const std::vector<Vec3> &points) {
+  Vec3 centroid{0, 0, 0};
+  for (auto &p : points) centroid = centroid + p;
+  centroid = {centroid.x / points.size(), centroid.y / points.size(), centroid.z / points.size()};
+  float radius = 0.0f;
+  for (auto &p : points) radius = std::max(radius, (p - centroid).norm());
+
+  constexpr float kFovDeg = 60.0f;
+  constexpr float kMargin = 1.5f;
+  constexpr float kPi = 3.14159265358979323846f;
+  float half_fov = (kFovDeg / 2.0f) * kPi / 180.0f;
+  float distance = radius * kMargin / std::sin(half_fov);
+
+  Vec3 forward{0, 0, 1};
+  Vec3 cam_pos = centroid - Vec3{forward.x * distance, forward.y * distance, forward.z * distance};
+  Vec3 world_up{0, 1, 0};
+  Vec3 right = normalized(cross(forward, world_up));
+  Vec3 up = cross(right, forward);
+  std::array<float, 9> rot = {right.x, right.y, right.z, up.x, up.y, up.z, forward.x, forward.y, forward.z};
+  Vec3 world2cam_pos_v = matvec(rot, cam_pos);
+  world2cam_pos_v = {-world2cam_pos_v.x, -world2cam_pos_v.y, -world2cam_pos_v.z};
+
+  quickik::Camera camera{};
+  camera.fx = distance;
+  camera.fy = distance;
+  camera.cx = 0.0f;
+  camera.cy = 0.0f;
+  camera.world2cam_pos = {world2cam_pos_v.x, world2cam_pos_v.y, world2cam_pos_v.z};
+  camera.world2cam_rot_mat = rot;
+  return camera;
+}
+
+std::pair<float, float> project_to_2d(const quickik::Camera &camera, const Vec3 &pos_world3d) {
+  Vec3 rot_v = matvec(camera.world2cam_rot_mat, pos_world3d);
+  Vec3 pos_cam3d = {rot_v.x + camera.world2cam_pos[0], rot_v.y + camera.world2cam_pos[1],
+                     rot_v.z + camera.world2cam_pos[2]};
+  return {camera.fx * pos_cam3d.x / pos_cam3d.z + camera.cx, camera.fy * pos_cam3d.y / pos_cam3d.z + camera.cy};
+}
+
+std::vector<quickik::KeypointObservation> build_observations_2d_camera(const std::vector<Vec3> &target_ego,
+                                                                        const quickik::Camera &camera) {
+  std::vector<quickik::KeypointObservation> obs;
+  obs.push_back(quickik::keypoint_missing());
+  for (auto &p : target_ego) {
+    auto [u, v] = project_to_2d(camera, p);
+    obs.push_back(quickik::keypoint_position_2d({u, v}, 1.0f));
+  }
+  return obs;
+}
+
+std::vector<quickik::KeypointObservation> build_observations_2d_xyview(const std::vector<Vec3> &target_ego) {
+  std::vector<quickik::KeypointObservation> obs;
+  obs.push_back(quickik::keypoint_missing());
+  for (auto &p : target_ego) obs.push_back(quickik::keypoint_position_2d({p.x, p.y}, 1.0f));
   return obs;
 }
 
@@ -170,6 +257,98 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
   }
 }
 
+/// Same checks as run_correctness, but every observation is `to_2d`'s
+/// projection of the fixture's usual 3D target. Fit quality is still
+/// measured in 3D -- the distance between the solved pose's FK output and
+/// the *original* 3D target -- since that's the physical quantity that
+/// matters, even though the solver never saw it.
+void run_correctness_2d_for_mapper(const BodyPlan &plan, const Json &fixtures, rust::Box<quickik::KinematicTree> &tree,
+                                    const std::string &label, quickik::Mapper mapper,
+                                    const std::function<std::vector<quickik::KeypointObservation>(
+                                        const std::vector<Vec3> &)> &to_2d) {
+  std::printf("== Synthetic exact-fit frames (bug hunt), 2D via %s ==\n", label.c_str());
+  std::printf("%6s %16s %16s %18s %20s\n", "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)");
+
+  quickik::SolverConfig default_config = quickik::default_solver_config();
+  quickik::SolverConfig zero_reg_config = default_config;
+  zero_reg_config.weight = 0.0f;
+  auto default_solver = quickik::new_solver(*tree, default_config, mapper);
+  auto zero_reg_solver = quickik::new_solver(*tree, zero_reg_config, mapper);
+
+  size_t i = 0;
+  for (auto &frame : fixtures["synthetic_frames"].as_array()) {
+    auto target = to_vec3s(frame["target_ego"]);
+    std::vector<float> ground_truth;
+    for (auto &leg : frame["ground_truth_dof_angles_per_leg"].as_array()) {
+      for (auto &a : leg.as_array()) ground_truth.push_back(static_cast<float>(a.as_number()));
+    }
+    auto obs = to_2d(target);
+
+    auto state = quickik::state_neutral_pose(*tree);
+    default_solver->solve(*state, slice_of(obs));
+    auto solved_pts = solved_keypoints(plan, *state);
+    auto [rms, max] = residual_stats(solved_pts, target);
+    float angle_err = angle_error_deg(to_std_vec(state->dof_angles()), ground_truth);
+
+    auto state0 = quickik::state_neutral_pose(*tree);
+    zero_reg_solver->solve(*state0, slice_of(obs));
+    float angle_err0 = angle_error_deg(to_std_vec(state0->dof_angles()), ground_truth);
+
+    std::printf("%6zu %16.6f %16.6f %18.4f %20.6f\n", i, rms, max, angle_err, angle_err0);
+    i++;
+  }
+  std::printf(
+      "(kpt rms/max: 3D distance between solved FK output and the *original 3D* target -- the "
+      "solver itself never sees 3D, only its %s projection. angle err: max abs error over all "
+      "%zu DOFs, degrees, mod 2*pi. \"w=0\" = weight=0.)\n\n",
+      label.c_str(), tree->n_dofs());
+
+  std::printf("== Real mocap frames (cross-solver vs. flygym.ik), 2D via %s ==\n", label.c_str());
+  auto seq = quickik::new_sequence_solver(*tree, quickik::default_solver_config(), mapper);
+  std::vector<float> quickik_rms, quickik_max, cross_rms, cross_max;
+  auto &real_frames = fixtures["real_frames"].as_array();
+  for (auto &frame : real_frames) {
+    auto target = to_vec3s(frame["target_ego"]);
+    auto obs = to_2d(target);
+    auto state = seq->solve_frame(slice_of(obs));
+    auto solved_pts = solved_keypoints(plan, *state);
+
+    auto [rms, max] = residual_stats(solved_pts, target);
+    quickik_rms.push_back(rms);
+    quickik_max.push_back(max);
+
+    if (frame.has("flygym_ik_reconstructed_ego")) {
+      auto cross_target = to_vec3s(frame["flygym_ik_reconstructed_ego"]);
+      auto [crms, cmax] = residual_stats(solved_pts, cross_target);
+      cross_rms.push_back(crms);
+      cross_max.push_back(cmax);
+    }
+  }
+  auto mean = [](const std::vector<float> &v) { return std::accumulate(v.begin(), v.end(), 0.0f) / v.size(); };
+  auto rms_of = [](const std::vector<float> &v) {
+    float s = 0;
+    for (float x : v) s += x * x;
+    return std::sqrt(s / v.size());
+  };
+  auto max_of = [](const std::vector<float> &v) { return *std::max_element(v.begin(), v.end()); };
+  std::printf("over %zu frames:\n", real_frames.size());
+  std::printf("  quickik fit residual to target:      rms=%.5f  mean=%.5f  max=%.5f\n", rms_of(quickik_rms),
+              mean(quickik_rms), max_of(quickik_max));
+  if (!cross_rms.empty()) {
+    std::printf("  cross-solver agreement (vs flygym.ik): rms=%.5f  mean=%.5f  max=%.5f\n\n", rms_of(cross_rms),
+                mean(cross_rms), max_of(cross_max));
+  } else {
+    std::printf("  cross-solver agreement (vs flygym.ik): n/a (no reference solver output for this body)\n\n");
+  }
+}
+
+void run_correctness_2d(const BodyPlan &plan, const Json &fixtures, rust::Box<quickik::KinematicTree> &tree,
+                         const quickik::Camera &camera) {
+  run_correctness_2d_for_mapper(plan, fixtures, tree, "Camera", quickik::camera_mapper(camera),
+                                 [&camera](const std::vector<Vec3> &t) { return build_observations_2d_camera(t, camera); });
+  run_correctness_2d_for_mapper(plan, fixtures, tree, "XYView", quickik::xyview_mapper(), build_observations_2d_xyview);
+}
+
 // =============================================================================
 //  Performance (mirrors perf.rs / bench_python.py's run_performance)
 // =============================================================================
@@ -197,8 +376,9 @@ double elapsed_us(Clock::time_point t0) {
 // real target every call (no warm start).
 std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree> &tree,
                                                 const std::vector<quickik::KeypointObservation> &obs, int n_calls,
-                                                quickik::SolverConfig config) {
-  auto solver = quickik::new_solver(*tree, config, quickik::no_mapper());
+                                                quickik::SolverConfig config,
+                                                quickik::Mapper mapper = quickik::no_mapper()) {
+  auto solver = quickik::new_solver(*tree, config, mapper);
   for (int i = 0; i < 500; i++) {
     auto state = quickik::state_neutral_pose(*tree);
     solver->solve(*state, slice_of(obs));
@@ -216,11 +396,12 @@ std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree>
 
 std::vector<double> bench_solve_sequence(rust::Box<quickik::KinematicTree> &tree,
                                           const std::vector<std::vector<quickik::KeypointObservation>> &all_obs,
-                                          quickik::SolverConfig config) {
-  auto seq = quickik::new_sequence_solver(*tree, config, quickik::no_mapper());
+                                          quickik::SolverConfig config,
+                                          quickik::Mapper mapper = quickik::no_mapper()) {
+  auto seq = quickik::new_sequence_solver(*tree, config, mapper);
   for (auto &obs : all_obs) seq->solve_frame(slice_of(obs));
 
-  auto timed_seq = quickik::new_sequence_solver(*tree, config, quickik::no_mapper());
+  auto timed_seq = quickik::new_sequence_solver(*tree, config, mapper);
   std::vector<double> samples;
   samples.reserve(all_obs.size());
   for (auto &obs : all_obs) {
@@ -259,7 +440,8 @@ std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequenc
 
 double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &tree,
                                               const std::vector<std::vector<quickik::KeypointObservation>> &sequence,
-                                              rust::isize n_workers) {
+                                              rust::isize n_workers,
+                                              quickik::Mapper mapper = quickik::no_mapper()) {
   quickik::SolverConfig config = quickik::default_solver_config();
   quickik::ParallelSolveConfig parallel_config{kSegmentLen, kOverlapLen, 0.05f, n_workers};
 
@@ -272,7 +454,7 @@ double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &
 
   auto run_once = [&] {
     return quickik::solve_sequence_segmented_parallel(*tree, config, slice_of(flat), n_joints, parallel_config,
-                                                       quickik::no_mapper());
+                                                       mapper);
   };
   run_once();  // warm up
   auto t0 = Clock::now();
@@ -342,6 +524,91 @@ void run_performance(const std::string &body, rust::Box<quickik::KinematicTree> 
                       multithread_fps);
 }
 
+// List-of-observations counterpart to tiled_native_rate_sequence, for
+// mappers whose observations come from to_2d rather than build_observations.
+std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequence_2d(
+    const Json &fixtures, size_t length,
+    const std::function<std::vector<quickik::KeypointObservation>(const std::vector<Vec3> &)> &to_2d) {
+  std::vector<std::vector<quickik::KeypointObservation>> base;
+  for (auto &f : fixtures["native_rate_frames"].as_array()) base.push_back(to_2d(to_vec3s(f["target_ego"])));
+  std::vector<std::vector<quickik::KeypointObservation>> out;
+  out.reserve(length);
+  for (size_t i = 0; i < length; i++) out.push_back(base[i % base.size()]);
+  return out;
+}
+
+// Writes ../plot/results/quickik-cpp-2d-<observation>-<body>.json for
+// ../plot/plot_2d_comparison.py to pick up. Same schema as
+// write_results_json plus an "observation" field ("camera"/"xyview").
+void write_results_json_2d(const std::string &body, const std::string &observation, double single_frame_latency_us,
+                            double single_frame_latency_max_us, double single_thread_throughput_fps,
+                            double multi_thread_throughput_fps) {
+  std::filesystem::path out_dir = std::filesystem::path(__FILE__).parent_path() / "../plot/results";
+  std::filesystem::create_directories(out_dir);
+  std::ofstream out(out_dir / ("quickik-cpp-2d-" + observation + "-" + body + ".json"));
+  out << "{\n"
+      << "  \"name\": \"quickik-cpp\",\n"
+      << "  \"body\": \"" << body << "\",\n"
+      << "  \"language\": \"cpp\",\n"
+      << "  \"formulation\": \"whole-tree\",\n"
+      << "  \"observation\": \"" << observation << "\",\n"
+      << "  \"single_frame_latency_us\": " << single_frame_latency_us << ",\n"
+      << "  \"single_frame_latency_max_us\": " << single_frame_latency_max_us << ",\n"
+      << "  \"single_thread_throughput_fps\": " << single_thread_throughput_fps << ",\n"
+      << "  \"multi_thread_throughput_fps\": " << multi_thread_throughput_fps << ",\n"
+      << "  \"multi_thread_n_threads\": " << kMultithreadNThreads << ",\n"
+      << "  \"notes\": null\n"
+      << "}\n";
+}
+
+void run_performance_2d_for_mapper(
+    const std::string &body, rust::Box<quickik::KinematicTree> &tree, const Json &fixtures,
+    const std::string &observation, quickik::Mapper mapper, const std::string &label,
+    const std::function<std::vector<quickik::KeypointObservation>(const std::vector<Vec3> &)> &to_2d) {
+  std::printf("quickik C++-bindings benchmark, 2D via %s (state_dim=%zu)\n\n", label.c_str(), tree->n_dofs() + 6);
+
+  auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
+  auto obs = to_2d(target);
+  std::printf("-- single-frame time (latency), default config (adaptive early stop) --\n");
+  double single_frame_latency_us =
+      summarize("solve()", bench_single_frame_latency(tree, obs, 10000, quickik::default_solver_config(), mapper));
+
+  quickik::SolverConfig max_iterations_config = quickik::default_solver_config();
+  max_iterations_config.position_tolerance = 0.0f;
+  max_iterations_config.angle_tolerance = 0.0f;
+  std::printf("\n-- single-frame time (latency), early stop disabled (%zu iterations) --\n",
+              max_iterations_config.n_iterations);
+  double single_frame_latency_max_us = summarize(
+      "solve() (forced max iterations)", bench_single_frame_latency(tree, obs, 10000, max_iterations_config, mapper));
+
+  std::printf("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --\n");
+  auto single_thread_sequence = tiled_native_rate_sequence_2d(fixtures, kSingleThreadNFrames, to_2d);
+  double single_thread_mean_us = summarize(
+      "SequenceSolver.solve_frame",
+      bench_solve_sequence(tree, single_thread_sequence, quickik::default_solver_config(), mapper));
+
+  std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, %zu threads) --\n",
+              kMultithreadNThreads);
+  auto sequence = tiled_native_rate_sequence_2d(fixtures, frames_for_n_segments(kMultithreadNThreads), to_2d);
+  double elapsed_ms =
+      bench_multithread_sequence_throughput(tree, sequence, static_cast<rust::isize>(kMultithreadNThreads), mapper);
+  double multithread_fps = sequence.size() / (elapsed_ms / 1e3);
+  std::printf("solve_sequence_segmented_parallel   n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n\n",
+              sequence.size(), elapsed_ms, multithread_fps);
+
+  write_results_json_2d(body, observation, single_frame_latency_us, single_frame_latency_max_us,
+                         1e6 / single_thread_mean_us, multithread_fps);
+}
+
+void run_performance_2d(const std::string &body, rust::Box<quickik::KinematicTree> &tree, const Json &fixtures,
+                         const quickik::Camera &camera) {
+  run_performance_2d_for_mapper(
+      body, tree, fixtures, "camera", quickik::camera_mapper(camera), "Camera",
+      [&camera](const std::vector<Vec3> &t) { return build_observations_2d_camera(t, camera); });
+  run_performance_2d_for_mapper(body, tree, fixtures, "xyview", quickik::xyview_mapper(), "XYView",
+                                 build_observations_2d_xyview);
+}
+
 }  // namespace
 
 int main() {
@@ -369,6 +636,24 @@ int main() {
 
     run_correctness(plan, fixtures, tree);
     run_performance(body.name, tree, fixtures);
+
+    // Same task, but observed only in 2D (a synthetic pinhole camera, bottom
+    // view, fixed once per body, plus the trivial XYView) -- mirrors
+    // quickik_rust's twod.rs. NeuroMechFly only for now, matching the Rust
+    // benchmark's scope while the 2D fit is still being validated for G1.
+    if (body.name == "neuromechfly") {
+      std::vector<Vec3> all_points;
+      for (auto &f : fixtures["synthetic_frames"].as_array())
+        for (auto &p : to_vec3s(f["target_ego"])) all_points.push_back(p);
+      for (auto &f : fixtures["native_rate_frames"].as_array())
+        for (auto &p : to_vec3s(f["target_ego"])) all_points.push_back(p);
+      for (auto &f : fixtures["real_frames"].as_array())
+        for (auto &p : to_vec3s(f["target_ego"])) all_points.push_back(p);
+      quickik::Camera camera = synthetic_camera(all_points);
+
+      run_correctness_2d(plan, fixtures, tree, camera);
+      run_performance_2d(body.name, tree, fixtures, camera);
+    }
   }
   return 0;
 }
