@@ -74,15 +74,9 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     joint_weight_scalers: Vec<f32>,
     jtj: DMatrix<f32>,
     jtr: DVector<f32>,
-    /// Per-keypoint Jacobian slice, copied out of `workspace.kpt_jacobian`
-    /// (whose rows aren't contiguous) and reused across keypoints and
-    /// iterations to avoid allocating one on every call.
+    /// Per-keypoint Jacobian buffer in compact form: shape is 3 x state_dim,
+    /// but nonzero columns are moved to the left, and the rest is ignored.
     jacobian_buffer: DMatrix<f32>,
-    /// Buffers for accumulating `J^T*J`/`J^T*r` into `jtj`/`jtr` without
-    /// allocating a temporary for the transpose or the product.
-    jacobian_transpose_buffer: DMatrix<f32>, // state_dim x 3
-    jtj_buffer: DMatrix<f32>, // state_dim x state_dim
-    jtr_buffer: DVector<f32>, // state_dim
     pub config: SolverConfig<M>,
 }
 
@@ -111,9 +105,6 @@ impl<M: Mapper3Dto2D> Solver<M> {
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
             jacobian_buffer: DMatrix::zeros(3, state_dim),
-            jacobian_transpose_buffer: DMatrix::zeros(state_dim, 3),
-            jtj_buffer: DMatrix::zeros(state_dim, state_dim),
-            jtr_buffer: DVector::zeros(state_dim),
             config,
         }
     }
@@ -138,19 +129,24 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 if matches!(obs, KeypointObservation::Missing) {
                     continue;
                 }
-                self.jacobian_buffer
-                    .copy_from(&self.workspace.kpt_jacobian.rows(3 * k, 3));
+                let relevant_idxs = &self.workspace.relevant_dof_idxs_by_joint[k];
+                // Gather this keypoint's nonzero Jacobian columns (root's
+                // N_ROOT_DOFS plus its own ancestor DOFs). Everywhere else is 0.
+                for (col, &state_idx) in relevant_idxs.iter().enumerate() {
+                    for row in 0..3 {
+                        self.jacobian_buffer[(row, col)] =
+                            self.workspace.kpt_jacobian[(3 * k + row, state_idx)];
+                    }
+                }
                 accumulate_keypoint_residual(
                     obs,
                     self.config.mapper.as_ref(),
                     &self.workspace.kpt_positions[k],
                     &self.jacobian_buffer,
                     self.joint_weight_scalers[k],
+                    relevant_idxs,
                     &mut self.jtj,
                     &mut self.jtr,
-                    &mut self.jacobian_transpose_buffer,
-                    &mut self.jtj_buffer,
-                    &mut self.jtr_buffer,
                 );
             }
 
@@ -171,12 +167,16 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 self.jtj[(i, i)] += self.config.damping * self.jtj[(i, i)].max(1.0);
             }
 
-            // Update state. `jtj`'s pre-decomposition values are never read
-            // again after this point (the next iteration immediately zeroes
-            // it), so it's moved into the decomposition in place instead of
-            // cloned, and `unpack()` hands the same allocation back for the
-            // next iteration to reuse -- avoiding a fresh state_dim x
-            // state_dim allocation+copy on every Gauss-Newton iteration.
+            // The Cholesky decomposer requires owning the matrix by value
+            // (because it runs memory-optimized in-place operations). However,
+            // self.jtj is passed via self which is given by mutable reference,
+            // so Rust doesn't allow us to move it out of self.
+            // Solution: Replace self.jtj with an empty placeholder matrix, move
+            // the real jtj matrix into the Cholesky decomposer, and then move
+            // the result back to self.jtj.
+            // Because Cholesky does in-place math, the owned "jtj" matrix
+            // contains garbage value after decomposition. But this is fine
+            // because jtj is zeroed at the start of each solver iteration.
             let jtj_owned = std::mem::replace(&mut self.jtj, DMatrix::zeros(0, 0));
             let delta = match nalgebra::linalg::Cholesky::new(jtj_owned) {
                 Some(chol) => {
@@ -186,8 +186,9 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 }
                 None => {
                     // Not positive-definite (numerically unstable): no
-                    // update this iteration. `Cholesky::new` drops the
-                    // matrix it failed on, so reallocate for next time.
+                    // update this iteration. This can happen when no keypoint
+                    // is observed (even if some are observed, the root might
+                    // be underconstrained and matches the targets exactly).
                     self.jtj = DMatrix::zeros(state_dim, state_dim);
                     DVector::zeros(state_dim)
                 }
@@ -223,51 +224,51 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
     fwdkin_pos3d: &Vector3<f32>,
     jacobian_3d: &DMatrix<f32>,
     joint_weight_scaler: f32,
+    relevant_idxs: &[usize],
     jtj: &mut DMatrix<f32>,
     jtr: &mut DVector<f32>,
-    jacobian_transpose_buffer: &mut DMatrix<f32>,
-    jtj_buffer: &mut DMatrix<f32>,
-    jtr_buffer: &mut DVector<f32>,
 ) {
+    // Only this keypoint's own n_relevant_dofs nonzero columns of jacobian_3d
+    // are read. The result is scattered into `jtj`/`jtr` at the DOFs' global
+    // state indices.
+    let n_relevant_dofs = relevant_idxs.len();
     match *obs {
         KeypointObservation::Missing => {}
         KeypointObservation::Position3D { obs_pos, weight } => {
             let weight = weight * joint_weight_scaler;
             let residual = obs_pos - fwdkin_pos3d;
-            // Writes into preallocated buffers instead of allocating a
-            // temporary for the transpose and the product.
-            jacobian_3d.transpose_to(jacobian_transpose_buffer);
-            jacobian_transpose_buffer.mul_to(jacobian_3d, jtj_buffer);
-            accumulate_scaled(jtj, jtj_buffer, weight);
-            jacobian_transpose_buffer.mul_to(&residual, jtr_buffer);
-            accumulate_scaled(jtr, jtr_buffer, weight);
+            let jacobian_3d_view = jacobian_3d.columns(0, n_relevant_dofs);
+            // i/j = index in compact views; gi/gj = global state indices
+            for (i, &gi) in relevant_idxs.iter().enumerate() {
+                let col_i = jacobian_3d_view.column(i);
+                for (j, &gj) in relevant_idxs.iter().enumerate() {
+                    jtj[(gi, gj)] += col_i.dot(&jacobian_3d_view.column(j)) * weight;
+                }
+                jtr[gi] += col_i.dot(&residual) * weight;
+            }
         }
         KeypointObservation::Position2D { obs_pos, weight } => {
             let weight = weight * joint_weight_scaler;
-            // The mapper always allocates its own Jacobian, so there's no
-            // allocation-free path here regardless.
+            // The mapper's `&DMatrix<f32>` parameter needs an owned, densely
+            // packed matrix, so unlike the Position3D case above, it can't take
+            // an arbitrary view. For simplicity, let's do a clone every
+            // iteration here for now.
             let mapper = mapper
                 .expect("Position2D observation given to a Solver constructed with mapper: None");
-            let (fwdkin_pos2d, jacobian_2d) = mapper.project_3d_to_2d(fwdkin_pos3d, jacobian_3d);
+            let jacobian_3d_compact = jacobian_3d.columns(0, n_relevant_dofs).clone_owned();
+            let (fwdkin_pos2d, jacobian_2d) =
+                mapper.project_3d_to_2d(fwdkin_pos3d, &jacobian_3d_compact);
             let residual = obs_pos - fwdkin_pos2d;
-            *jtj += jacobian_2d.transpose() * &jacobian_2d * weight;
-            *jtr += jacobian_2d.transpose() * residual * weight;
+            let jtj_local = jacobian_2d.transpose() * &jacobian_2d;
+            let jtr_local = jacobian_2d.transpose() * residual;
+            for (i, &gi) in relevant_idxs.iter().enumerate() {
+                for (j, &gj) in relevant_idxs.iter().enumerate() {
+                    jtj[(gi, gj)] += jtj_local[(i, j)] * weight;
+                }
+                jtr[gi] += jtr_local[i] * weight;
+            }
         }
     }
-}
-
-/// `dst += src * scale`, without allocating (unlike `dst += src * scale`
-/// written as an expression, which would build an owned `src * scale`
-/// temporary first).
-fn accumulate_scaled<R: nalgebra::Dim, C: nalgebra::Dim, S, SB>(
-    dst: &mut nalgebra::Matrix<f32, R, C, S>,
-    src: &nalgebra::Matrix<f32, R, C, SB>,
-    scale: f32,
-) where
-    S: nalgebra::storage::StorageMut<f32, R, C>,
-    SB: nalgebra::storage::Storage<f32, R, C>,
-{
-    dst.zip_apply(src, |d, s| *d += s * scale);
 }
 
 fn accumulate_neutral_pose_prior(

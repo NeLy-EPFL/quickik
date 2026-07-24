@@ -33,6 +33,10 @@ pub struct ForwardKinematicsWorkspace {
     /// Stacked per-keypoint Jacobians:
     /// keypoint k's `3 x state_dim` block is rows `3*k .. 3*k+3`
     pub kpt_jacobian: DMatrix<f32>,
+    /// Records of which DOFs can affect each keypoint's position. This enables
+    /// sparse Jacobian computation in the solver, since most DOFs do not impact
+    /// any given keypoint.
+    pub relevant_dof_idxs_by_joint: Vec<Vec<usize>>,
     /// Records of all DOFs in the kinematic tree in order of their flat indices
     dof_records: Vec<DofRecord>,
 }
@@ -40,15 +44,18 @@ pub struct ForwardKinematicsWorkspace {
 impl ForwardKinematicsWorkspace {
     pub fn new(kinematic_tree: &KinematicTree) -> Self {
         let n_joints = kinematic_tree.n_joints();
+        let state_dim = kinematic_tree.state_dim();
         Self {
             n_joints,
             kpt_positions: vec![Vector3::zeros(); n_joints],
-            kpt_jacobian: DMatrix::zeros(3 * n_joints, kinematic_tree.state_dim()),
+            kpt_jacobian: DMatrix::zeros(3 * n_joints, state_dim),
+            relevant_dof_idxs_by_joint: std::iter::repeat_with(|| Vec::with_capacity(state_dim))
+                .take(n_joints)
+                .collect(),
             dof_records: Vec::with_capacity(kinematic_tree.n_dofs()),
         }
     }
 }
-
 pub fn evaluate_fwdkin(workspace: &mut ForwardKinematicsWorkspace, state: &State) {
     debug_assert_eq!(workspace.n_joints, state.kinematic_tree.n_joints());
 
@@ -87,6 +94,14 @@ fn traverse_dfs(
         frame.origin,
         &workspace.dof_records[..n_records_before],
     );
+
+    // Record which DOFs can affect this keypoint. Root pos/rot affect all.
+    workspace.relevant_dof_idxs_by_joint[curr_joint_idx].clear();
+    workspace.relevant_dof_idxs_by_joint[curr_joint_idx].extend(0..N_ROOT_DOFS);
+    for i in 0..n_records_before {
+        let state_idx = workspace.dof_records[i].state_idx;
+        workspace.relevant_dof_idxs_by_joint[curr_joint_idx].push(state_idx);
+    }
 
     for &child_idx in state.kinematic_tree.children_indices(curr_joint_idx) {
         traverse_dfs(workspace, state, child_idx, frame);
