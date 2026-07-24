@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik_benchmark::{correctness, fixtures, perf, twod};
+use quickik_benchmark::{correctness, errors, fixtures, perf, twod};
 
 /// One body to benchmark: its body plan and matching fixtures file.
 struct BodyConfig {
@@ -73,7 +73,8 @@ fn main() {
             let camera = twod::synthetic_camera(all_points);
 
             correctness::run_all_2d(&tree, &fixtures, camera);
-            perf::run_all_2d(&tree, &fixtures, camera);
+            perf::run_all_2d(&tree, &fixtures, body.name, camera);
+            errors::write_errors_json(&tree, &fixtures, body.name, camera);
         }
     }
 }

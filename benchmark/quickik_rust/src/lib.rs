@@ -3,6 +3,7 @@
 //! multi-thread-throughput helpers for its own weak-scaling sweep).
 
 pub mod correctness;
+pub mod errors;
 pub mod fixtures;
 pub mod perf;
 pub mod twod;
