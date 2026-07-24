@@ -117,7 +117,9 @@ fn evaluate_frame_at_joint(
         dof_records.push(record);
 
         let angle = state.dof_angles[joint.dof_offset + i];
-        rotation *= UnitQuaternion::from_axis_angle(&Unit::new_normalize(axis_local), angle);
+        // `Dof::axis` is already unit length (see its doc comment), so this
+        // skips re-normalizing (a sqrt + division) on every solve iteration.
+        rotation *= UnitQuaternion::from_axis_angle(&Unit::new_unchecked(axis_local), angle);
     }
 
     Frame { origin, rotation }

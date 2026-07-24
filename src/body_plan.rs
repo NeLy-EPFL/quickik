@@ -30,7 +30,10 @@ pub enum DofType {
 #[derive(Clone, Copy, Debug)]
 pub struct Dof {
     /// Rotational or translational axis in local frame (relative to the
-    /// joint's `offset_quat`)
+    /// joint's `offset_quat`). Must be unit length -- forward kinematics
+    /// trusts this invariant (rather than re-normalizing on every solve
+    /// iteration) instead of checking it, so a `Dof` built directly (rather
+    /// than parsed from JSON, which normalizes it) must provide one itself.
     pub axis: Vector3<f32>,
     /// Whether this is a hinge or slide DOF.
     pub dof_type: DofType,
@@ -134,7 +137,9 @@ impl KinematicTree {
                         );
                     }
                     Dof {
-                        axis: Vector3::from(dof.axis),
+                        // Normalized once here rather than on every solve
+                        // iteration -- see `Dof::axis`'s doc comment.
+                        axis: Vector3::from(dof.axis).normalize(),
                         dof_type: dof.dof_type,
                         neutral: dof.neutral,
                         limits: dof.limits,
