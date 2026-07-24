@@ -251,18 +251,46 @@ def bench_single_frame_latency(tree, target, n_calls, config):
     return samples
 
 
-def bench_solve_sequence(tree, all_obs, config):
-    seq = quickik.SequenceSolver(tree, config)
-    for obs in all_obs:
-        seq.solve_frame(obs)
+def build_observation_arrays(ctx, frames):
+    """positions: (n_frames, n_keypoints, 3) float32, weights: (n_frames,
+    n_keypoints) float32 -- a weight <= 0 is treated as missing, matching
+    build_observations' "root is never observed" convention. n_keypoints
+    includes the root (index 0).
 
-    timed_seq = quickik.SequenceSolver(tree, config)
-    samples = []
-    for obs in all_obs:
-        t0 = time.perf_counter()
-        timed_seq.solve_frame(obs)
-        samples.append(time.perf_counter() - t0)
-    return samples
+    Feeds solve_sequence_segmented_parallel directly, instead of
+    building one KeypointObservation Python object per keypoint per frame
+    (see build_observations) -- avoids that per-object construction and the
+    matching per-object unwrapping on the Rust side.
+    """
+    n_keypoints = len(ctx.joints)
+    targets = np.array([f["target_ego"] for f in frames], dtype=np.float32)
+    positions = np.zeros((len(frames), n_keypoints, 3), dtype=np.float32)
+    positions[:, 1:, :] = targets
+    weights = np.zeros((len(frames), n_keypoints), dtype=np.float32)
+    weights[:, 1:] = 1.0
+    return positions, weights
+
+
+def tile_arrays(positions, weights, length):
+    idx = np.arange(length) % positions.shape[0]
+    return positions[idx], weights[idx]
+
+
+def bench_solve_sequence(tree, positions, weights, config):
+    """Single-thread sequence throughput: one bulk call to
+    solve_sequence_segmented_parallel with n_workers=1 (a single
+    segment spanning the whole sequence), instead of looping solve_frame()
+    once per frame from Python -- avoids paying Python/PyO3 call overhead on
+    every single frame."""
+    parallel_config = quickik.ParallelSolveConfig(len(positions), 0, 0.05, 1)
+    quickik.solve_sequence_segmented_parallel(
+        tree, config, positions, weights, parallel_config
+    )  # warm up
+    t0 = time.perf_counter()
+    quickik.solve_sequence_segmented_parallel(
+        tree, config, positions, weights, parallel_config
+    )
+    return time.perf_counter() - t0
 
 
 # Frames per segment/worker, matching perf.rs exactly (same stride, so a
@@ -283,23 +311,18 @@ def frames_for_n_segments(n_segments):
     return SEGMENT_LEN + max(n_segments - 1, 0) * (SEGMENT_LEN - OVERLAP_LEN)
 
 
-def tiled_native_rate_sequence(ctx, length):
-    base = [
-        build_observations(f["target_ego"]) for f in ctx.fixtures["native_rate_frames"]
-    ]
-    return [base[i % len(base)] for i in range(length)]
-
-
-def bench_multithread_sequence_throughput(tree, sequence, n_workers):
+def bench_multithread_sequence_throughput(tree, positions, weights, n_workers):
     config = quickik.SolverConfig()
     parallel_config = quickik.ParallelSolveConfig(
         SEGMENT_LEN, OVERLAP_LEN, 0.05, n_workers
     )
     quickik.solve_sequence_segmented_parallel(
-        tree, config, sequence, parallel_config
+        tree, config, positions, weights, parallel_config
     )  # warm up
     t0 = time.perf_counter()
-    quickik.solve_sequence_segmented_parallel(tree, config, sequence, parallel_config)
+    quickik.solve_sequence_segmented_parallel(
+        tree, config, positions, weights, parallel_config
+    )
     return time.perf_counter() - t0
 
 
@@ -358,33 +381,42 @@ def run_performance(ctx):
     print(
         "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
     )
-    native_obs = tiled_native_rate_sequence(ctx, SINGLE_THREAD_N_FRAMES)
-    single_thread_mean_us = summarize(
-        "SequenceSolver.solve_frame",
-        bench_solve_sequence(tree, native_obs, quickik.SolverConfig()),
+    base_positions, base_weights = build_observation_arrays(
+        ctx, ctx.fixtures["native_rate_frames"]
+    )
+    single_positions, single_weights = tile_arrays(
+        base_positions, base_weights, SINGLE_THREAD_N_FRAMES
+    )
+    elapsed = bench_solve_sequence(
+        tree, single_positions, single_weights, quickik.SolverConfig()
+    )
+    single_thread_fps = single_positions.shape[0] / elapsed
+    print(
+        f"solve_sequence_segmented_parallel (n_workers=1)   "
+        f"n_frames={single_positions.shape[0]:<6} elapsed={elapsed * 1e3:>9.3f}ms  "
+        f"throughput={single_thread_fps:>10.1f} frames/s"
     )
 
     print(
         f"\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, "
         f"{MULTITHREAD_N_THREADS} threads) --"
     )
-    sequence = tiled_native_rate_sequence(
-        ctx, frames_for_n_segments(MULTITHREAD_N_THREADS)
-    )
+    n_frames = frames_for_n_segments(MULTITHREAD_N_THREADS)
+    mt_positions, mt_weights = tile_arrays(base_positions, base_weights, n_frames)
     elapsed = bench_multithread_sequence_throughput(
-        tree, sequence, MULTITHREAD_N_THREADS
+        tree, mt_positions, mt_weights, MULTITHREAD_N_THREADS
     )
-    multithread_fps = len(sequence) / elapsed
+    multithread_fps = n_frames / elapsed
     print(
-        f"solve_sequence_segmented_parallel   n_frames={len(sequence):<6} elapsed={elapsed * 1e3:>9.3f}ms  "
-        f"throughput={multithread_fps:>10.1f} frames/s"
+        f"solve_sequence_segmented_parallel   n_frames={n_frames:<6} "
+        f"elapsed={elapsed * 1e3:>9.3f}ms  throughput={multithread_fps:>10.1f} frames/s"
     )
 
     write_results_json(
         ctx.name,
         single_frame_latency_us,
         single_frame_latency_max_us,
-        1e6 / single_thread_mean_us,
+        single_thread_fps,
         multithread_fps,
     )
 

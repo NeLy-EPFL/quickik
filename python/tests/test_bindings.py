@@ -18,6 +18,7 @@ docs/installation.md):
 
 import math
 
+import numpy as np
 import pytest
 import quickik
 
@@ -205,36 +206,50 @@ def test_solve_sequence_returns_one_state_per_frame(tree):
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
 
 
-def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
-    n_frames = 40
+def sine_trajectory_arrays(tree, n_frames):
+    """positions/weights (all keypoints observed, weight 1.0) for a smooth
+    sine trajectory of the two-joint chain, plus the true (a1, a2) angles
+    used to generate it."""
     true_angles = []
-    sequence = []
+    positions = np.zeros((n_frames, tree.n_joints, 3), dtype=np.float32)
+    weights = np.ones((n_frames, tree.n_joints), dtype=np.float32)
     for t in range(n_frames):
         a = 0.3 * math.sin(t * 0.15)
         true_angles.append((a, a * 0.5))
-        sequence.append(observations_for(a, a * 0.5))
+        positions[t] = two_link_positions(a, a * 0.5)
+    return positions, weights, true_angles
+
+
+def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
 
     parallel_config = quickik.ParallelSolveConfig(
         segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
     )
     states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), sequence, parallel_config
+        tree, quickik.SolverConfig(), positions, weights, parallel_config
     )
 
-    assert len(states) == n_frames
+    assert len(states) == len(true_angles)
     for state, (a1, a2) in zip(states, true_angles, strict=True):
         assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
+def test_solve_sequence_segmented_parallel_rejects_wrong_keypoint_count(tree):
+    positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
+    weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=5, overlap_len=0, overlap_tolerance=0.05, n_workers=1
+    )
+    with pytest.raises(ValueError, match="keypoints"):
+        quickik.solve_sequence_segmented_parallel(
+            tree, quickik.SolverConfig(), positions, weights, parallel_config
+        )
+
+
 def test_solve_sequence_segmented_parallel_honors_explicit_n_workers(tree):
-    n_frames = 40
-    true_angles = []
-    sequence = []
-    for t in range(n_frames):
-        a = 0.3 * math.sin(t * 0.15)
-        true_angles.append((a, a * 0.5))
-        sequence.append(observations_for(a, a * 0.5))
+    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
 
     # n_workers=1 forces every segment through a single spawned thread,
     # exercising a different code path than the -1 (all available cores)
@@ -243,10 +258,10 @@ def test_solve_sequence_segmented_parallel_honors_explicit_n_workers(tree):
         segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=1
     )
     states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), sequence, parallel_config
+        tree, quickik.SolverConfig(), positions, weights, parallel_config
     )
 
-    assert len(states) == n_frames
+    assert len(states) == len(true_angles)
     for state, (a1, a2) in zip(states, true_angles, strict=True):
         assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)

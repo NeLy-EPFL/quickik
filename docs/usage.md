@@ -179,13 +179,24 @@ A plain, sequential `SequenceSolver` like this only ever uses one thread, and on
 === "Python"
 
     ```python
+    import numpy as np
+
+    # positions: (n_frames, n_joints, 3) float32, in kinematic_tree.joints
+    # order. weights: (n_frames, n_joints) float32; a keypoint with
+    # weight <= 0 counts as Missing.
+    positions = np.zeros((len(long_recording), kinematic_tree.n_joints, 3), dtype=np.float32)
+    weights = np.ones((len(long_recording), kinematic_tree.n_joints), dtype=np.float32)
+    # ... fill positions/weights from long_recording ...
+
     parallel_config = quickik.ParallelSolveConfig(
         segment_len=200, overlap_len=20, overlap_tolerance=0.05, n_workers=-1
     )
     poses = quickik.solve_sequence_segmented_parallel(
-        kinematic_tree, quickik.SolverConfig(), long_recording, parallel_config
+        kinematic_tree, quickik.SolverConfig(), positions, weights, parallel_config
     )
     ```
+
+    Python takes the whole sequence as `positions`/`weights` numpy arrays instead of a list of per-frame `KeypointObservation` lists, unlike `SequenceSolver.solve_frame` above: constructing one Python object per keypoint per frame is fine for a single frame at a time, but its overhead dominates once you're pushing a whole recording through in one call – see the [benchmarks page](benchmarks.md)'s "QuickIK (Python/C++/Rust)" implementation note.
 
 === "C++"
 

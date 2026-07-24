@@ -17,7 +17,10 @@ QuickIK is compared against three other whole-tree IK libraries – [KDL](https:
 ![Benchmark comparison across both the NeuroMechFly fly body and the Unitree G1 humanoid body](assets/benchmarks/comparison.svg)
 
 
-??? Note "Implementation notes on external benchmarked libraries"
+??? Note "Implementation notes"
+    === "QuickIK (Python/C++/Rust)"
+        All three of QuickIK's own bindings run the identical compiled Rust solver (the core `quickik` crate, same release build) – the Python and C++ layers are thin FFI wrappers around it, not separate implementations. Python's throughput metrics batch a whole recording into one call via a numpy-array API (flat position/weight arrays) instead of one Python object per keypoint per frame, which is what keeps it within a few percent of Rust and C++ here; an earlier, naive per-frame-object-list version of the same binding was roughly 2x slower on these metrics, since Python/PyO3 call and object-marshaling overhead then dominated the actual (fast) per-frame solve. Any remaining C++-vs-Rust gap in the chart is measurement noise from CPU scheduling on a shared machine (see `benchmark/README.md`'s "Reducing measurement noise" section), not a real difference, since both run the same code.
+
     === "RBDL"
         RBDL's native floating-base joint crashes its `InverseKinematicsConstraintSet` solver (an upstream dimension-mismatch bug), so QuickIK's floating base is represented as a translation plus Euler-angle joint in series instead, matching KDL's workaround for the same underlying reason. Its solver is a joint-space damped Levenberg-Marquardt normal-equations solve, tuned to match QuickIK's own iteration count and tolerance for a fair comparison. Python bindings wrap the same native C++ solver (via Cython), so Python and C++ perform almost identically on latency and single-thread throughput; multi-thread throughput uses `multiprocessing` in Python versus in-process threads in C++, which accounts for the modest gap there.
 

@@ -13,3 +13,4 @@ crate-type = ["cdylib"]
 quickik_core = { package = "quickik", path = ".." }
 nalgebra = "0.35"
 pyo3 = { version = "0.29", features = ["extension-module"] }
+numpy = "0.29.0"

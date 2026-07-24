@@ -1,3 +1,4 @@
+use numpy::ndarray::{ArrayView2, ArrayView3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -219,4 +220,39 @@ pub(crate) fn extract_observations(
     observations: Vec<PyRef<'_, KeypointObservation>>,
 ) -> Vec<quickik_core::observation::KeypointObservation> {
     observations.iter().map(|obs| obs.inner).collect()
+}
+
+/// Builds one frame's-worth of `Position3D`/`Missing` observations per row
+/// of `positions`/`weights` (a keypoint with `weight <= 0.0` is treated as
+/// [`KeypointObservation::missing`]), without ever constructing a Python
+/// `KeypointObservation` object -- unlike [`extract_observations`], which
+/// unwraps objects a caller already built one per keypoint. Used by
+/// array-based entry points (e.g.
+/// [`solve_sequence_segmented_parallel`](crate::high_level::solve_sequence_segmented_parallel))
+/// for callers that already have their data in numpy arrays, to avoid that
+/// per-keypoint Python object construction and unwrapping.
+pub(crate) fn observations_from_arrays(
+    positions: ArrayView3<'_, f32>,
+    weights: ArrayView2<'_, f32>,
+) -> Vec<Vec<quickik_core::observation::KeypointObservation>> {
+    positions
+        .outer_iter()
+        .zip(weights.outer_iter())
+        .map(|(frame_positions, frame_weights)| {
+            frame_positions
+                .outer_iter()
+                .zip(frame_weights.iter())
+                .map(|(pos, &weight)| {
+                    if weight <= 0.0 {
+                        quickik_core::observation::KeypointObservation::Missing
+                    } else {
+                        quickik_core::observation::KeypointObservation::Position3D {
+                            obs_pos: nalgebra::Vector3::new(pos[0], pos[1], pos[2]),
+                            weight,
+                        }
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
