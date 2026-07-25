@@ -50,7 +50,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
     - `offset_pos`/`offset_quat`: this joint's offset from its parent.
     - `weight_scaler`: multiplied together with each frame's `KeypointObservation`'s `weight` for this joint's keypoint. Optional, defaults to `1.0`.
     - `dofs`: this joint's degrees of freedom, each with:
-        - `type`: `"hinge"` (rotational) or `"slide"` (translational). Only `"hinge"` is currently implemented.
+        - `type`: `"hinge"` (rotational) or `"slide"` (translational).
         - `axis`: rotation/translation axis in local frame.
         - `neutral`: neutral angle (radians) or position.
         - `limits`: optional `[min, max]` limits; unbounded if omitted or `null`.

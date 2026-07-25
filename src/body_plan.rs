@@ -14,15 +14,12 @@ use crate::utils::quat_from_wxyz;
 pub const N_ROOT_DOFS: usize = 6; // 3 for root position, 3 for root rotation
 
 /// Whether a [`Dof`] is a hinge (rotational) or slide (translational) DOF.
-///
-/// Only [`Hinge`](DofType::Hinge) is currently implemented -- constructing a
-/// body plan with a `Slide` DOF panics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DofType {
     /// Rotates about `axis`.
     Hinge,
-    /// Translates along `axis`. Not yet implemented.
+    /// Translates along `axis`.
     Slide,
 }
 
@@ -49,7 +46,7 @@ pub struct Dof {
     pub weight_scaler: f32,
 }
 
-/// An anatomical joint with up to three rotational DOF.
+/// An anatomical joint with any number of hinge and/or slide DOFs.
 /// Also serves as a tracking keypoint in the MoCap data.
 #[derive(Clone, Debug)]
 pub struct Joint {
@@ -59,8 +56,8 @@ pub struct Joint {
     pub offset_pos: Vector3<f32>,
     /// Offset rotation of the joint from its parent in the kinematic tree
     pub offset_quat: UnitQuaternion<f32>,
-    /// Rotational DOFs at this joint. Can be empty or up to 3. The ordering is
-    /// important (as SO(3) rotations are not commutative) and should be
+    /// Hinge and/or slide DOFs at this joint. Can be empty. The ordering is
+    /// important (rotations and translations don't commute) and should be
     /// consistent with MoCap data.
     pub dofs: Vec<Dof>,
     /// Index of the parent joint in the body plan. Should be `None` for the
@@ -129,22 +126,14 @@ impl KinematicTree {
             let dofs = joint_spec
                 .dofs
                 .into_iter()
-                .map(|dof| {
-                    if dof.dof_type == DofType::Slide {
-                        unimplemented!(
-                            "Slide DOFs are not yet implemented (joint '{}')",
-                            joint_spec.name
-                        );
-                    }
-                    Dof {
-                        // Normalized once here rather than on every solve
-                        // iteration -- see `Dof::axis`'s doc comment.
-                        axis: Vector3::from(dof.axis).normalize(),
-                        dof_type: dof.dof_type,
-                        neutral: dof.neutral,
-                        limits: dof.limits,
-                        weight_scaler: dof.weight_scaler,
-                    }
+                .map(|dof| Dof {
+                    // Normalized once here rather than on every solve
+                    // iteration -- see `Dof::axis`'s doc comment.
+                    axis: Vector3::from(dof.axis).normalize(),
+                    dof_type: dof.dof_type,
+                    neutral: dof.neutral,
+                    limits: dof.limits,
+                    weight_scaler: dof.weight_scaler,
                 })
                 .collect();
             let joint = Joint {

@@ -1,4 +1,4 @@
-use quickik::body_plan::KinematicTree;
+use quickik::body_plan::{DofType, KinematicTree};
 
 fn valid_body_json() -> &'static str {
     r#"{
@@ -124,16 +124,22 @@ fn rejects_dof_missing_type() {
 }
 
 #[test]
-#[should_panic(expected = "Slide DOFs are not yet implemented")]
-fn rejects_slide_dofs() {
+fn parses_slide_dofs() {
     let json = r#"{
         "joints": [
             {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
             {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
-             "dofs": [{"axis": [0,0,1], "type": "slide", "neutral": 0.0, "limits": null}]}
+             "dofs": [{"axis": [0,0,2], "type": "slide", "neutral": 0.5, "limits": [-1.0, 1.0]}]}
         ]
     }"#;
-    KinematicTree::from_json_str(json);
+    let tree = KinematicTree::from_json_str(json);
+
+    let dof = &tree.joints[1].dofs[0];
+    assert_eq!(dof.dof_type, DofType::Slide);
+    assert_eq!(dof.neutral, 0.5);
+    assert_eq!(dof.limits, Some([-1.0, 1.0]));
+    // Non-unit axes are normalized once at parse time, same as hinge DOFs.
+    assert!((dof.axis - nalgebra::Vector3::new(0.0, 0.0, 1.0)).norm() < 1e-6);
 }
 
 #[test]

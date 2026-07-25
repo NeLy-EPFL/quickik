@@ -3,7 +3,7 @@
 
 use nalgebra::{DMatrix, Unit, UnitQuaternion, Vector3};
 
-use crate::body_plan::{Joint, KinematicTree, N_ROOT_DOFS};
+use crate::body_plan::{DofType, Joint, KinematicTree, N_ROOT_DOFS};
 use crate::state::State;
 
 #[derive(Clone, Copy, Debug)]
@@ -16,9 +16,14 @@ struct Frame {
 struct DofRecord {
     /// DOF's flat index in the state vector, starting from 6
     state_idx: usize,
-    /// DOF's rotation axis in world coordinates
+    /// Hinge or slide.
+    dof_type: DofType,
+    /// DOF's rotation/translation axis in world coordinates
     axis_world: Vector3<f32>,
-    /// Origin of the joint that this DOF belongs to, in world coordinates
+    /// Origin of the joint that this DOF belongs to, in world coordinates, as
+    /// of just before this DOF's own contribution is applied. Only used for
+    /// `Hinge` DOFs; irrelevant for slide DOFs, whose Jacobian column is
+    /// `axis_world` regardless of position.
     origin_world: Vector3<f32>,
 }
 
@@ -84,14 +89,20 @@ fn traverse_dfs(
     let joint = &state.kinematic_tree.joints[curr_joint_idx];
 
     let n_records_before = workspace.dof_records.len();
-    let frame = evaluate_frame_at_joint(joint, parent_frame, state, &mut workspace.dof_records);
+    let (joint_origin, frame) =
+        evaluate_frame_at_joint(joint, parent_frame, state, &mut workspace.dof_records);
 
-    workspace.kpt_positions[curr_joint_idx] = frame.origin;
+    // A joint's own DOFs (hinge or slide) never move its own keypoint, only its
+    // descendants' (see this module's doc comment on `joint_origin` in
+    // `evaluate_frame_at_joint`). So the keypoint and its Jacobian use
+    // `joint_origin` (computed before this joint's own DOFs) rather than
+    // `frame.origin` (which children use, and which does reflect them).
+    workspace.kpt_positions[curr_joint_idx] = joint_origin;
     write_keypoint_jacobian(
         &mut workspace.kpt_jacobian,
         state,
         curr_joint_idx,
-        frame.origin,
+        joint_origin,
         &workspace.dof_records[..n_records_before],
     );
 
@@ -109,16 +120,24 @@ fn traverse_dfs(
     workspace.dof_records.truncate(n_records_before);
 }
 
-/// Compute frame of a single joint in world coordinates
+/// Compute the frame of a single joint in world coordinates.
+///
+/// Returns `(joint_origin, frame)`: `joint_origin` is this joint's own
+/// keypoint position, fixed by the parent frame and this joint's constant
+/// offset alone (not moved by this joint's own DOFs, only by its ancestors).
+/// `frame` additionally contains this joint's own DOFs (both its rotation and
+/// origin). The origin is shifted by any slide DOFs and is what its children
+/// are positioned relative to.
 fn evaluate_frame_at_joint(
     joint: &Joint,
     parent_frame: Frame,
     state: &State,
     dof_records: &mut Vec<DofRecord>,
-) -> Frame {
+) -> (Vector3<f32>, Frame) {
     // Start with parent frame...
-    let origin = parent_frame.origin + parent_frame.rotation * joint.offset_pos;
+    let own_origin = parent_frame.origin + parent_frame.rotation * joint.offset_pos;
     let mut rotation = parent_frame.rotation * joint.offset_quat;
+    let mut origin_for_children = own_origin;
 
     // ... then apply the joint's own DOFs
     for (i, dof) in joint.dofs.iter().enumerate() {
@@ -126,18 +145,31 @@ fn evaluate_frame_at_joint(
         let axis_world = rotation * axis_local;
         let record = DofRecord {
             state_idx: N_ROOT_DOFS + joint.dof_offset + i,
+            dof_type: dof.dof_type,
             axis_world,
-            origin_world: origin,
+            origin_world: origin_for_children,
         };
         dof_records.push(record);
 
-        let angle = state.dof_angles[joint.dof_offset + i];
-        // `Dof::axis` is already unit length (see its doc comment), so this
-        // skips re-normalizing (a sqrt + division) on every solve iteration.
-        rotation *= UnitQuaternion::from_axis_angle(&Unit::new_unchecked(axis_local), angle);
+        let value = state.dof_angles[joint.dof_offset + i]; // angle or slide pos
+        match dof.dof_type {
+            DofType::Hinge => {
+                // `Dof::axis` is already unit. Skip re-normalization here in
+                // the hot loop.
+                let unit_axis_local = Unit::new_unchecked(axis_local);
+                rotation *= UnitQuaternion::from_axis_angle(&unit_axis_local, value);
+            }
+            DofType::Slide => origin_for_children += axis_world * value,
+        }
     }
 
-    Frame { origin, rotation }
+    (
+        own_origin,
+        Frame {
+            origin: origin_for_children,
+            rotation,
+        },
+    )
 }
 
 /// Write the Jacobian of a single keypoint with respect to the state variables
@@ -171,13 +203,19 @@ fn write_keypoint_jacobian(
         jacobian[(row2, 3 + i)] = d.z;
     }
 
-    // Upstream joint dofs:
-    // Note that most DOFs do not affect any given keypoint
+    // Upstream joint dofs. Note that each keypoint is only affected by a few
+    // DOFs, so this is rather sparse
     for record in dof_records_until_now {
-        let radius = pos - record.origin_world;
-        let d = record.axis_world.cross(&radius);
-        jacobian[(row0, record.state_idx)] = d.x;
-        jacobian[(row1, record.state_idx)] = d.y;
-        jacobian[(row2, record.state_idx)] = d.z;
+        let jac = match record.dof_type {
+            // Rotating about `axis_world` through `origin_world` moves a
+            // point in its orbit: standard angular-velocity cross product.
+            DofType::Hinge => record.axis_world.cross(&(pos - record.origin_world)),
+            // Sliding along `axis_world` moves every downstream point by the
+            // same amount along that direction, regardless of position.
+            DofType::Slide => record.axis_world,
+        };
+        jacobian[(row0, record.state_idx)] = jac.x;
+        jacobian[(row1, record.state_idx)] = jac.y;
+        jacobian[(row2, record.state_idx)] = jac.z;
     }
 }

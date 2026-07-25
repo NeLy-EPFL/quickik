@@ -47,6 +47,33 @@ fn recovers_pose_from_3d_observations() {
 }
 
 #[test]
+fn recovers_pose_with_slide_dof_from_3d_observations() {
+    let tree = common::hinge_then_slide_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            weight: 0.0,
+            ..SolverConfig::default()
+        },
+    );
+    solver.solve(&mut state, &observations);
+
+    assert!((state.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+}
+
+#[test]
 fn recovers_pose_from_xyview_observations() {
     let tree = common::two_joint_chain();
     let target_positions = keypoints_at(&tree, &[0.35, -0.25]);

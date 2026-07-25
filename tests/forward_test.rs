@@ -92,14 +92,14 @@ fn active_indices_exclude_other_branches_dofs() {
 /// Cross-check the analytical Jacobian against central finite differences
 /// across every state variable, catching any sign or indexing errors in
 /// `write_keypoint_jacobian`.
-#[test]
-fn jacobian_matches_finite_differences() {
-    let tree = common::two_joint_chain();
+fn assert_jacobian_matches_finite_differences(
+    tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,
+    dof_values: &[f32],
+) {
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles[0] = 0.3;
-    state.dof_angles[1] = -0.2;
+    state.dof_angles.copy_from_slice(dof_values);
 
-    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    let mut workspace = ForwardKinematicsWorkspace::new(tree);
     evaluate_fwdkin(&mut workspace, &state);
     let analytical_jacobian = workspace.kpt_jacobian.clone();
     let baseline_positions = workspace.kpt_positions.clone();
@@ -126,4 +126,89 @@ fn jacobian_matches_finite_differences() {
             );
         }
     }
+}
+
+#[test]
+fn jacobian_matches_finite_differences() {
+    assert_jacobian_matches_finite_differences(&common::two_joint_chain(), &[0.3, -0.2]);
+}
+
+#[test]
+fn jacobian_matches_finite_differences_with_slide_dof() {
+    assert_jacobian_matches_finite_differences(&common::slide_joint_chain(), &[0.4]);
+}
+
+#[test]
+fn jacobian_matches_finite_differences_with_hinge_then_slide() {
+    assert_jacobian_matches_finite_differences(
+        &common::hinge_then_slide_chain(),
+        &[std::f32::consts::FRAC_PI_4, 0.4],
+    );
+}
+
+#[test]
+fn jacobian_matches_finite_differences_with_hinge_and_slide_on_same_joint() {
+    assert_jacobian_matches_finite_differences(
+        &common::joint_with_hinge_and_slide(),
+        &[std::f32::consts::FRAC_PI_4, 0.4],
+    );
+}
+
+/// A slide DOF translates its joint's frame along its (world-rotated) axis,
+/// but -- like a hinge DOF's rotation -- never moves its own joint's tracked
+/// keypoint, only its descendants'.
+#[test]
+fn slide_dof_moves_only_descendants() {
+    let tree = common::slide_joint_chain();
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = 0.5;
+    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut workspace, &state);
+
+    assert!((workspace.kpt_positions[0] - Vector3::new(0.0, 0.0, 0.0)).norm() < 1e-6);
+    assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
+    assert!((workspace.kpt_positions[2] - Vector3::new(2.5, 0.0, 0.0)).norm() < 1e-5);
+}
+
+/// A downstream slide's world-frame axis follows an upstream hinge's
+/// rotation, so rotating the hinge also swings the slide's translation
+/// direction -- and therefore every keypoint past it.
+#[test]
+fn hinge_then_slide_positions() {
+    let tree = common::hinge_then_slide_chain();
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = std::f32::consts::FRAC_PI_2; // hinge_joint: 90 deg about Z
+    state.dof_angles[1] = 0.3; // slide_joint: slide by 0.3 along its local X
+    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut workspace, &state);
+
+    assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-5);
+    assert!((workspace.kpt_positions[2] - Vector3::new(1.0, 1.0, 0.0)).norm() < 1e-5);
+    assert!((workspace.kpt_positions[3] - Vector3::new(1.0, 2.3, 0.0)).norm() < 1e-5);
+}
+
+/// Hand-derived expected position and Jacobian for a single joint carrying a
+/// hinge DOF then a slide DOF, at theta = pi/2, d = 0.5:
+/// tip = (1 + (d+1) cos(theta), (d+1) sin(theta), 0) = (1, 1.5, 0);
+/// d(tip)/d(theta) = (-(d+1) sin(theta), (d+1) cos(theta), 0) = (-1.5, 0, 0);
+/// d(tip)/d(d) = (cos(theta), sin(theta), 0) = (0, 1, 0).
+/// This directly exercises the cross-term where an earlier hinge within the
+/// same joint rotates a later slide's translation axis.
+#[test]
+fn hinge_and_slide_on_same_joint_cross_term() {
+    let tree = common::joint_with_hinge_and_slide();
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = std::f32::consts::FRAC_PI_2;
+    state.dof_angles[1] = 0.5;
+    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut workspace, &state);
+
+    // joint1's own keypoint is unaffected by either of its own DOFs.
+    assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
+    assert!((workspace.kpt_positions[2] - Vector3::new(1.0, 1.5, 0.0)).norm() < 1e-5);
+
+    let theta_col = workspace.kpt_jacobian.fixed_view::<3, 1>(3 * 2, 6);
+    assert!((theta_col - Vector3::new(-1.5, 0.0, 0.0)).norm() < 1e-4);
+    let d_col = workspace.kpt_jacobian.fixed_view::<3, 1>(3 * 2, 7);
+    assert!((d_col - Vector3::new(0.0, 1.0, 0.0)).norm() < 1e-4);
 }
