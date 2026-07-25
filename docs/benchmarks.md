@@ -14,7 +14,7 @@ QuickIK is compared against three other whole-tree IK libraries – [KDL](https:
     - **Throughput (single thread)**: frames per second solving a long recording one frame at a time, each warm-started from the previous frame's solution.
     - **Throughput (multi-thread, 8 threads)**: the same recording split across 8 threads and solved in parallel, for libraries/bindings that support it.
 
-![Benchmark comparison across both the NeuroMechFly fly body and the Unitree G1 humanoid body](assets/benchmarks/comparison.svg)
+![Benchmark comparison across both the NeuroMechFly fly body and the Unitree G1 humanoid body](assets/benchmarks/comparison.svg){ width="480" }
 
 
 ??? Note "Implementation notes"

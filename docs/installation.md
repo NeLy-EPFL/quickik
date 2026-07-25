@@ -21,9 +21,9 @@ git clone https://github.com/NeLy-EPFL/quickik
 
     ```sh
     cd quickik/python
-    pip install maturin  # or use uv etc. if you'are in a managed virtual env
+    pip install maturin  # or use uv etc. if you're in a managed virtual env
     maturin develop --release
-    
+
     # To run unit tests for the Python bindings:
     # Run `pip install pytest` if you don't have it already
     pytest tests/
@@ -43,4 +43,4 @@ git clone https://github.com/NeLy-EPFL/quickik
     ./quickik/cpp/build/quickik_cpp_tests
     ```
 
-    The `cmake --build` command above already builds everything needed to run the test suite -- there's nothing extra to do for that. If you're linking QuickIK into your own CMake project instead, add `cpp/include/` to your include path and link against the `quickik_cpp` and `quickik_cpp_bridge` imported targets that `cpp/CMakeLists.txt` defines; both are produced automatically by the same build (a custom target runs `cargo build -p quickik-cpp` and copies the generated header and glue code into `cpp/include/`/`cpp/lib/`).
+    The `cmake --build` command above already builds everything needed to run the test suite – there's nothing extra to do for that. If you're linking QuickIK into your own CMake project instead, add `cpp/include/` to your include path and link against the `quickik_cpp` and `quickik_cpp_bridge` imported targets that `cpp/CMakeLists.txt` defines; both are produced automatically by the same build (a custom target runs `cargo build -p quickik-cpp` and copies the generated header and glue code into `cpp/include/`/`cpp/lib/`).

@@ -10,11 +10,18 @@ edit_uri = "edit/main/docs/"
 nav = [
   { "Home" = "index.md" },
   { "Installation" = "installation.md" },
-  { "Usage" = "usage.md" },
+  { "Getting started" = [
+      { "Body plan" = "getting-started/body-plan.md" },
+      { "Solve pose for single frame" = "getting-started/single-frame.md" },
+      { "Solve sequences of frames" = "getting-started/sequences.md" },
+      { "From 2D keypoint positions" = "getting-started/from-2d-keypoints.md" },
+    ] },
   { "Benchmarks" = "benchmarks.md" },
-  { "API reference (Rust)" = "api/rust/quickik/index.html" },
-  { "API reference (Python)" = "api/python/quickik.html" },
-  { "API reference (C++)" = "api/cpp/html/index.html" },
+  { "API reference" = [
+      { "Rust (native)" = "api/rust/quickik/index.html" },
+      { "Python bindings" = "api/python/quickik.html" },
+      { "C++ bindings" = "api/cpp/html/index.html" },
+    ] },
 ]
 
 # Not deployed yet -- there is nothing to publish until this is released on
