@@ -24,7 +24,7 @@ active):
 import json
 from pathlib import Path
 
-from plot_comparison import BAR_HEIGHT, despine, format_value, register_fonts
+from plot_comparison import BAR_HEIGHT, G1_COLOR, NEUROMECHFLY_COLOR, despine, format_value, register_fonts
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 BODY = "neuromechfly"
@@ -66,12 +66,12 @@ METRICS = [
     },
 ]
 
-# Fixed display/color order throughout (bars and KDE alike). Colors are the
-# dataviz reference palette's first two categorical slots (blue/orange),
-# validated for all-pairs comparisons -- see scripts/validate_palette.js.
+# Fixed display/color order throughout (bars and KDE alike). Colors reused
+# from plot_comparison.py's own body colors, so the two charts read as one
+# consistent palette rather than introducing a third, unrelated pair.
 OBSERVATIONS = ["3d", "xyview"]
 OBSERVATION_LABELS = {"3d": "3D", "xyview": "XYView"}
-OBSERVATION_COLORS = {"3d": "#2a78d6", "xyview": "#eb6834"}
+OBSERVATION_COLORS = {"3d": NEUROMECHFLY_COLOR, "xyview": G1_COLOR}
 
 TEXT_NUMBER_FONTSIZE = 8
 # 2 touching bars, 3D on top -- same BAR_HEIGHT as plot_comparison.py's own
