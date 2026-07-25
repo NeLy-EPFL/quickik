@@ -6,7 +6,8 @@ fn xyview_drops_z_and_passes_through_xy() {
     let mapper = XYView;
     let jacobian_world3d = DMatrix::from_row_slice(3, 2, &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     let mut jac2d = DMatrix::<f32>::zeros(2, 2);
-    let pos2d = mapper.project_3d_to_2d(&Vector3::new(1.0, 2.0, 3.0), &jacobian_world3d, &mut jac2d);
+    let pos2d =
+        mapper.project_3d_to_2d(&Vector3::new(1.0, 2.0, 3.0), &jacobian_world3d, &mut jac2d);
 
     assert_eq!(pos2d, Vector2::new(1.0, 2.0));
     assert_eq!(jac2d, jacobian_world3d.rows(0, 2).into_owned());
@@ -24,7 +25,8 @@ fn camera_projects_point_directly_in_front_to_principal_point() {
     };
     let jacobian_world3d = DMatrix::<f32>::identity(3, 3);
     let mut jac2d = DMatrix::<f32>::zeros(2, 3);
-    let pos2d = camera.project_3d_to_2d(&Vector3::new(0.0, 0.0, 0.0), &jacobian_world3d, &mut jac2d);
+    let pos2d =
+        camera.project_3d_to_2d(&Vector3::new(0.0, 0.0, 0.0), &jacobian_world3d, &mut jac2d);
 
     assert!((pos2d - Vector2::new(320.0, 240.0)).norm() < 1e-4);
 }
