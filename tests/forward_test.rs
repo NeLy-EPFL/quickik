@@ -187,6 +187,44 @@ fn hinge_then_slide_positions() {
     assert!((workspace.kpt_positions[3] - Vector3::new(1.0, 2.3, 0.0)).norm() < 1e-5);
 }
 
+/// On a fixed-base tree, the root contributes no state at all, so a
+/// keypoint's active indices are just its ancestors' own DOFs (never a
+/// leading `0..N_ROOT_DOFS` block, unlike the free-floating case in
+/// `active_indices_track_ancestor_dofs_not_own_dof` above).
+#[test]
+fn fixed_base_tree_has_no_root_dofs_in_active_indices() {
+    let tree = common::fixed_base_two_joint_chain();
+    let state = State::neutral_pose(tree.clone());
+    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut workspace, &state);
+
+    assert_eq!(workspace.relevant_dof_idxs_by_joint[0], Vec::<usize>::new());
+    assert_eq!(workspace.relevant_dof_idxs_by_joint[1], Vec::<usize>::new());
+    assert_eq!(workspace.relevant_dof_idxs_by_joint[2], vec![0]);
+    assert_eq!(workspace.relevant_dof_idxs_by_joint[3], vec![0, 1]);
+}
+
+/// A fixed-base tree's keypoints move exactly like its free-floating
+/// counterpart's when the root state is left at `neutral_pose`'s default
+/// (zero position, identity rotation) -- `fixed_base` only removes the
+/// root's own state variables, it doesn't change where the root sits.
+#[test]
+fn fixed_base_tree_neutral_pose_matches_free_floating_counterpart() {
+    let tree = common::fixed_base_two_joint_chain();
+    let state = State::neutral_pose(tree.clone());
+    let mut workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut workspace, &state);
+
+    assert!((workspace.kpt_positions[0] - Vector3::new(0.0, 0.0, 0.0)).norm() < 1e-6);
+    assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
+    assert!((workspace.kpt_positions[2] - Vector3::new(2.0, 0.0, 0.0)).norm() < 1e-6);
+}
+
+#[test]
+fn jacobian_matches_finite_differences_fixed_base() {
+    assert_jacobian_matches_finite_differences(&common::fixed_base_two_joint_chain(), &[0.3, -0.2]);
+}
+
 /// Hand-derived expected position and Jacobian for a single joint carrying a
 /// hinge DOF then a slide DOF, at theta = pi/2, d = 0.5:
 /// tip = (1 + (d+1) cos(theta), (d+1) sin(theta), 0) = (1, 1.5, 0);

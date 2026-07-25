@@ -2,7 +2,7 @@
 
 use nalgebra::{DMatrix, DVector, Vector3};
 
-use crate::body_plan::{KinematicTree, N_ROOT_DOFS};
+use crate::body_plan::KinematicTree;
 use crate::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
 use crate::state::State;
@@ -65,6 +65,10 @@ impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
 /// [`Position2D`]: crate::observation::KeypointObservation::Position2D
 pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     workspace: ForwardKinematicsWorkspace,
+    /// Cached from the kinematic tree at construction time: `0` for a
+    /// fixed-base tree, [`N_ROOT_DOFS`](crate::body_plan::N_ROOT_DOFS)
+    /// otherwise.
+    n_root_dofs: usize,
     neutral_joint_angles: Vec<f32>,
     /// Per-DOF [`Dof::weight_scaler`](crate::body_plan::Dof::weight_scaler),
     /// same indexing as `neutral_joint_angles`.
@@ -103,6 +107,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         let state_dim = kinematic_tree.state_dim();
         Self {
             workspace: ForwardKinematicsWorkspace::new(kinematic_tree),
+            n_root_dofs: kinematic_tree.n_root_dofs(),
             neutral_joint_angles,
             dof_weight_scalers,
             joint_weight_scalers,
@@ -217,14 +222,17 @@ impl<M: Mapper3Dto2D> Solver<M> {
     }
 
     fn has_converged(&self, delta: &DVector<f32>) -> bool {
-        // Positions: delta[0..3] is root position
+        // Positions: delta[0..n_root_position_dofs] is root position -- empty
+        // for a fixed-base tree (n_root_dofs == 0), since it has no root
+        // position state at all.
+        let n_root_position_dofs = self.n_root_dofs.min(3);
         let max_abs_position_delta = delta
-            .rows(0, 3)
+            .rows(0, n_root_position_dofs)
             .iter()
             .fold(0.0f32, |acc, &x| acc.max(x.abs()));
-        // Angles: delta[3..6] is root rotation, the rest are DOF angles
+        // Angles: the rest -- root rotation (if any) plus every DOF angle.
         let max_abs_angle_delta = delta
-            .rows(3, delta.len() - 3)
+            .rows(n_root_position_dofs, delta.len() - n_root_position_dofs)
             .iter()
             .fold(0.0f32, |acc, &x| acc.max(x.abs()));
         max_abs_position_delta <= self.config.position_tolerance
@@ -299,6 +307,7 @@ fn accumulate_neutral_pose_prior(
     if weight == 0.0 {
         return;
     }
+    let n_root_dofs = state.kinematic_tree.n_root_dofs();
     for (i, ((&curr_angle, &neutral_angle), &dof_weight_scaler)) in (state.dof_angles)
         .iter()
         .zip(neutral_joint_angles)
@@ -306,7 +315,7 @@ fn accumulate_neutral_pose_prior(
         .enumerate()
     {
         let weight = weight * dof_weight_scaler;
-        let state_idx = N_ROOT_DOFS + i;
+        let state_idx = n_root_dofs + i;
         jtj[(state_idx, state_idx)] += weight; // only contributor is self
         jtr[state_idx] += weight * (neutral_angle - curr_angle);
     }

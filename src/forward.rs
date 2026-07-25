@@ -3,7 +3,7 @@
 
 use nalgebra::{DMatrix, Unit, UnitQuaternion, Vector3};
 
-use crate::body_plan::{DofType, Joint, KinematicTree, N_ROOT_DOFS};
+use crate::body_plan::{DofType, Joint, KinematicTree};
 use crate::state::State;
 
 #[derive(Clone, Copy, Debug)]
@@ -14,7 +14,8 @@ struct Frame {
 
 /// A record of a single DOF's current configuration.
 struct DofRecord {
-    /// DOF's flat index in the state vector, starting from 6
+    /// DOF's flat index in the state vector, starting from the tree's
+    /// [`n_root_dofs`](crate::body_plan::KinematicTree::n_root_dofs)
     state_idx: usize,
     /// Hinge or slide.
     dof_type: DofType,
@@ -106,9 +107,11 @@ fn traverse_dfs(
         &workspace.dof_records[..n_records_before],
     );
 
-    // Record which DOFs can affect this keypoint. Root pos/rot affect all.
+    // Record which DOFs can affect this keypoint. Root pos/rot (if any --
+    // empty for a fixed-base tree) affect all.
     workspace.relevant_dof_idxs_by_joint[curr_joint_idx].clear();
-    workspace.relevant_dof_idxs_by_joint[curr_joint_idx].extend(0..N_ROOT_DOFS);
+    workspace.relevant_dof_idxs_by_joint[curr_joint_idx]
+        .extend(0..state.kinematic_tree.n_root_dofs());
     for i in 0..n_records_before {
         let state_idx = workspace.dof_records[i].state_idx;
         workspace.relevant_dof_idxs_by_joint[curr_joint_idx].push(state_idx);
@@ -138,13 +141,14 @@ fn evaluate_frame_at_joint(
     let own_origin = parent_frame.origin + parent_frame.rotation * joint.offset_pos;
     let mut rotation = parent_frame.rotation * joint.offset_quat;
     let mut origin_for_children = own_origin;
+    let n_root_dofs = state.kinematic_tree.n_root_dofs();
 
     // ... then apply the joint's own DOFs
     for (i, dof) in joint.dofs.iter().enumerate() {
         let axis_local = dof.axis;
         let axis_world = rotation * axis_local;
         let record = DofRecord {
-            state_idx: N_ROOT_DOFS + joint.dof_offset + i,
+            state_idx: n_root_dofs + joint.dof_offset + i,
             dof_type: dof.dof_type,
             axis_world,
             origin_world: origin_for_children,
@@ -184,23 +188,27 @@ fn write_keypoint_jacobian(
     let row1: usize = row0 + 1;
     let row2: usize = row0 + 2;
 
-    // Root translation (state cols 0..3):
-    // Moving the root moves every keypoint by the same amount
-    jacobian[(row0, 0)] = 1.0;
-    jacobian[(row1, 1)] = 1.0;
-    jacobian[(row2, 2)] = 1.0;
+    // A fixed-base tree's root isn't a state variable at all, so it
+    // contributes no Jacobian columns.
+    if state.kinematic_tree.n_root_dofs() > 0 {
+        // Root translation (state cols 0..3):
+        // Moving the root moves every keypoint by the same amount
+        jacobian[(row0, 0)] = 1.0;
+        jacobian[(row1, 1)] = 1.0;
+        jacobian[(row2, 2)] = 1.0;
 
-    // Root rotation (state cols 3..6):
-    // Rotate about the root's current position
-    let radius = pos - state.root_pos;
-    for (i, axis) in [Vector3::x(), Vector3::y(), Vector3::z()]
-        .iter()
-        .enumerate()
-    {
-        let d = axis.cross(&radius);
-        jacobian[(row0, 3 + i)] = d.x;
-        jacobian[(row1, 3 + i)] = d.y;
-        jacobian[(row2, 3 + i)] = d.z;
+        // Root rotation (state cols 3..6):
+        // Rotate about the root's current position
+        let radius = pos - state.root_pos;
+        for (i, axis) in [Vector3::x(), Vector3::y(), Vector3::z()]
+            .iter()
+            .enumerate()
+        {
+            let d = axis.cross(&radius);
+            jacobian[(row0, 3 + i)] = d.x;
+            jacobian[(row1, 3 + i)] = d.y;
+            jacobian[(row2, 3 + i)] = d.z;
+        }
     }
 
     // Upstream joint dofs. Note that each keypoint is only affected by a few

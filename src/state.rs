@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use nalgebra::{DVector, UnitQuaternion, Vector3};
 
-use crate::body_plan::{KinematicTree, N_ROOT_DOFS};
+use crate::body_plan::KinematicTree;
 use crate::utils::unit_quat_from_axis_angle_vec;
 
 /// The pose being solved for.
@@ -46,16 +46,19 @@ impl State {
     pub fn apply_delta(&mut self, delta: &DVector<f32>) {
         debug_assert_eq!(delta.len(), self.state_dim());
 
-        // Root state
-        let d_root_pos = Vector3::new(delta[0], delta[1], delta[2]);
-        self.root_pos += d_root_pos;
-        let d_root_rot = Vector3::new(delta[3], delta[4], delta[5]);
-        self.root_rot = unit_quat_from_axis_angle_vec(d_root_rot) * self.root_rot;
+        // Root state -- absent (0 columns) for a fixed-base tree.
+        let n_root_dofs = self.kinematic_tree.n_root_dofs();
+        if n_root_dofs > 0 {
+            let d_root_pos = Vector3::new(delta[0], delta[1], delta[2]);
+            self.root_pos += d_root_pos;
+            let d_root_rot = Vector3::new(delta[3], delta[4], delta[5]);
+            self.root_rot = unit_quat_from_axis_angle_vec(d_root_rot) * self.root_rot;
+        }
 
         // Body DOF state, clamped to each DOF's angle limits (if any)
         let dofs = self.kinematic_tree.joints.iter().flat_map(|j| &j.dofs);
         for (i, (angle, dof)) in self.dof_angles.iter_mut().zip(dofs).enumerate() {
-            *angle += delta[N_ROOT_DOFS + i];
+            *angle += delta[n_root_dofs + i];
             if let Some([min, max]) = dof.limits {
                 *angle = angle.clamp(min, max);
             }
