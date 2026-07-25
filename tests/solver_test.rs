@@ -46,6 +46,38 @@ fn recovers_pose_from_3d_observations() {
     assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
 }
 
+/// A fixed-base tree's root has no state to fit, so the solver should recover
+/// the same DOF angles as the free-floating case above while leaving
+/// `root_pos`/`root_rot` untouched at their `neutral_pose` default.
+#[test]
+fn recovers_pose_on_fixed_base_tree_without_moving_root() {
+    let tree = common::fixed_base_two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            weight: 0.0,
+            ..SolverConfig::default()
+        },
+    );
+    solver.solve(&mut state, &observations);
+
+    assert!((state.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert_eq!(state.root_pos, Vector3::zeros());
+    assert_eq!(state.root_rot, nalgebra::UnitQuaternion::identity());
+}
+
 #[test]
 fn recovers_pose_with_slide_dof_from_3d_observations() {
     let tree = common::hinge_then_slide_chain();
@@ -278,6 +310,7 @@ fn joint_weight_scaler_zero_matches_missing_observation() {
     let zero_weight_tree = std::sync::Arc::new(quickik::body_plan::KinematicTree {
         joints: zero_weight_joints,
         root_idx: tree.root_idx,
+        fixed_base: tree.fixed_base,
     });
 
     let tip_target = keypoints_at(&tree, &[0.4, 0.3])[3];
@@ -323,6 +356,7 @@ fn dof_weight_scaler_zero_recovers_exact_target_despite_nonzero_global_neutral_w
     let zero_weight_tree = std::sync::Arc::new(quickik::body_plan::KinematicTree {
         joints,
         root_idx: tree.root_idx,
+        fixed_base: tree.fixed_base,
     });
 
     let target_positions = keypoints_at(&tree, &[0.4, 0.3]);

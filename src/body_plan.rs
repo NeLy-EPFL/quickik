@@ -11,7 +11,9 @@ use crate::utils::quat_from_wxyz;
 //  Data structures for the actual algorithm
 // =============================================================================
 
-pub const N_ROOT_DOFS: usize = 6; // 3 for root position, 3 for root rotation
+/// DOFs of a free-floating root: 3 for position, 3 for rotation. See
+/// [`KinematicTree::n_root_dofs`], which is `0` instead for a fixed-base tree.
+pub const N_ROOT_DOFS: usize = 6;
 
 /// Whether a [`Dof`] is a hinge (rotational) or slide (translational) DOF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -61,8 +63,9 @@ pub struct Joint {
     /// consistent with MoCap data.
     pub dofs: Vec<Dof>,
     /// Index of the parent joint in the body plan. Should be `None` for the
-    /// root joint, which is attached to an imaginary floating base
-    /// (i.e. connected to the world with a free joint).
+    /// root joint, which is attached to the world -- either via an imaginary
+    /// free joint (floating base), or fixed in place if the tree's
+    /// [`fixed_base`](KinematicTree::fixed_base) is set.
     pub parent: Option<usize>,
     /// Indices of this joint's direct children. Populated by
     // `KinematicTree::new`. Redundant with `parent` but useful as a cache.
@@ -85,18 +88,44 @@ pub struct KinematicTree {
     pub joints: Vec<Joint>,
     /// Index of the root joint in `joints`. Should usually be 0.
     pub root_idx: usize,
+    /// Whether the root is fixed in the world (e.g. a robot arm bolted to a
+    /// table) rather than a free-floating base with its own `N_ROOT_DOFS`.
+    ///
+    /// A semi-fixed base -- one that only slides along a rail or spins on a
+    /// turntable -- isn't modeled by this flag. Instead, keep `fixed_base`
+    /// set and give the root a zero-offset child joint carrying the one
+    /// hinge/slide DOF the base actually has, then attach the rest of the
+    /// body to that joint: since a joint's own DOF only moves its
+    /// descendants (never its own keypoint), this joint acts as exactly that
+    /// one-DOF base, and -- unlike the root's own DOFs -- it gets `limits`
+    /// and `weight_scaler` like any other DOF.
+    pub fixed_base: bool,
 }
 
 impl KinematicTree {
-    /// Construct a tree directly from parsed `joints` and a `root_idx`,
-    /// populating each joint's `children` from `parent`.
-    pub fn new(mut joints: Vec<Joint>, root_idx: usize) -> Self {
+    /// Construct a free-floating-base tree directly from parsed `joints` and
+    /// a `root_idx`, populating each joint's `children` from `parent`.
+    pub fn new(joints: Vec<Joint>, root_idx: usize) -> Self {
+        Self::new_impl(joints, root_idx, false)
+    }
+
+    /// Same as [`new`](Self::new), but the root is fixed in the world --
+    /// see [`fixed_base`](Self::fixed_base).
+    pub fn new_fixed_base(joints: Vec<Joint>, root_idx: usize) -> Self {
+        Self::new_impl(joints, root_idx, true)
+    }
+
+    fn new_impl(mut joints: Vec<Joint>, root_idx: usize, fixed_base: bool) -> Self {
         for i in 0..joints.len() {
             if let Some(parent_idx) = joints[i].parent {
                 joints[parent_idx].children.push(i);
             }
         }
-        Self { joints, root_idx }
+        Self {
+            joints,
+            root_idx,
+            fixed_base,
+        }
     }
 
     pub fn n_joints(&self) -> usize {
@@ -107,9 +136,14 @@ impl KinematicTree {
         self.joints.iter().map(|joint| joint.dofs.len()).sum()
     }
 
+    /// Number of free root DOFs: `N_ROOT_DOFS` for a free-floating base, or
+    /// `0` if [`fixed_base`](Self::fixed_base) is set.
+    pub fn n_root_dofs(&self) -> usize {
+        if self.fixed_base { 0 } else { N_ROOT_DOFS }
+    }
+
     pub fn state_dim(&self) -> usize {
-        // 3 for root position, 3 for root rotation, plus DOFs on the body
-        N_ROOT_DOFS + self.n_dofs()
+        self.n_root_dofs() + self.n_dofs()
     }
 
     /// Return indices of the direct children of the joint at the given index
@@ -149,7 +183,7 @@ impl KinematicTree {
             joints.push(joint);
             curr_dof_offset += n_dofs;
         }
-        Self::new(joints, root_idx)
+        Self::new_impl(joints, root_idx, body.fixed_base)
     }
 
     pub fn from_json_str(json_str: &str) -> Self {
@@ -179,6 +213,9 @@ impl KinematicTree {
 /// The "metadata" field in the JSON is ignored (it's for JSON self-documentation only).
 #[derive(Deserialize)]
 struct BodyPlanSpec {
+    /// See [`KinematicTree::fixed_base`]. Optional, defaults to `false`.
+    #[serde(default)]
+    fixed_base: bool,
     joints: Vec<JointSpec>,
 }
 

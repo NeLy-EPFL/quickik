@@ -1,4 +1,4 @@
-use quickik::body_plan::{DofType, KinematicTree};
+use quickik::body_plan::{DofType, KinematicTree, N_ROOT_DOFS};
 
 fn valid_body_json() -> &'static str {
     r#"{
@@ -140,6 +140,31 @@ fn parses_slide_dofs() {
     assert_eq!(dof.limits, Some([-1.0, 1.0]));
     // Non-unit axes are normalized once at parse time, same as hinge DOFs.
     assert!((dof.axis - nalgebra::Vector3::new(0.0, 0.0, 1.0)).norm() < 1e-6);
+}
+
+#[test]
+fn fixed_base_defaults_to_false_and_keeps_all_root_dofs() {
+    let tree = KinematicTree::from_json_str(valid_body_json());
+    assert!(!tree.fixed_base);
+    assert_eq!(tree.n_root_dofs(), N_ROOT_DOFS);
+    assert_eq!(tree.state_dim(), N_ROOT_DOFS + tree.n_dofs());
+}
+
+#[test]
+fn fixed_base_true_excludes_root_dofs_from_state_dim() {
+    let json = r#"{
+        "fixed_base": true,
+        "joints": [
+            {"name": "root", "parent": null, "offset_pos": [0,0,0], "offset_quat": [1,0,0,0], "dofs": []},
+            {"name": "a", "parent": "root", "offset_pos": [1,0,0], "offset_quat": [1,0,0,0],
+             "dofs": [{"axis": [0,0,1], "type": "hinge", "neutral": 0.0, "limits": null}]}
+        ]
+    }"#;
+    let tree = KinematicTree::from_json_str(json);
+
+    assert!(tree.fixed_base);
+    assert_eq!(tree.n_root_dofs(), 0);
+    assert_eq!(tree.state_dim(), tree.n_dofs());
 }
 
 #[test]

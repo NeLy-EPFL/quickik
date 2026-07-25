@@ -6,9 +6,12 @@ A body plan describes the kinematic tree QuickIK solves against – a robot's jo
 
 One modeling consequence worth knowing: a joint's own DOF reorients its *children*, not itself – rotating a joint never moves its own keypoint, only the keypoints downstream of it. So every DOF needs at least one keypoint further down its own chain to be observable at all; a chain that ends exactly at its last DOF-bearing joint, with nothing past it, leaves that DOF's angle undetermined by any observation. This is why even a fixed, 0-DOF "tip" joint (a fingertip, a fly's claw, a robot's end effector) is usually worth keeping in the body plan even though it never actuates anything itself.
 
+By default the root is a free-floating base with its own 6 DOFs (position and rotation), solved for like everything else – this fits a tracked animal or a robot free to move through the world. Setting the top-level `"fixed_base": true` instead anchors the root in place (e.g. a robot arm bolted to a table), removing those 6 DOFs from the state entirely. A *semi*-fixed base – one that only slides along a rail or spins on a turntable – isn't a separate setting: keep `fixed_base` set and give the root a zero-offset child joint carrying that one hinge/slide DOF, then attach the rest of the body to that joint instead of directly to the root. Because a joint's own DOF only moves its descendants (see above), this joint acts as exactly that one-DOF base – and unlike the root's own DOFs, it gets `limits` and `weight_scaler` like any other DOF.
+
 ??? note "Body plan JSON schema"
     ```json
     {
+      "fixed_base": false,
       "joints": [
         {
           "name": "root",
@@ -46,6 +49,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
     }
     ```
 
+    - `fixed_base`: whether the root is fixed in the world rather than a free-floating base. Optional, defaults to `false`.
     - `parent`: joint name, or `null` for the root.
     - `offset_pos`/`offset_quat`: this joint's offset from its parent.
     - `weight_scaler`: multiplied together with each frame's `KeypointObservation`'s `weight` for this joint's keypoint. Optional, defaults to `1.0`.
@@ -60,7 +64,7 @@ One modeling consequence worth knowing: a joint's own DOF reorients its *childre
 
 ## Inverse kinematics on a single frame
 
-QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObservation` per keypoint – `Missing`, `Position3D`, or `Position2D` (see [below](#keypoint-positions-observed-in-2d)) – in `kinematic_tree.joints` order, and jointly fits the free-floating root pose and every joint angle at once against all of them. This is what makes it different from solving each limb as its own small IK problem: a keypoint on one limb can still help constrain the root pose (and therefore every other limb) even if that other limb's own keypoints are all `Missing` this frame.
+QuickIK solves *whole-tree* IK: one `Solver::solve` call takes one `KeypointObservation` per keypoint – `Missing`, `Position3D`, or `Position2D` (see [below](#keypoint-positions-observed-in-2d)) – in `kinematic_tree.joints` order, and jointly fits every joint angle at once against all of them – plus the root pose too, unless the body plan's root is [fixed](#body-plan). This is what makes it different from solving each limb as its own small IK problem: a keypoint on one limb can still help constrain the root pose (and therefore every other limb) even if that other limb's own keypoints are all `Missing` this frame.
 
 === "Rust"
 

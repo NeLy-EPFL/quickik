@@ -38,3 +38,22 @@ fn apply_delta_updates_root_position_and_rotation() {
 
     assert!((state.root_pos - nalgebra::Vector3::new(1.0, 2.0, 3.0)).norm() < 1e-6);
 }
+
+/// On a fixed-base tree, `delta` has no root columns at all -- index 0 is
+/// already the first DOF -- and `apply_delta` must never touch `root_pos`/
+/// `root_rot`, which stay at `neutral_pose`'s default.
+#[test]
+fn apply_delta_on_fixed_base_tree_never_touches_root() {
+    let tree = common::fixed_base_two_joint_chain();
+    let mut state = State::neutral_pose(tree.clone());
+
+    let mut delta = DVector::zeros(state.state_dim());
+    delta[0] = 10.0; // joint1 (unbounded)
+    delta[1] = 10.0; // joint2 (limited to [-0.5, 0.5])
+    state.apply_delta(&delta);
+
+    assert!((state.dof_angles[0] - 10.0).abs() < 1e-6);
+    assert!((state.dof_angles[1] - 0.5).abs() < 1e-6);
+    assert_eq!(state.root_pos, nalgebra::Vector3::zeros());
+    assert_eq!(state.root_rot, nalgebra::UnitQuaternion::identity());
+}
