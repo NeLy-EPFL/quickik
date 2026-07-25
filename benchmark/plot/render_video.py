@@ -73,7 +73,15 @@ BODIES = {
         "padding": 1.02,
         "up_reference": None,
         "missing_keypoints": [],
-        "weight": None,  # library default (SolverConfig's own)
+        # 10x SolverConfig's own default (1e-3), matching G1's own weight
+        # below and render_video_2d.WEIGHT_2D_XYVIEW -- same magnitude for
+        # consistency across all three fits in this file/its companion.
+        "weight": 0.01,
+        # The root ("thorax") only fans out to each leg's first joint; drawing
+        # those 6 bones makes the thorax look like it has long spokes running
+        # to each coxa, which reads as anatomy that isn't there -- the thorax
+        # itself has no visible extent in this body plan to justify it.
+        "hide_root_bones": True,
     },
     "g1": {
         "body_plan": "g1_body_plan.json",
@@ -171,6 +179,9 @@ def load_body(name):
     # (parent, child) node-name pairs to draw as bones -- every joint except
     # the root, which has no parent of its own.
     edges = [(j["parent"], j["name"]) for j in joints if j["parent"] is not None]
+    if cfg.get("hide_root_bones"):
+        root_name = next(j["name"] for j in joints if j["parent"] is None)
+        edges = [(parent, child) for parent, child in edges if parent != root_name]
     return cfg, joints, dof_offsets, tree, fixtures, edges
 
 
@@ -371,8 +382,9 @@ def setup_panel(ax, body, show_legend):
         ax.legend(handles=[mocap_handle, fit_handle], loc="upper left", frameon=False)
     # text2D pins this to the axes' own 2D display space (top right corner),
     # unaffected by the 3D view/rotation -- unlike ax.text, which would place
-    # it at a fixed *data* point instead.
-    ax.text2D(
+    # it at a fixed *data* point instead. Returned so render_comparison can
+    # hide it just for the static frame export.
+    speed_text = ax.text2D(
         0.98,
         0.98,
         f"{cfg['playback_speed']:g}x speed",
@@ -380,7 +392,7 @@ def setup_panel(ax, body, show_legend):
         ha="right",
         va="top",
     )
-    return mocap_scatter, fit_scatter, fit_bones
+    return mocap_scatter, fit_scatter, fit_bones, speed_text
 
 
 def render_comparison():
@@ -409,18 +421,31 @@ def render_comparison():
     def update(k):
         t = k / output_fps
         artists = []
-        for (mocap_scatter, fit_scatter, fit_bones), body in zip(
+        for (mocap_scatter, fit_scatter, fit_bones, speed_text), body in zip(
             panels, bodies, strict=True
         ):
             idx = min(int(t * body["display_fps"]), body["n_frames"] - 1)
             mocap_scatter._offsets3d = tuple(body["mocap_frames"][idx].T)
             fit_scatter._offsets3d = tuple(body["fitted_frames"][idx].T)
             fit_bones.set_segments(body["fitted_bones"][idx])
-            artists += [mocap_scatter, fit_scatter, fit_bones]
+            artists += [mocap_scatter, fit_scatter, fit_bones, speed_text]
         return artists
 
-    anim = animation.FuncAnimation(fig, update, frames=total_output_frames, blit=False)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # A static SVG of frame 0 -- scatters start out empty (see setup_panel),
+    # so this needs one update() call before saving, unlike the bones (already
+    # seeded with frame 0 to satisfy add_collection3d; see its own comment).
+    # The speed labels are hidden just for this export, then restored so the
+    # mp4 animation (built from the same figure/artists below) still shows
+    # them.
+    update(0)
+    for _mocap_scatter, _fit_scatter, _fit_bones, speed_text in panels:
+        speed_text.set_visible(False)
+    fig.savefig(OUT_DIR / "example_clips_frame0.svg")
+    for _mocap_scatter, _fit_scatter, _fit_bones, speed_text in panels:
+        speed_text.set_visible(True)
+
+    anim = animation.FuncAnimation(fig, update, frames=total_output_frames, blit=False)
     out_path = OUT_DIR / "example_clips.mp4"
     # matplotlib's default FFMpegWriter settings pick a fairly high (lossy)
     # compression ratio, which shows up as blur/ringing around sharp edges
