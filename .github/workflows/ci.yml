@@ -52,10 +52,14 @@ jobs:
       - run: cd python && maturin develop --release
       - run: pytest python/tests/
 
-  python-lint:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
       - uses: astral-sh/setup-uv@v7
       - run: cd devtools-pyenv && uv sync
       # ruff.toml at the root covers python/tests/, benchmark/, and

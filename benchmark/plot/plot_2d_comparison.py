@@ -24,7 +24,14 @@ active):
 import json
 from pathlib import Path
 
-from plot_comparison import BAR_HEIGHT, G1_COLOR, NEUROMECHFLY_COLOR, despine, format_value, register_fonts
+from plot_comparison import (
+    BAR_HEIGHT,
+    G1_COLOR,
+    NEUROMECHFLY_COLOR,
+    despine,
+    format_value,
+    register_fonts,
+)
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 BODY = "neuromechfly"

@@ -185,7 +185,12 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
     let single_frame_latency = summarize(
         "solve()",
-        bench_single_frame_latency(tree, &target_obs, 10_000, SolverConfig::<NoMapper>::default()),
+        bench_single_frame_latency(
+            tree,
+            &target_obs,
+            10_000,
+            SolverConfig::<NoMapper>::default(),
+        ),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
@@ -289,7 +294,10 @@ fn tiled_native_rate_sequence_2d(
 /// `../plot/results/quickik-rust-2d-xyview-<body>.json` for
 /// `../plot/plot_2d_comparison.py` to pick up.
 pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
-    println!("quickik Rust benchmark, 2D via XYView (state_dim={})\n", tree.state_dim());
+    println!(
+        "quickik Rust benchmark, 2D via XYView (state_dim={})\n",
+        tree.state_dim()
+    );
 
     let target_obs = observations_2d_xyview(&fixtures.synthetic_frames[0].target_ego);
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
@@ -323,9 +331,7 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         bench_single_frame_latency(tree, &target_obs, 10_000, max_iterations_config),
     );
 
-    println!(
-        "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
-    );
+    println!("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --");
     let single_thread_sequence = tiled_native_rate_sequence_2d(
         &fixtures.native_rate_frames,
         SINGLE_THREAD_N_FRAMES,
