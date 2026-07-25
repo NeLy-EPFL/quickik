@@ -17,6 +17,7 @@ docs/installation.md):
 """
 
 import math
+import time
 
 import numpy as np
 import pytest
@@ -130,6 +131,39 @@ def test_recovers_pose_from_camera_observations(tree):
 
     assert state.dof_angles[0] == pytest.approx(0.2, abs=1e-3)
     assert state.dof_angles[1] == pytest.approx(0.15, abs=1e-3)
+
+
+def test_xyview_latency_not_much_worse_than_3d(tree):
+    """Sanity check, not a benchmark (see benchmark/ for real numbers):
+    XYView's per-keypoint sparse-accumulation path (solver.rs's Position2D
+    branch) shouldn't be dramatically slower than the Position3D path it
+    mirrors. A generous factor -- this only needs to catch a gross
+    regression (e.g. an accidental per-call allocation creeping back in),
+    not assert precise parity, since single-frame timing on this tiny
+    fixture is dominated by Python/FFI call overhead common to both paths."""
+
+    def mean_solve_seconds(observations, mapper=None):
+        solver = quickik.Solver(tree, quickik.SolverConfig(), mapper)
+        state = quickik.State.neutral_pose(tree)
+        solver.solve(state, observations)  # warm up
+
+        n = 2000
+        t0 = time.perf_counter()
+        for _ in range(n):
+            state = quickik.State.neutral_pose(tree)
+            solver.solve(state, observations)
+        return (time.perf_counter() - t0) / n
+
+    positions = two_link_positions(0.4, 0.3)
+    observations_3d = observations_for(0.4, 0.3)
+    observations_2d = [
+        quickik.KeypointObservation.position_2d([p[0], p[1]], 1.0) for p in positions
+    ]
+
+    t_3d = mean_solve_seconds(observations_3d)
+    t_2d = mean_solve_seconds(observations_2d, mapper=quickik.XYView())
+
+    assert t_2d < t_3d * 5
 
 
 def test_missing_observations_leave_state_at_neutral_prior(tree):

@@ -121,5 +121,11 @@ echo; echo "-- QuickIK scaling sweep (Rust, thread count) --"
 echo; echo "== Aggregating results into charts =="
 "$DEVTOOLS_VENV/bin/python" "$REPO_ROOT/benchmark/plot/plot_comparison.py"
 "$DEVTOOLS_VENV/bin/python" "$REPO_ROOT/benchmark/plot/plot_scaling.py"
+# 2D (XYView) vs. 3D, QuickIK's Rust benchmark only -- see plot_2d_comparison.py's
+# own module docstring for why (2D observations are a QuickIK-only feature, and
+# Python/C++ only carry a perf sanity test for it, not a full benchmark). Its
+# input JSONs (quickik-rust-2d-xyview-neuromechfly.json, errors-neuromechfly.json)
+# are already written above by the QuickIK (Rust) run.
+"$DEVTOOLS_VENV/bin/python" "$REPO_ROOT/benchmark/plot/plot_2d_comparison.py"
 
 echo; echo "Done. Results under benchmark/plot/results/, charts regenerated."

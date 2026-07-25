@@ -13,6 +13,7 @@
 // printing a message and returning false on the first failed CHECK.
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -173,6 +174,48 @@ bool test_recovers_pose_from_camera_observations() {
   if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
   CHECK(std::abs(angles[0] - 0.2f) < 1e-3f);
   CHECK(std::abs(angles[1] - 0.15f) < 1e-3f);
+#undef CHECK
+  return ok;
+}
+
+// Sanity check, not a benchmark (see benchmark/ for real numbers): XYView's
+// per-keypoint sparse-accumulation path (solver.rs's Position2D branch)
+// shouldn't be dramatically slower than the Position3D path it mirrors. A
+// generous factor -- this only needs to catch a gross regression (e.g. an
+// accidental per-call allocation creeping back in), not assert precise
+// parity, since single-frame timing on this tiny fixture is dominated by
+// FFI call overhead common to both paths.
+double mean_solve_seconds(rust::Box<quickik::KinematicTree> &tree,
+                           const std::vector<quickik::KeypointObservation> &observations, quickik::Mapper mapper) {
+  auto solver = quickik::new_solver(*tree, quickik::default_solver_config(), mapper);
+  auto warm_state = quickik::state_neutral_pose(*tree);
+  solver->solve(*warm_state, slice_of(observations));  // warm up
+
+  constexpr int kNCalls = 2000;
+  auto t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < kNCalls; i++) {
+    auto state = quickik::state_neutral_pose(*tree);
+    solver->solve(*state, slice_of(observations));
+  }
+  auto elapsed = std::chrono::steady_clock::now() - t0;
+  return std::chrono::duration<double>(elapsed).count() / kNCalls;
+}
+
+bool test_xyview_latency_not_much_worse_than_3d() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto positions = two_link_positions(0.4f, 0.3f);
+
+  auto observations_3d = observations_for(0.4f, 0.3f);
+  std::vector<quickik::KeypointObservation> observations_2d;
+  for (auto &pos : positions) observations_2d.push_back(quickik::keypoint_position_2d({pos[0], pos[1]}, 1.0f));
+
+  double t_3d = mean_solve_seconds(tree, observations_3d, quickik::no_mapper());
+  double t_2d = mean_solve_seconds(tree, observations_2d, quickik::xyview_mapper());
+
+#define CHECK(cond) \
+  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
+  CHECK(t_2d < t_3d * 5);
 #undef CHECK
   return ok;
 }
@@ -369,6 +412,7 @@ int main() {
       {"recovers_pose_from_3d_observations", test_recovers_pose_from_3d_observations},
       {"recovers_pose_from_xyview_observations", test_recovers_pose_from_xyview_observations},
       {"recovers_pose_from_camera_observations", test_recovers_pose_from_camera_observations},
+      {"xyview_latency_not_much_worse_than_3d", test_xyview_latency_not_much_worse_than_3d},
       {"missing_observations_leave_state_at_neutral_prior", test_missing_observations_leave_state_at_neutral_prior},
       {"config_can_be_tuned_between_solve_calls", test_config_can_be_tuned_between_solve_calls},
       {"solve_respects_joint_limits", test_solve_respects_joint_limits},

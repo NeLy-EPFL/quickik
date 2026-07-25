@@ -12,13 +12,13 @@ use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
 use quickik::high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
-use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
+use quickik::observation::{KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
 
 use crate::correctness::build_observations;
 use crate::fixtures::{Fixtures, NativeRateFrame};
-use crate::twod::{observations_2d_camera, observations_2d_xyview};
+use crate::twod::observations_2d_xyview;
 
 /// Frames per segment/thread for both the multi-thread throughput benchmark
 /// and `quickik_scaling`'s weak-scaling sweep.
@@ -285,35 +285,13 @@ fn tiled_native_rate_sequence_2d(
 }
 
 /// Runs the same latency/throughput suite as [`run_all`], but every
-/// observation is `to_2d`'s projection of the fixture's usual 3D target --
-/// for both a synthetic pinhole [`Camera`] and the trivial [`XYView`].
-/// Writes `../plot/results/quickik-rust-2d-<camera|xyview>-<body>.json` for
+/// observation is its fixture target reprojected through [`XYView`]. Writes
+/// `../plot/results/quickik-rust-2d-xyview-<body>.json` for
 /// `../plot/plot_2d_comparison.py` to pick up.
-pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str, camera: Camera) {
-    run_all_2d_for_mapper(tree, fixtures, body, "camera", camera, "Camera", |t| {
-        observations_2d_camera(t, &camera)
-    });
-    run_all_2d_for_mapper(tree, fixtures, body, "xyview", XYView, "XYView", |t| {
-        observations_2d_xyview(t)
-    });
-}
+pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
+    println!("quickik Rust benchmark, 2D via XYView (state_dim={})\n", tree.state_dim());
 
-#[allow(clippy::too_many_arguments)]
-fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
-    tree: &Arc<KinematicTree>,
-    fixtures: &Fixtures,
-    body: &str,
-    observation: &str,
-    mapper: M,
-    label: &str,
-    to_2d: impl Fn(&[[f32; 3]]) -> Vec<KeypointObservation>,
-) {
-    println!(
-        "quickik Rust benchmark, 2D via {label} (state_dim={})\n",
-        tree.state_dim()
-    );
-
-    let target_obs = to_2d(&fixtures.synthetic_frames[0].target_ego);
+    let target_obs = observations_2d_xyview(&fixtures.synthetic_frames[0].target_ego);
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
     let single_frame_latency = summarize(
         "solve()",
@@ -322,7 +300,7 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
             &target_obs,
             10_000,
             SolverConfig {
-                mapper: Some(mapper),
+                mapper: Some(XYView),
                 ..SolverConfig::default()
             },
         ),
@@ -333,7 +311,7 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
     let max_iterations_config = SolverConfig {
         position_tolerance: 0.0,
         angle_tolerance: 0.0,
-        mapper: Some(mapper),
+        mapper: Some(XYView),
         ..SolverConfig::default()
     };
     println!(
@@ -348,15 +326,18 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
     println!(
         "\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --"
     );
-    let single_thread_sequence =
-        tiled_native_rate_sequence_2d(&fixtures.native_rate_frames, SINGLE_THREAD_N_FRAMES, &to_2d);
+    let single_thread_sequence = tiled_native_rate_sequence_2d(
+        &fixtures.native_rate_frames,
+        SINGLE_THREAD_N_FRAMES,
+        &observations_2d_xyview,
+    );
     let single_thread_mean = summarize(
         "SequenceSolver.solve_frame",
         bench_single_thread_sequence_throughput(
             tree,
             &single_thread_sequence,
             SolverConfig {
-                mapper: Some(mapper),
+                mapper: Some(XYView),
                 ..SolverConfig::default()
             },
         ),
@@ -368,14 +349,14 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
     let sequence = tiled_native_rate_sequence_2d(
         &fixtures.native_rate_frames,
         frames_for_n_segments(MULTITHREAD_N_THREADS),
-        &to_2d,
+        &observations_2d_xyview,
     );
     let elapsed = bench_multithread_sequence_throughput_with_config(
         tree,
         &sequence,
         MULTITHREAD_N_THREADS as isize,
         SolverConfig {
-            mapper: Some(mapper),
+            mapper: Some(XYView),
             ..SolverConfig::default()
         },
     );
@@ -388,7 +369,6 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
 
     write_results_json_2d(
         body,
-        observation,
         single_frame_latency.as_secs_f64() * 1e6,
         single_frame_latency_max.as_secs_f64() * 1e6,
         1.0 / single_thread_mean.as_secs_f64(),
@@ -396,13 +376,12 @@ fn run_all_2d_for_mapper<M: Mapper3Dto2D + Sync>(
     );
 }
 
-/// Writes `../plot/results/quickik-rust-2d-<observation>-<body>.json` for
+/// Writes `../plot/results/quickik-rust-2d-xyview-<body>.json` for
 /// `../plot/plot_2d_comparison.py` to pick up. Same schema as
-/// [`write_results_json`] plus an `"observation"` field ("camera"/"xyview"),
+/// [`write_results_json`] plus an `"observation"` field (always `"xyview"`),
 /// so both scripts can read files from the same directory without colliding.
 fn write_results_json_2d(
     body: &str,
-    observation: &str,
     single_frame_latency_us: f64,
     single_frame_latency_max_us: f64,
     single_thread_throughput_fps: f64,
@@ -413,7 +392,7 @@ fn write_results_json_2d(
         "body": body,
         "language": "rust",
         "formulation": "whole-tree",
-        "observation": observation,
+        "observation": "xyview",
         "single_frame_latency_us": single_frame_latency_us,
         "single_frame_latency_max_us": single_frame_latency_max_us,
         "single_thread_throughput_fps": single_thread_throughput_fps,
@@ -423,7 +402,7 @@ fn write_results_json_2d(
     });
     let out_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plot/results");
     std::fs::create_dir_all(&out_dir).expect("failed to create ../plot/results");
-    let out_path = out_dir.join(format!("quickik-rust-2d-{observation}-{body}.json"));
+    let out_path = out_dir.join(format!("quickik-rust-2d-xyview-{body}.json"));
     std::fs::write(&out_path, serde_json::to_string_pretty(&results).unwrap())
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_path.display()));
 }

@@ -6,7 +6,7 @@ use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use quickik::high_level::SequenceSolver;
-use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
+use quickik::observation::{KeypointObservation, Mapper3Dto2D, XYView};
 use quickik::solver::{Solver, SolverConfig};
 use quickik::state::State;
 
@@ -292,17 +292,9 @@ pub fn run_real_frame_tests_2d<M: Mapper3Dto2D>(
     }
 }
 
-/// Runs the 2D-observation correctness suite for both mappers (a synthetic
-/// pinhole [`Camera`] and the trivial [`XYView`]) on the same fixtures used
-/// by [`run_all`].
-pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, camera: Camera) {
-    run_synthetic_frame_tests_2d(tree, &fixtures.synthetic_frames, camera, "Camera", |t| {
-        crate::twod::observations_2d_camera(t, &camera)
-    });
-    run_real_frame_tests_2d(tree, &fixtures.real_frames, camera, "Camera", |t| {
-        crate::twod::observations_2d_camera(t, &camera)
-    });
-
+/// Runs the 2D-observation correctness suite via [`XYView`], on the same
+/// fixtures used by [`run_all`].
+pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
     run_synthetic_frame_tests_2d(tree, &fixtures.synthetic_frames, XYView, "XYView", |t| {
         crate::twod::observations_2d_xyview(t)
     });
