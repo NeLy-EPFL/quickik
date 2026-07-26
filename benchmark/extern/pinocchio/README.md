@@ -1,6 +1,6 @@
 # Pinocchio benchmark
 
-Benchmarks [Pinocchio](https://github.com/stack-of-tasks/pinocchio) against QuickIK, on both bodies (see `../../README.md`). Methodology mirrors `../../quickik_python/bench.py` and `../../quickik_rust/src/perf.rs` exactly (same fixtures, same metrics, same config values) so the numbers are directly comparable. See the [Benchmarks docs page](../../../docs/benchmarks.md) for Pinocchio's modeling compromises and results.
+Benchmarks [Pinocchio](https://github.com/stack-of-tasks/pinocchio) against QuickIK, on both bodies (see `../../README.md`). Methodology mirrors `../../quickik_python/bench.py` and `../../quickik_rust/src/perf.rs` exactly (same fixtures, same metrics, same config values) so the numbers are directly comparable. See the [Benchmarks docs page](../../../docs/technical/benchmarks.md) for Pinocchio's modeling compromises and results.
 
 ## Running
 

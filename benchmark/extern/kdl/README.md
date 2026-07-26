@@ -1,6 +1,6 @@
 # KDL benchmark
 
-Benchmarks Orocos KDL's tree-based inverse kinematics against QuickIK, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/benchmarks.md) for KDL's modeling compromises and results; `bench_kdl.cpp`'s header comment has the full write-up.
+Benchmarks Orocos KDL's tree-based inverse kinematics against QuickIK, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/technical/benchmarks.md) for KDL's modeling compromises and results; `bench_kdl.cpp`'s header comment has the full write-up.
 
 ## Build
 

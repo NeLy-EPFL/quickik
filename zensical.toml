@@ -9,18 +9,21 @@ edit_uri = "edit/main/docs/"
 
 nav = [
   { "Home" = "index.md" },
-  { "Installation" = "installation.md" },
   { "Getting started" = [
+      { "Installation" = "getting-started/installation.md" },
       { "Body plan" = "getting-started/body-plan.md" },
-      { "Solve pose for single frame" = "getting-started/single-frame.md" },
+      { "Solve for a single frame" = "getting-started/single-frame.md" },
       { "Solve sequences of frames" = "getting-started/sequences.md" },
-      { "From 2D keypoint positions" = "getting-started/from-2d-keypoints.md" },
+      { "From 2D keypoint positions" = "getting-started/2d-keypoints.md" },
     ] },
-  { "Benchmarks" = "benchmarks.md" },
-  { "API reference" = [
+  { "API references" = [
       { "Rust (native)" = "api/rust/quickik/index.html" },
       { "Python bindings" = "api/python/quickik.html" },
       { "C++ bindings" = "api/cpp/html/index.html" },
+    ] },
+  { "Technical information" = [
+      { "Benchmarks" = "technical/benchmarks.md" },
+      # { "Technical paper & citation" = "technical/paper.md" },
     ] },
 ]
 
@@ -41,6 +44,8 @@ features = [
     "navigation.top",
     "navigation.footer",
     "search.highlight",
+    "content.tooltips",
+    "content.footnote.tooltips",
 ]
 
 [project.theme.icon]
@@ -65,10 +70,12 @@ toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 [project.markdown_extensions.admonition]
+[project.markdown_extensions.abbr]
 [project.markdown_extensions.attr_list]
 [project.markdown_extensions.md_in_html]
 [project.markdown_extensions.toc]
 permalink = true
+[project.markdown_extensions.footnotes]
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.highlight]
 anchor_linenums = true
@@ -76,11 +83,7 @@ anchor_linenums = true
 [project.markdown_extensions.pymdownx.magiclink]
 [project.markdown_extensions.pymdownx.superfences]
 # Without an explicit `slugify`, tab panels get an unreadable auto-numbered
-# id (e.g. "#__tabbed_3_2") instead of a real anchor -- unlike `toc` above,
-# whose header anchors already have a sensible default baked into Python-
-# Markdown itself. `combine_header_slug` (Zensical's own default for this
-# extension) prefixes the tab's own slug with its parent header's, so e.g.
-# "## Quick start" + tab "Python" -> "#quick-start_python".
+# id (e.g. "#__tabbed_3_2") instead of a real anchor
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
 combine_header_slug = true

@@ -1,6 +1,6 @@
 # RBDL benchmark
 
-Benchmarks RBDL's core-library `InverseKinematicsConstraintSet` (not an addon – see `rbdl-src/include/rbdl/Kinematics.h`) against QuickIK, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/benchmarks.md) for RBDL's modeling compromises and results; `bench_rbdl.cpp`'s header comment has the full write-up. `leg_poc.cpp` is the earlier one-leg proof of concept this was built up from.
+Benchmarks RBDL's core-library `InverseKinematicsConstraintSet` (not an addon – see `rbdl-src/include/rbdl/Kinematics.h`) against QuickIK, on both bodies (see `../../README.md`). See the [Benchmarks docs page](../../../docs/technical/benchmarks.md) for RBDL's modeling compromises and results; `bench_rbdl.cpp`'s header comment has the full write-up. `leg_poc.cpp` is the earlier one-leg proof of concept this was built up from.
 
 ## Build
 

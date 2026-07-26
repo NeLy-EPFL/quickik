@@ -17,7 +17,7 @@ git clone https://github.com/NeLy-EPFL/quickik
 
 === "Python"
 
-    The Python bindings (`python/`) are a [PyO3](https://pyo3.rs)/[maturin](https://github.com/PyO3/maturin) extension module, so they build from source and require a Rust toolchain plus Python >= 3.8.
+    The Python bindings (`python/`) are a [PyO3](https://pyo3.rs)/[maturin](https://www.maturin.rs/) extension module, so they build from source and require a Rust toolchain plus Python >= 3.8.
 
     ```sh
     cd quickik/python
