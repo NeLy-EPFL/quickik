@@ -228,16 +228,27 @@ def test_sequence_solver_warm_start_converges_faster(tree):
 
 def test_solve_sequence_returns_one_state_per_frame(tree):
     solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    sequence = [
-        observations_for(a1, a2) for a1, a2 in [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
-    ]
+    angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
+    positions = np.array(
+        [two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float32
+    )
+    weights = np.ones((len(angles), tree.n_joints), dtype=np.float32)
 
-    states = solver.solve_sequence(sequence)
+    states = solver.solve_sequence(positions, weights)
 
     assert len(states) == 3
     last = states[2]
     assert last.dof_angles[0] == pytest.approx(0.3, abs=1e-2)
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
+
+
+def test_solve_sequence_rejects_wrong_keypoint_count(tree):
+    positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
+    weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
+    with pytest.raises(ValueError, match="keypoints"):
+        quickik.SequenceSolver(tree, quickik.SolverConfig()).solve_sequence(
+            positions, weights
+        )
 
 
 def sine_trajectory_arrays(tree, n_frames):
