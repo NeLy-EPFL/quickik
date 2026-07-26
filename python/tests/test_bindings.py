@@ -270,6 +270,20 @@ def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
+def test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
+
+    parallel_config = quickik.ParallelSolveConfig.for_recording(len(true_angles))
+    states = quickik.solve_sequence_segmented_parallel(
+        tree, quickik.SolverConfig(), positions, weights, parallel_config
+    )
+
+    assert len(states) == len(true_angles)
+    for state, (a1, a2) in zip(states, true_angles, strict=True):
+        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
 def test_solve_sequence_segmented_parallel_rejects_wrong_keypoint_count(tree):
     positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
     weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)

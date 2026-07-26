@@ -122,6 +122,13 @@ mod ffi {
         /// damping and neutral-pose weight, and tolerances of 1e-3.
         fn default_solver_config() -> SolverConfig;
 
+        /// A `ParallelSolveConfig` that spreads `total_len` frames evenly
+        /// across every available core: one segment per core, `total_len /
+        /// n_workers` frames each (plus a fixed default overlap). For finer
+        /// control over cold-start frequency, build a `ParallelSolveConfig`
+        /// directly instead.
+        fn parallel_solve_config_for_recording(total_len: usize) -> ParallelSolveConfig;
+
         /// A kinematic tree, i.e. body plan, or skeleton.
         type KinematicTree;
         /// Parses a `KinematicTree` from a JSON body-plan string.
@@ -623,6 +630,20 @@ impl SequenceSolver {
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
+    }
+}
+
+// =============================================================================
+//  ParallelSolveConfig
+// =============================================================================
+
+fn parallel_solve_config_for_recording(total_len: usize) -> ffi::ParallelSolveConfig {
+    let config = quickik_core::high_level::ParallelSolveConfig::for_recording(total_len);
+    ffi::ParallelSolveConfig {
+        segment_len: config.segment_len,
+        overlap_len: config.overlap_len,
+        overlap_tolerance: config.overlap_tolerance,
+        n_workers: config.n_workers,
     }
 }
 

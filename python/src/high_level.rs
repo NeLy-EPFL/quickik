@@ -144,6 +144,19 @@ impl ParallelSolveConfig {
             },
         }
     }
+
+    /// A `ParallelSolveConfig` that spreads `total_len` frames evenly across
+    /// every available core: one segment per core, `total_len / n_workers`
+    /// frames each (plus a fixed default overlap). For finer control over
+    /// cold-start frequency -- how often a segment restarts from the neutral
+    /// pose, trading accuracy for finer-grained parallelism -- build a
+    /// `ParallelSolveConfig` directly instead.
+    #[staticmethod]
+    fn for_recording(total_len: usize) -> Self {
+        ParallelSolveConfig {
+            inner: quickik_core::high_level::ParallelSolveConfig::for_recording(total_len),
+        }
+    }
 }
 
 /// Solves a single long sequence in parallel by splitting it into slightly
