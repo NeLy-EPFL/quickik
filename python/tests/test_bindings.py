@@ -62,7 +62,7 @@ def observations_for(a1, a2):
 
 
 def no_prior_config():
-    return quickik.SolverConfig(weight=0.0)
+    return quickik.SolverConfig(neutral_weight=0.0)
 
 
 def test_malformed_json_raises():

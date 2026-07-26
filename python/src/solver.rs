@@ -16,14 +16,10 @@ pub(crate) struct SolverConfig {
     /// termination -- see `position_tolerance`/`angle_tolerance`.
     #[pyo3(get, set)]
     n_iterations: usize,
-    /// Levenberg-Marquardt damping added to the normal equations' diagonal,
-    /// for numerical stability only; keep it very small (e.g. 1e-6).
-    #[pyo3(get, set)]
-    damping: f32,
     /// Weight pulling every joint angle toward the neutral pose. Improves
     /// robustness to missing/noisy keypoints, at the cost of some bias.
     #[pyo3(get, set)]
-    weight: f32,
+    neutral_weight: f32,
     /// Stop iterating early once an update step's largest root-position
     /// component drops below this value, and the largest angle update drops
     /// below `angle_tolerance`. 0 disables early termination.
@@ -32,6 +28,10 @@ pub(crate) struct SolverConfig {
     /// Angle-space counterpart to `position_tolerance`, in radians.
     #[pyo3(get, set)]
     angle_tolerance: f32,
+    /// Levenberg-Marquardt damping added to the normal equations' diagonal,
+    /// for numerical stability only; keep it very small (e.g. 1e-6).
+    #[pyo3(get, set)]
+    damping: f32,
 }
 
 impl SolverConfig {
@@ -41,10 +41,10 @@ impl SolverConfig {
     ) -> quickik_core::solver::SolverConfig<Mapper> {
         quickik_core::solver::SolverConfig {
             n_iterations: self.n_iterations,
-            damping: self.damping,
-            weight: self.weight,
+            neutral_weight: self.neutral_weight,
             position_tolerance: self.position_tolerance,
             angle_tolerance: self.angle_tolerance,
+            damping: self.damping,
             mapper,
         }
     }
@@ -55,20 +55,20 @@ impl SolverConfig {
     /// All arguments are optional; see the attributes above for their
     /// defaults and meaning.
     #[new]
-    #[pyo3(signature = (n_iterations=10, damping=1e-6, weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3))]
+    #[pyo3(signature = (n_iterations=10, neutral_weight=1e-3, position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6))]
     fn new(
         n_iterations: usize,
-        damping: f32,
-        weight: f32,
+        neutral_weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
+        damping: f32,
     ) -> Self {
         SolverConfig {
             n_iterations,
-            damping,
-            weight,
+            neutral_weight,
             position_tolerance,
             angle_tolerance,
+            damping,
         }
     }
 }

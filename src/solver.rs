@@ -12,17 +12,14 @@ use crate::state::State;
 pub struct SolverConfig<M: Mapper3Dto2D = NoMapper> {
     /// Fixed number of Gauss-Newton steps per solve.
     pub n_iterations: usize,
-    /// Levenberg-Marquardt damping added to the normal equations' diagonal.
-    /// This term is used only to improve numerical stability and should be set
-    /// to a very small number (e.g. 1e-6).
-    pub damping: f32,
-    /// Tikhonov weight pulling every joint angle toward the neutral pose,
-    /// multiplied together with each DOF's own [`Dof::weight_scaler`]. This
-    /// regularization term improves robustness when keypoints are missing or
-    /// noisy, but can also bias the solution away from the true pose.
+    /// Weight of Tikhonov regularization term pulling every joint angle toward
+    /// the neutral pose, multiplied together with each DOF's own
+    /// [`Dof::weight_scaler`]. This regularization term improves robustness
+    /// when keypoints are missing or noisy, but can also bias the solution away
+    /// from the true pose.
     ///
     /// [`Dof::weight_scaler`]: crate::body_plan::Dof::weight_scaler
-    pub weight: f32,
+    pub neutral_weight: f32,
     /// Stop iterating early once an update step's largest root-position
     /// component drops below this value, *and* the largest angle update drops
     /// below [`angle_tolerance`](Self::angle_tolerance). In other words,
@@ -35,6 +32,10 @@ pub struct SolverConfig<M: Mapper3Dto2D = NoMapper> {
     /// See [`position_tolerance`](Self::position_tolerance). Specified in
     /// radians.
     pub angle_tolerance: f32,
+    /// Levenberg-Marquardt damping added to the normal equations' diagonal.
+    /// This term is used only to improve numerical stability and should be set
+    /// to a very small number (e.g. 1e-6).
+    pub damping: f32,
     /// Mapper used to project every [`Position2D`] observation. `None` if
     /// keypoint observations will be provided in 3D.
     ///
@@ -47,7 +48,7 @@ impl<M: Mapper3Dto2D> Default for SolverConfig<M> {
         SolverConfig {
             n_iterations: 10,
             damping: 1e-6,
-            weight: 1e-3,
+            neutral_weight: 1e-3,
             position_tolerance: 1e-3,
             angle_tolerance: 1e-3,
             mapper: None,
@@ -165,7 +166,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 state,
                 &self.neutral_joint_angles,
                 &self.dof_weight_scalers,
-                self.config.weight,
+                self.config.neutral_weight,
                 &mut self.jtj,
                 &mut self.jtr,
             );
@@ -180,7 +181,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
             //   zero (weakly- or entirely-unconstrained DOFs -- routine, and
             //   unrelated to coordinate units/scale: it happens whenever few
             //   keypoints constrain a DOF, and is exercised directly by any
-            //   config with `weight: 0.0`), so damping doesn't vanish right
+            //   config with `neutral_weight: 0.0`), so damping doesn't vanish right
             //   when it's most needed to keep the Cholesky decomposition
             //   well-conditioned.
             for i in 0..state_dim {

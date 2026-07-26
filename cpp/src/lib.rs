@@ -80,10 +80,10 @@ mod ffi {
     #[derive(Clone, Copy, Debug)]
     struct SolverConfig {
         n_iterations: usize,
-        damping: f32,
-        weight: f32,
+        neutral_weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
+        damping: f32,
     }
 
     /// Configuration for `solve_sequence_segmented_parallel`.
@@ -403,10 +403,10 @@ fn to_core_config(
 ) -> quickik_core::solver::SolverConfig<RuntimeMapper> {
     quickik_core::solver::SolverConfig {
         n_iterations: config.n_iterations,
-        damping: config.damping,
-        weight: config.weight,
+        neutral_weight: config.neutral_weight,
         position_tolerance: config.position_tolerance,
         angle_tolerance: config.angle_tolerance,
+        damping: config.damping,
         mapper,
     }
 }
@@ -416,10 +416,10 @@ fn from_core_config(
 ) -> ffi::SolverConfig {
     ffi::SolverConfig {
         n_iterations: config.n_iterations,
-        damping: config.damping,
-        weight: config.weight,
+        neutral_weight: config.neutral_weight,
         position_tolerance: config.position_tolerance,
         angle_tolerance: config.angle_tolerance,
+        damping: config.damping,
     }
 }
 

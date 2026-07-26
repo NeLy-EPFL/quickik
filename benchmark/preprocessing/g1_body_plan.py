@@ -90,7 +90,7 @@ LEAF_KEYPOINTS = {
 ROOT_LINK = "pelvis"
 
 # Each DOF's `neutral` value -- the solver's regularization anchor
-# (`SolverConfig::weight`) and `State::neutral_pose`'s starting guess. The
+# (`SolverConfig::neutral_weight`) and `State::neutral_pose`'s starting guess. The
 # URDF's own zero configuration (no retargeted motion data feeds this
 # anymore -- see g1_fixtures.py's module docstring for why).
 NEUTRAL_ANGLES = [0.0] * len(REVOLUTE_JOINT_ORDER)

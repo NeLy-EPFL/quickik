@@ -66,7 +66,7 @@ rust::Slice<const quickik::KeypointObservation> slice_of(const std::vector<quick
 
 quickik::SolverConfig no_prior_config() {
   quickik::SolverConfig config = quickik::default_solver_config();
-  config.weight = 0.0f;
+  config.neutral_weight = 0.0f;
   return config;
 }
 

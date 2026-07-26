@@ -235,7 +235,7 @@ def solve_sequence(tree, fixtures, missing_keypoints=(), weight=None):
     config = (
         quickik.SolverConfig()
         if weight is None
-        else quickik.SolverConfig(weight=weight)
+        else quickik.SolverConfig(neutral_weight=weight)
     )
     seq = quickik.SequenceSolver(tree, config)
     return [
