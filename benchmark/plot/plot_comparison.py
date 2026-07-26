@@ -155,7 +155,14 @@ def load_results():
         data = json.loads(path.read_text())
         # quickik-scaling.json is a list of weak-scaling data points (see
         # plot_scaling.py), not a single-library result -- skip it here.
-        if isinstance(data, dict):
+        # errors-<body>.json is plot_2d_comparison.py's own per-frame
+        # fit-residual distribution data (no "name"/"formulation" keys),
+        # not a per-library result either -- skip that too. So is
+        # quickik-rust-2d-xyview-<body>.json (an "observation" override of
+        # quickik-rust's own 3D result, also only used by
+        # plot_2d_comparison.py) -- without this it'd show up here as a
+        # second, indistinguishable "quickik-rust" row.
+        if isinstance(data, dict) and "name" in data and "observation" not in data:
             all_results.append(data)
     included = [r for r in all_results if r.get("formulation") == "whole-tree"]
     excluded = [r for r in all_results if r not in included]
