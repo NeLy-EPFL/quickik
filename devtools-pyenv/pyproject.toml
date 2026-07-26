@@ -8,7 +8,17 @@ dependencies = [
     "matplotlib>=3.11.1",
     "numpy>=2.5.1",
     "pytest>=9.1.1",
+    "quickik",
     "ruff>=0.15.22",
     "scipy>=1.18.0",
     "zensical>=0.0.51",
 ]
+
+[tool.uv.sources]
+# Path dependency so `uv sync` keeps quickik installed (it would otherwise be
+# stripped on every sync, since nothing else here declares it). This only
+# guarantees quickik *stays* installed -- `uv sync` alone won't rebuild it
+# after a Rust source change (../python/src, ../src, ../cpp/src): rerun
+# `uv sync --reinstall-package quickik` (or `cd ../python && maturin develop
+# --release` directly) whenever those change.
+quickik = { path = "../python", editable = true }
