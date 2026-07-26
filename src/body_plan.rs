@@ -232,9 +232,9 @@ struct JointSpec {
 
 #[derive(Deserialize)]
 struct DofSpec {
-    axis: [f32; 3],
     #[serde(rename = "type")]
     dof_type: DofType,
+    axis: [f32; 3],
     neutral: f32,
     limits: Option<[f32; 2]>,
     #[serde(default = "default_weight_scaler")]

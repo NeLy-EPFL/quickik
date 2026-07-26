@@ -325,7 +325,7 @@ def setup_panel(ax, body):
         body["lo"][2],
         "X-Y projection",
         size=x_range * 0.06,
-        color="0.4",
+        color="0.7",
     )
     return artists
 
