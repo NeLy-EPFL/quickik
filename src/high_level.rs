@@ -72,10 +72,10 @@ const DEFAULT_OVERLAP_TOLERANCE: f32 = 0.05;
 impl ParallelSolveConfig {
     /// A `ParallelSolveConfig` that spreads `total_len` frames evenly across
     /// every available core: one segment per core, `total_len / n_workers`
-    /// frames each (plus [`DEFAULT_OVERLAP_LEN`] of overlap on top). For finer
-    /// control over cold-start frequency -- how often a segment restarts from
-    /// the neutral pose, trading accuracy for finer-grained parallelism --
-    /// build a `ParallelSolveConfig` directly instead.
+    /// frames each (plus a fixed default overlap of 10 frames on top). For
+    /// finer control over cold-start frequency -- how often a segment
+    /// restarts from the neutral pose, trading accuracy for finer-grained
+    /// parallelism -- build a `ParallelSolveConfig` directly instead.
     pub fn for_recording(total_len: usize) -> Self {
         let n_workers = resolve_n_workers(-1);
         let overlap_len = DEFAULT_OVERLAP_LEN;
