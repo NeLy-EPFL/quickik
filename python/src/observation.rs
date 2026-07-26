@@ -265,3 +265,31 @@ pub(crate) fn observations_from_arrays(
         })
         .collect()
 }
+
+/// Checks that `positions`/`weights` have the shapes
+/// [`observations_from_arrays`] expects: `(n_frames, n_joints, 3)` and
+/// `(n_frames, n_joints)`.
+pub(crate) fn validate_position_weight_shapes(
+    positions: &ArrayView3<'_, f32>,
+    weights: &ArrayView2<'_, f32>,
+    n_joints: usize,
+) -> PyResult<()> {
+    let (n_frames, n_keypoints, dim) = positions.dim();
+    if dim != 3 {
+        return Err(PyValueError::new_err(format!(
+            "positions must have shape (n_frames, n_keypoints, 3), got last dimension {dim}"
+        )));
+    }
+    if n_keypoints != n_joints {
+        return Err(PyValueError::new_err(format!(
+            "positions has {n_keypoints} keypoints, but kinematic_tree has {n_joints} joints"
+        )));
+    }
+    if weights.dim() != (n_frames, n_keypoints) {
+        return Err(PyValueError::new_err(format!(
+            "weights must have shape (n_frames, n_keypoints) = ({n_frames}, {n_keypoints}), got {:?}",
+            weights.dim()
+        )));
+    }
+    Ok(())
+}

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/bodyplan_20260726.schema.json",
+  "title": "Body Plan",
+  "description": "Definition of a kinematic tree with joints and degrees of freedom.",
+  "type": "object",
+  "required": ["fixed_base", "joints"],
+  "patternProperties": {
+    "^x-": { "description": "Reserved namespace for custom metadata/extension fields." }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "fixed_base": {
+      "type": "boolean",
+      "description": "Whether the root joint is fixed in world space (true) or free-floating (false). Always required in this repo's own body plans, even though the parser itself defaults to false if omitted."
+    },
+    "joints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/joint" },
+      "description": "Joints in the tree. The first joint with parent=null is the root; order should be such that a joint's parent appears earlier in the list."
+    }
+  },
+  "$defs": {
+    "joint": {
+      "type": "object",
+      "required": ["name", "parent", "offset_pos", "offset_quat", "dofs"],
+      "patternProperties": {
+        "^x-": { "description": "Reserved namespace for custom metadata/extension fields." }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique joint name."
+        },
+        "parent": {
+          "description": "Name of the parent joint, or null for the root joint.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "offset_pos": {
+          "$ref": "#/$defs/vec3",
+          "description": "Translation offset from the parent joint frame."
+        },
+        "offset_quat": {
+          "$ref": "#/$defs/quat",
+          "description": "Rotation offset from the parent joint frame, quaternion as [w, x, y, z]."
+        },
+        "weight_scaler": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1.0,
+          "description": "Scaling constant applied to weights for this joint's contribution in inverse kinematics. Optional, defaults to 1.0."
+        },
+        "dofs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dof" },
+          "description": "Degrees of freedom defined at this joint, applied in order."
+        }
+      }
+    },
+    "dof": {
+      "type": "object",
+      "required": ["type", "axis", "neutral"],
+      "patternProperties": {
+        "^x-": { "description": "Reserved namespace for custom metadata/extension fields." }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Optional human-readable label for this DOF, purely for the body plan's own readability -- ignored by the parser."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["hinge", "slide"],
+          "description": "Type of degree of freedom."
+        },
+        "axis": {
+          "$ref": "#/$defs/vec3",
+          "description": "Unit axis of rotation (hinge) or translation (slide), in the parent joint's local frame."
+        },
+        "neutral": {
+          "type": "number",
+          "description": "Neutral (rest) value of the DOF. Given in radians for hinge DOFs and the model's native unit for slide DOFs."
+        },
+        "weight_scaler": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1.0,
+          "description": "Scaling constant applied to weights for this DOF's contribution to the natural pose preference term. Optional, defaults to 1.0."
+        },
+        "limits": {
+          "description": "[min, max] limits for the DOF, in radians for hinge DOFs and the model's native unit for slide DOFs. Use null for unbounded DOFs.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "quat": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    }
+  }
+}

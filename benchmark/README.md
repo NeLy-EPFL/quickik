@@ -1,6 +1,6 @@
 # QuickIK benchmark
 
-Compares QuickIK's IK solve speed against KDL, Pinocchio, and RBDL, across QuickIK's Rust API, Python bindings, and C++ bindings, on two bodies: NeuroMechFly (a fly) and G1 (a Unitree humanoid). See the [Benchmarks docs page](../docs/benchmarks.md) for what's being compared, why, and the current results – this file only covers how to reproduce them.
+Compares QuickIK's IK solve speed against KDL, Pinocchio, and RBDL, across QuickIK's Rust API, Python bindings, and C++ bindings, on two bodies: NeuroMechFly (a fly) and G1 (a Unitree humanoid). See the [Benchmarks docs page](../docs/technical/benchmarks.md) for what's being compared, why, and the current results – this file only covers how to reproduce them.
 
 ## Running it
 

@@ -1,61 +1,86 @@
 # Body plan
 
-A body plan describes the kinematic tree QuickIK solves against – a robot's joints, or an animal's skeleton – loaded once from JSON and reused across every solve. Unlike a typical robotics kinematic tree, which separates joints (that move) from frames or links (that get tracked), here every joint doubles as a keypoint: its world position is always available as a potential target, whether or not it carries a rotational DOF of its own. This is what lets one uniform `KeypointObservation` list – one entry per joint, in the body plan's own tree order – describe a whole tracked pose, DOF-bearing joints and fixed leaf keypoints alike.
+A body plan describes the kinematic tree QuickIK solves against – a robot's joints, or an animal's skeleton.
 
-One modeling consequence worth knowing: a joint's own DOF reorients its *children*, not itself – rotating a joint never moves its own keypoint, only the keypoints downstream of it. So every DOF needs at least one keypoint further down its own chain to be observable at all; a chain that ends exactly at its last DOF-bearing joint, with nothing past it, leaves that DOF's angle undetermined by any observation. This is why even a fixed, 0-DOF "tip" joint (a fingertip, a fly's claw, a robot's end effector) is usually worth keeping in the body plan even though it never actuates anything itself.
+In QuickIK, the kinematic tree is defined using **joints**. Each joint can contain multiple **degrees of freedom (DOFs)**. There are two types of DOFs: *hinges* that rotate, and *slides* that move translationally. For example, a 3-axis ball joint would have three hinge DOFs and no slide DOF.
 
-By default the root is a free-floating base with its own 6 DOFs (position and rotation), solved for like everything else – this fits a tracked animal or a robot free to move through the world. Setting the top-level `"fixed_base": true` instead anchors the root in place (e.g. a robot arm bolted to a table), removing those 6 DOFs from the state entirely. A *semi*-fixed base – one that only slides along a rail or spins on a turntable – isn't a separate setting: keep `fixed_base` set and give the root a zero-offset child joint carrying that one hinge/slide DOF, then attach the rest of the body to that joint instead of directly to the root. Because a joint's own DOF only moves its descendants (see above), this joint acts as exactly that one-DOF base – and unlike the root's own DOFs, it gets `limits` and `weight_scaler` like any other DOF.
+All joints trace back to a single parent – the **root** of the kinematic tree. In principle, the definition of the root is arbitrary (you can say the whole human body stems from the left index fingertip if you wish), but practically it should be defined as a central body part like the pelvis or thorax. The root can be *freely floating* – useful when the body is a robot or an animal that can move around, or *fixed* – useful for fixed-base robotic arms.
 
-??? note "Body plan JSON schema"
-    ```json
+In QuickIK, joints double as **keypoints**[^1] – the points on the body whose positions are recorded and used to constrain the state. If you need a keypoint in the middle of a body segment, add a "pseudo joint" where they keypoint is supposed to be with no associated DOFs.
+
+[^1]:
+    This is merely a practical choice, as articulated joints are usually easier to track than arbitrary points on the body and indeed they are what's typically available in MoCap/pose estimation data.
+
+**Each joint has the following properties:**
+
+- A **name**.
+- A **parent joint** (the parent of the root joint is `null`).
+- A **position offset** and a **rotation offset** from its parent joint, representing the properties of the rigid-body link connecting them. Rotation offsets are specified in quaternions in wxyz format.
+- A **weight scaler** that controls the _scale_[^2] of how hard the solver should try to minimize the mismatch of this joint's position. If some joints are intrinsically harder to measure (e.g., if they are usually occluded or embedded in soft tissues), it's useful to lower this number.
+- A list of **degrees of freedom** (DOFs). The order of the DOFs is important, as 3D rotations do not commute.
+
+[^2]:
+    During inverse kinematics, the user can also supply a weight for each keypoint on a frame-to-frame basis (e.g., using the uncertainty measure of the pose estimation model on that particular frame). The final weight is the product of the weight supplied at runtime and this scaler.
+
+**Each DOF has the following properties:**
+
+- A **type**: can be `hinge` or `slide`.
+- An **axis**: this is the rotational axis for hinge joints or translational axis for slide joints.
+- A **neutral** value: the "natural" rotation angle or slide position the solver favors poses being closer to. For hinge DOFs, this is in radians; for slide DOFs, it's in whatever unit the joint's position offset uses.
+- Optionally, the **limits** for the value of this DOF (angle for hinge joints, positions for slide joints). Same unit as the neutral value. Set to `null` if unbounded.
+- A **weight scaler** controlling the _scale_[^3] of how strongly the solver favors the neutral state defined above.
+
+[^3]:
+    Upon initiating the inverse kinematics solver, the user can define a weight for the pull toward the neutral pose. Like the weight scaler for the joint's weight, the final weight toward the neutral value for each DOF is the product of the weight supplied at runtime and the scaler specified here in the body plan.
+
+
+## JSON body plan format
+
+In QuickIK, the body plan is specified in JSON. An example JSON file is as follows.
+
+!!! info "JSON schema"
+    A formal schema of the JSON format is [available here](https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/bodyplan_20260726.schema.json). You can use it for formal [syntax check with your IDE](https://code.visualstudio.com/docs/languages/json).
+
+```json
+{
+  "fixed_base": false,
+  "joints": [
     {
-      "fixed_base": false,
-      "joints": [
+      "name": "root",
+      "parent": null,
+      "offset_pos": [0.0, 0.0, 0.0],
+      "offset_quat": [1.0, 0.0, 0.0, 0.0],
+      "weight_scaler": 1.0,
+      "dofs": []
+    },
+    {
+      "name": "elbow",
+      "parent": "root",
+      "offset_pos": [1.0, 0.0, 0.0],
+      "offset_quat": [1.0, 0.0, 0.0, 0.0],
+      "weight_scaler": 1.0,
+      "dofs": [
         {
-          "name": "root",
-          "parent": null,
-          "offset_pos": [0.0, 0.0, 0.0],
-          "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "weight_scaler": 1.0,
-          "dofs": []
-        },
-        {
-          "name": "elbow",
-          "parent": "root",
-          "offset_pos": [1.0, 0.0, 0.0],
-          "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "weight_scaler": 1.0,
-          "dofs": [
-            {
-              "axis": [0.0, 0.0, 1.0],
-              "type": "hinge",
-              "neutral": 0.0,
-              "weight_scaler": 1.0,
-              "limits": [-3.0, 3.0]
-            }
-          ]
-        },
-        {
-          "name": "wrist",
-          "parent": "elbow",
-          "offset_pos": [1.0, 0.0, 0.0],
-          "offset_quat": [1.0, 0.0, 0.0, 0.0],
-          "weight_scaler": 1.0,
-          "dofs": []
+          "type": "hinge",
+          "axis": [0.0, 0.0, 1.0],
+          "neutral": 0.0,
+          "limits": [-3.0, 3.0],
+          "weight_scaler": 1.0
         }
       ]
+    },
+    {
+      "name": "wrist",
+      "parent": "elbow",
+      "offset_pos": [1.0, 0.0, 0.0],
+      "offset_quat": [1.0, 0.0, 0.0, 0.0],
+      "weight_scaler": 1.0,
+      "dofs": []
     }
-    ```
-
-    - `fixed_base`: whether the root is fixed in the world rather than a free-floating base. Optional, defaults to `false`.
-    - `parent`: joint name, or `null` for the root.
-    - `offset_pos`/`offset_quat`: this joint's offset from its parent.
-    - `weight_scaler`: multiplied together with each frame's `KeypointObservation`'s `weight` for this joint's keypoint. Optional, defaults to `1.0`.
-    - `dofs`: this joint's degrees of freedom, each with:
-        - `type`: `"hinge"` (rotational) or `"slide"` (translational).
-        - `axis`: rotation/translation axis in local frame.
-        - `neutral`: neutral angle (radians) or position.
-        - `limits`: optional `[min, max]` limits; unbounded if omitted or `null`.
-        - `weight_scaler`: multiplied together with `SolverConfig`'s `weight` for this DOF's deviation-from-neutral penalty. Optional, defaults to `1.0`.
-
-    See the [API reference](../api/rust/quickik/body_plan/index.html) for the full schema.
+  ],
+  "x-anything": [
+    "Keys starting with 'x-' are allowed at any level and are ignored.",
+    "They can be of any type and are useful for custom metadata/documentation."
+  ]
+}
+```

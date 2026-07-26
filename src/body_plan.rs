@@ -42,9 +42,9 @@ pub struct Dof {
     /// Optional angle limits in [min, max]. Unbounded if `None`.
     pub limits: Option<[f32; 2]>,
     /// Scales this DOF's contribution to the deviation-from-neutral penalty,
-    /// multiplied together with [`SolverConfig::weight`].
+    /// multiplied together with [`SolverConfig::neutral_weight`].
     ///
-    /// [`SolverConfig::weight`]: crate::solver::SolverConfig::weight
+    /// [`SolverConfig::neutral_weight`]: crate::solver::SolverConfig::neutral_weight
     pub weight_scaler: f32,
 }
 
@@ -210,7 +210,8 @@ impl KinematicTree {
 // =============================================================================
 
 /// Root-level data structure for body plans serialized in JSON.
-/// The "metadata" field in the JSON is ignored (it's for JSON self-documentation only).
+/// Unrecognized fields (e.g. an "x-name" key) are ignored, for JSON
+/// self-documentation only.
 #[derive(Deserialize)]
 struct BodyPlanSpec {
     /// See [`KinematicTree::fixed_base`]. Optional, defaults to `false`.
@@ -232,9 +233,9 @@ struct JointSpec {
 
 #[derive(Deserialize)]
 struct DofSpec {
-    axis: [f32; 3],
     #[serde(rename = "type")]
     dof_type: DofType,
+    axis: [f32; 3],
     neutral: f32,
     limits: Option<[f32; 2]>,
     #[serde(default = "default_weight_scaler")]

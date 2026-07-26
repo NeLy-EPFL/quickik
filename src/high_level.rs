@@ -64,6 +64,31 @@ pub struct ParallelSolveConfig {
     pub n_workers: isize,
 }
 
+/// [`ParallelSolveConfig::for_recording`]'s default `overlap_len`.
+const DEFAULT_OVERLAP_LEN: usize = 10;
+/// [`ParallelSolveConfig::for_recording`]'s default `overlap_tolerance`.
+const DEFAULT_OVERLAP_TOLERANCE: f32 = 0.05;
+
+impl ParallelSolveConfig {
+    /// A `ParallelSolveConfig` that spreads `total_len` frames evenly across
+    /// every available core: one segment per core, `total_len / n_workers`
+    /// frames each (plus a fixed default overlap of 10 frames on top). For
+    /// finer control over cold-start frequency -- how often a segment
+    /// restarts from the neutral pose, trading accuracy for finer-grained
+    /// parallelism -- build a `ParallelSolveConfig` directly instead.
+    pub fn for_recording(total_len: usize) -> Self {
+        let n_workers = resolve_n_workers(-1);
+        let overlap_len = DEFAULT_OVERLAP_LEN;
+        let stride = total_len.max(1).div_ceil(n_workers);
+        ParallelSolveConfig {
+            segment_len: stride + overlap_len,
+            overlap_len,
+            overlap_tolerance: DEFAULT_OVERLAP_TOLERANCE,
+            n_workers: -1,
+        }
+    }
+}
+
 /// Resolves [`ParallelSolveConfig::n_workers`] into an actual thread count –
 /// see its docs for the exact convention.
 fn resolve_n_workers(n_workers: isize) -> usize {
@@ -333,5 +358,24 @@ mod tests {
     #[should_panic(expected = "n_workers must not be 0")]
     fn resolve_n_workers_rejects_zero() {
         resolve_n_workers(0);
+    }
+
+    #[test]
+    fn for_recording_uses_all_workers_and_the_default_overlap() {
+        let config = ParallelSolveConfig::for_recording(1000);
+        assert_eq!(config.n_workers, -1);
+        assert_eq!(config.overlap_len, DEFAULT_OVERLAP_LEN);
+        assert_eq!(config.overlap_tolerance, DEFAULT_OVERLAP_TOLERANCE);
+        assert!(config.segment_len > config.overlap_len);
+    }
+
+    #[test]
+    fn for_recording_never_produces_an_invalid_segment_len() {
+        for total_len in [0, 1, 2] {
+            let config = ParallelSolveConfig::for_recording(total_len);
+            assert!(config.segment_len > config.overlap_len);
+            // Doesn't panic building segment bounds from it either.
+            segment_bounds(total_len, config);
+        }
     }
 }

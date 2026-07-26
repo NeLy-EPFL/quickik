@@ -36,7 +36,7 @@ fn recovers_pose_from_3d_observations() {
     let mut solver: Solver = Solver::new(
         &tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -66,7 +66,7 @@ fn recovers_pose_on_fixed_base_tree_without_moving_root() {
     let mut solver: Solver = Solver::new(
         &tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -95,7 +95,7 @@ fn recovers_pose_with_slide_dof_from_3d_observations() {
     let mut solver: Solver = Solver::new(
         &tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -122,7 +122,7 @@ fn recovers_pose_from_xyview_observations() {
     let mut solver = Solver::new(
         &tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             mapper: Some(XYView),
             ..SolverConfig::default()
         },
@@ -165,7 +165,7 @@ fn recovers_pose_from_camera_observations() {
     let mut solver = Solver::new(
         &tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             mapper: Some(camera),
             ..SolverConfig::default()
         },
@@ -267,7 +267,7 @@ fn convergence_tolerance_stops_iterating_early() {
     // this toy problem, so every solve below should stop after exactly one
     // iteration regardless of its n_iterations cap.
     let generous_tolerance_config = SolverConfig {
-        weight: 0.0,
+        neutral_weight: 0.0,
         position_tolerance: 10.0,
         angle_tolerance: 10.0,
         ..SolverConfig::default()
@@ -327,7 +327,7 @@ fn joint_weight_scaler_zero_matches_missing_observation() {
     };
 
     let config = SolverConfig {
-        weight: 0.0,
+        neutral_weight: 0.0,
         ..SolverConfig::default()
     };
 

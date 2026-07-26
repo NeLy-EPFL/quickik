@@ -2,7 +2,7 @@
 schema as `benchmark/assets/neuromechfly_ypr_legs.json` -- see
 `benchmark/scripts/generate_fixtures.py`'s docstring and `src/body_plan.rs`):
 
-    {"metadata": {"name": ...},
+    {"fixed_base": bool, "x-name": ...,
      "joints": [{"name", "parent", "offset_pos": [x,y,z],
                  "offset_quat": [w,x,y,z], "dofs": [...]}]}
 
@@ -90,7 +90,7 @@ LEAF_KEYPOINTS = {
 ROOT_LINK = "pelvis"
 
 # Each DOF's `neutral` value -- the solver's regularization anchor
-# (`SolverConfig::weight`) and `State::neutral_pose`'s starting guess. The
+# (`SolverConfig::neutral_weight`) and `State::neutral_pose`'s starting guess. The
 # URDF's own zero configuration (no retargeted motion data feeds this
 # anymore -- see g1_fixtures.py's module docstring for why).
 NEUTRAL_ANGLES = [0.0] * len(REVOLUTE_JOINT_ORDER)
@@ -209,11 +209,11 @@ def build_g1_body_plan(neutral_angles):
             }
         )
 
-    return {"metadata": {"name": "g1_29dof"}, "joints": nodes}
+    return {"fixed_base": False, "x-name": "g1_29dof", "joints": nodes}
 
 
 if __name__ == "__main__":
     body_plan = build_g1_body_plan(NEUTRAL_ANGLES)
-    OUT_PATH.write_text(json.dumps(body_plan, indent=2))
+    OUT_PATH.write_text(json.dumps(body_plan, indent=2) + "\n")
     n_dofs = sum(len(j["dofs"]) for j in body_plan["joints"])
     print(f"Wrote {len(body_plan['joints'])} joints ({n_dofs} DOFs) to {OUT_PATH}")

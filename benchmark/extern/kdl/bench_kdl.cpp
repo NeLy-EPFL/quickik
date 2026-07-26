@@ -396,23 +396,12 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
       "uses simple contiguous chunking (8 independent, "
       "internally-warm-started, externally-cold-started chunks), not "
       "QuickIK's overlap-stitched segmented solve, since KDL has no "
-      "parallel solve path to mirror. single_frame_latency_max_us forces "
-      "max_iter=10 (not this file's own kMaxIter=100 ceiling) so the "
-      "forced-worst-case number is comparable to quickik/RBDL/Pinocchio's, "
-      "which all cap at 10.";
-  if (body == "g1") {
-    notes +=
-        " Unlike the fly, G1's step-size early-stop NEVER triggers within "
-        "kMaxIter=100 -- every single_frame_latency_us call burns the full "
-        "100 iterations, landing at a real but looser ~3-4mm position "
-        "residual (vs. the fly's ~10-micron near-exact fit), which is why "
-        "single_frame_latency_us (100 real iterations) is larger than "
-        "single_frame_latency_max_us (only 10 forced iterations) for this "
-        "body -- backwards from every other body/library combination in "
-        "this comparison, and not a bug: it reflects KDL's own actual "
-        "default behavior being worse than the shared 10-iteration cap on "
-        "this harder problem, not an inconsistency in the measurement.";
-  }
+      "parallel solve path to mirror. Both single_frame_latency_us and "
+      "single_frame_latency_max_us force max_iter=10 (not this file's own "
+      "kMaxIter=100 ceiling, which only bounds the warm-started throughput "
+      "sequence below) so both are comparable to quickik/RBDL/Pinocchio's, "
+      "which also cap at 10; only step_tol differs (kStepTol vs. 0, i.e. "
+      "early stopping allowed vs. forced to the full 10 iterations).";
   out << "{\n"
       << "  \"name\": \"kdl\",\n"
       << "  \"body\": \"" << body << "\",\n"
@@ -457,13 +446,17 @@ void run_body(const BodyConfig &body, const std::filesystem::path &assets_dir) {
   auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
   Frames target_frames = build_target_frames(sb.model, target);
 
+  // max_iter is forced to 10 here (not this file's own kMaxIter=100) to
+  // match QuickIK/RBDL/Pinocchio's shared iteration cap -- early stopping
+  // (step_tol=kStepTol, the default) still applies within that budget.
   std::printf("-- single-frame time (latency) --\n");
-  double single_frame_latency_us = summarize(
-      "CartToJnt() (cold)", bench_single_frame_latency(sb, q_neutral, target_frames, kLatencyNCalls, 500));
+  double single_frame_latency_us =
+      summarize("CartToJnt() (cold)",
+                 bench_single_frame_latency(sb, q_neutral, target_frames, kLatencyNCalls, 500, /*max_iter=*/10));
 
-  // step_tol=0 disables early stopping; max_iter is forced to 10 here (not
-  // this file's own kMaxIter=100) to match QuickIK/RBDL/Pinocchio's shared
-  // iteration cap -- the worst case if a frame never converges early.
+  // step_tol=0 additionally disables early stopping, forcing every solve to
+  // run the full 10 iterations -- the worst case if a frame never converges
+  // early.
   std::printf("\n-- single-frame time (latency), early stop disabled (10 iterations) --\n");
   double single_frame_latency_max_us =
       summarize("CartToJnt() (forced max iterations)",

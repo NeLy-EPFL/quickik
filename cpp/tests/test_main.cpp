@@ -66,7 +66,7 @@ rust::Slice<const quickik::KeypointObservation> slice_of(const std::vector<quick
 
 quickik::SolverConfig no_prior_config() {
   quickik::SolverConfig config = quickik::default_solver_config();
-  config.weight = 0.0f;
+  config.neutral_weight = 0.0f;
   return config;
 }
 
@@ -366,6 +366,35 @@ bool test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory() {
   return ok;
 }
 
+bool test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  const size_t n_frames = 40;
+  std::vector<std::array<float, 2>> true_angles;
+  std::vector<quickik::KeypointObservation> flat;
+  for (size_t t = 0; t < n_frames; t++) {
+    float a = 0.3f * std::sin(t * 0.15f);
+    true_angles.push_back({a, a * 0.5f});
+    for (auto &obs : observations_for(a, a * 0.5f)) flat.push_back(obs);
+  }
+
+  auto parallel_config = quickik::parallel_solve_config_for_recording(n_frames);
+  auto states = quickik::solve_sequence_segmented_parallel(
+      *tree, quickik::default_solver_config(), slice_of(flat), tree->n_joints(), parallel_config, quickik::no_mapper());
+
+#define CHECK(cond) \
+  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
+  CHECK(states->len() == n_frames);
+  for (size_t i = 0; i < n_frames; i++) {
+    auto state = states->at(i);
+    auto angles = state->dof_angles();
+    CHECK(std::abs(angles[0] - true_angles[i][0]) < 1e-2f);
+    CHECK(std::abs(angles[1] - true_angles[i][1]) < 1e-2f);
+  }
+#undef CHECK
+  return ok;
+}
+
 bool test_solve_sequence_segmented_parallel_honors_explicit_n_workers() {
   bool ok = true;
   auto tree = two_joint_chain();
@@ -420,6 +449,8 @@ int main() {
       {"solve_sequence_returns_one_state_per_frame", test_solve_sequence_returns_one_state_per_frame},
       {"solve_sequence_segmented_parallel_reconstructs_smooth_trajectory",
        test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory},
+      {"parallel_solve_config_for_recording_reconstructs_smooth_trajectory",
+       test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory},
       {"solve_sequence_segmented_parallel_honors_explicit_n_workers",
        test_solve_sequence_segmented_parallel_honors_explicit_n_workers},
   };

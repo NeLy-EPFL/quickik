@@ -80,10 +80,10 @@ mod ffi {
     #[derive(Clone, Copy, Debug)]
     struct SolverConfig {
         n_iterations: usize,
-        damping: f32,
-        weight: f32,
+        neutral_weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
+        damping: f32,
     }
 
     /// Configuration for `solve_sequence_segmented_parallel`.
@@ -121,6 +121,13 @@ mod ffi {
         /// A `SolverConfig` with reasonable defaults: 10 iterations, small
         /// damping and neutral-pose weight, and tolerances of 1e-3.
         fn default_solver_config() -> SolverConfig;
+
+        /// A `ParallelSolveConfig` that spreads `total_len` frames evenly
+        /// across every available core: one segment per core, `total_len /
+        /// n_workers` frames each (plus a fixed default overlap). For finer
+        /// control over cold-start frequency, build a `ParallelSolveConfig`
+        /// directly instead.
+        fn parallel_solve_config_for_recording(total_len: usize) -> ParallelSolveConfig;
 
         /// A kinematic tree, i.e. body plan, or skeleton.
         type KinematicTree;
@@ -403,10 +410,10 @@ fn to_core_config(
 ) -> quickik_core::solver::SolverConfig<RuntimeMapper> {
     quickik_core::solver::SolverConfig {
         n_iterations: config.n_iterations,
-        damping: config.damping,
-        weight: config.weight,
+        neutral_weight: config.neutral_weight,
         position_tolerance: config.position_tolerance,
         angle_tolerance: config.angle_tolerance,
+        damping: config.damping,
         mapper,
     }
 }
@@ -416,10 +423,10 @@ fn from_core_config(
 ) -> ffi::SolverConfig {
     ffi::SolverConfig {
         n_iterations: config.n_iterations,
-        damping: config.damping,
-        weight: config.weight,
+        neutral_weight: config.neutral_weight,
         position_tolerance: config.position_tolerance,
         angle_tolerance: config.angle_tolerance,
+        damping: config.damping,
     }
 }
 
@@ -623,6 +630,20 @@ impl SequenceSolver {
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
+    }
+}
+
+// =============================================================================
+//  ParallelSolveConfig
+// =============================================================================
+
+fn parallel_solve_config_for_recording(total_len: usize) -> ffi::ParallelSolveConfig {
+    let config = quickik_core::high_level::ParallelSolveConfig::for_recording(total_len);
+    ffi::ParallelSolveConfig {
+        segment_len: config.segment_len,
+        overlap_len: config.overlap_len,
+        overlap_tolerance: config.overlap_tolerance,
+        n_workers: config.n_workers,
     }
 }
 

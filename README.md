@@ -8,7 +8,7 @@ QuickIK provides high-level APIs for processing consecutive frames (i.e. with wa
 
 See the [docs site](https://nely-epfl.github.io/quickik/) for installation, usage examples, and benchmarks against KDL, Pinocchio, and RBDL.
 
-Not yet published to crates.io or PyPI – see [`docs/installation.md`](docs/installation.md) for building from a local clone.
+Not yet published to crates.io or PyPI – see [`docs/getting-started/installation.md`](docs/getting-started/installation.md) for building from a local clone.
 
 ## For developers
 
@@ -21,8 +21,8 @@ cd devtools-pyenv && uv sync && source .venv/bin/activate
 ### Build
 
 - **Rust core**: `cargo build` (add `--workspace` to also build the `python`/`cpp` bindings crates and the `benchmark/` crates).
-- **Python bindings**: `cd python && maturin develop --release` – see [`docs/installation.md`](docs/installation.md) for prerequisites.
-- **C++ bindings**: CMake, from `cpp/` – see [`docs/installation.md`](docs/installation.md).
+- **Python bindings**: `cd python && maturin develop --release` – see [`docs/getting-started/installation.md`](docs/getting-started/installation.md) for prerequisites.
+- **C++ bindings**: CMake, from `cpp/` – see [`docs/getting-started/installation.md`](docs/getting-started/installation.md).
 
 ### Lint/format
 

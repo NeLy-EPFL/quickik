@@ -35,9 +35,16 @@ add_custom_target(
 
 # Two static libs come out of the Rust side: the crate's own compiled code
 # (libquickik_cpp.a) and the cxx-bridge-generated C++ glue (compiled by
-# cxx_build/cc, libquickik-cpp-bridge.a). They reference each other's symbols
-# (Rust calls into cxx's C++ runtime helpers; C++ calls the exported
-# `extern "Rust"` functions), so both must be linked together.
+# cxx_build/cc, libquickik-cpp-bridge.a). Listing both below looks like it
+# should need circular-dependency handling (Rust calls into cxx's C++
+# runtime helpers; C++ calls the exported `extern "Rust"` functions) -- but
+# quickik_cpp is a Rust `staticlib`, and rustc bundles libquickik-cpp-bridge.a's
+# object files directly into libquickik_cpp.a's own archive at build time.
+# So the two archives' contents actually overlap: whichever is scanned first
+# during linking satisfies every symbol, and the identical duplicate content
+# in the other is simply never extracted. That means plain archive linking
+# (no `--start-group`/`--end-group`, a GNU ld feature Apple's linker doesn't
+# understand at all) works the same on every platform.
 add_library(quickik_cpp STATIC IMPORTED GLOBAL)
 set_target_properties(quickik_cpp PROPERTIES IMPORTED_LOCATION ${QUICKIK_TARGET_DIR}/libquickik_cpp.a)
 add_dependencies(quickik_cpp quickik_cargo_build)
@@ -46,12 +53,14 @@ add_library(quickik_cpp_bridge STATIC IMPORTED GLOBAL)
 set_target_properties(quickik_cpp_bridge PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libquickik-cpp-bridge.a)
 add_dependencies(quickik_cpp_bridge quickik_cargo_build)
 
+set(QUICKIK_RUST_LINK_LIBS quickik_cpp_bridge quickik_cpp)
+
 add_executable(quickik_cpp_tests tests/test_main.cpp)
 target_include_directories(quickik_cpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_dependencies(quickik_cpp_tests quickik_cargo_build)
 target_link_libraries(
   quickik_cpp_tests PRIVATE
-  -Wl,--start-group quickik_cpp_bridge quickik_cpp -Wl,--end-group
+  ${QUICKIK_RUST_LINK_LIBS}
   pthread dl m
 )
 
@@ -64,6 +73,6 @@ target_compile_options(quickik_cpp_benchmark PRIVATE -O3)
 add_dependencies(quickik_cpp_benchmark quickik_cargo_build)
 target_link_libraries(
   quickik_cpp_benchmark PRIVATE
-  -Wl,--start-group quickik_cpp_bridge quickik_cpp -Wl,--end-group
+  ${QUICKIK_RUST_LINK_LIBS}
   pthread dl m
 )

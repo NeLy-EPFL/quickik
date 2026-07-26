@@ -33,7 +33,7 @@ fn solve_frame_warm_starts_from_previous_pose() {
     let tree = common::two_joint_chain();
     let config = SolverConfig {
         n_iterations: 1,
-        weight: 0.0,
+        neutral_weight: 0.0,
         ..SolverConfig::default()
     };
     let target = observations_for(&tree, &[0.4, 0.3]);

@@ -4,9 +4,9 @@
 # (copied from wherever benchmark/plot/*.py last wrote them) -- then builds
 # or serves the site.
 #
-# Prerequisites on PATH: cargo, zensical (`uv tool install zensical`),
-# doxygen (system package manager). uv itself is used to manage a throwaway
-# venv for maturin/pdoc.
+# Prerequisites on PATH: cargo, uv, doxygen (system package manager).
+# zensical comes from devtools-pyenv (`uv sync` there); uv itself is used
+# to manage a throwaway venv for maturin/pdoc.
 #
 # Usage: docs/build.sh [build|serve]  (default: build)
 set -euo pipefail
@@ -61,4 +61,4 @@ else
     echo "docs/build.sh: no charts in benchmark/plot/results/ yet -- see benchmark/README.md" >&2
 fi
 
-zensical "${1:-build}"
+uv run --project devtools-pyenv zensical "${1:-build}"

@@ -71,7 +71,7 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
     let mut zero_reg_solver: Solver = Solver::new(
         tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             ..SolverConfig::default()
         },
     );
@@ -194,7 +194,7 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
     let mut zero_reg_solver: Solver<M> = Solver::new(
         tree,
         SolverConfig {
-            weight: 0.0,
+            neutral_weight: 0.0,
             mapper: Some(mapper),
             ..SolverConfig::default()
         },

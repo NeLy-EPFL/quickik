@@ -95,7 +95,7 @@ def solve_sequence_xyview(tree, fixtures):
     """Warm-started XYView solve, mirroring `render_video.solve_sequence` but
     with a `quickik.XYView()` mapper, 2D observations, and a stronger
     neutral-pose prior -- see `WEIGHT_2D_XYVIEW`."""
-    config = quickik.SolverConfig(weight=WEIGHT_2D_XYVIEW)
+    config = quickik.SolverConfig(neutral_weight=WEIGHT_2D_XYVIEW)
     seq = quickik.SequenceSolver(tree, config, mapper=quickik.XYView())
     return [
         seq.solve_frame(build_observations_2d_xyview(f["target_ego"]))
@@ -325,7 +325,7 @@ def setup_panel(ax, body):
         body["lo"][2],
         "X-Y projection",
         size=x_range * 0.06,
-        color="0.4",
+        color="0.7",
     )
     return artists
 
