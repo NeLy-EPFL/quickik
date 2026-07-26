@@ -79,16 +79,6 @@ METRICS = [
     },
 ]
 
-# Metric key -> the library whose bar, in *both* bodies, should be drawn
-# capped at CAP_MULTIPLE-x the next-highest bar's value (the max across
-# every other library's bar in either body) instead of running out to its
-# true value, which would flatten every other bar down near zero on a
-# linear axis -- see `draw_body_bars`. Only KDL's mean-latency result is
-# extreme enough (up to ~60x the next-highest bar, for g1) to need this;
-# everywhere else a plain, uncapped bar is clearer.
-CAPPED_METRIC_BARS = {"single_frame_latency_us": "kdl"}
-CAP_MULTIPLE = 2
-
 # Explicit display order (not alphabetical): language variants of the same
 # library grouped together, fastest-per-library first.
 ORDER = [
@@ -310,24 +300,6 @@ def register_fonts():
 BAR_OFFSET = 0.20
 BAR_HEIGHT = 0.40
 
-# A capped bar's "keeps going" dashes past its tip (see draw_body_bars):
-# DASH_COUNT blocks, each DASH_WIDTH*cap_length wide, separated by
-# DASH_GAP*cap_length (also used as the gap right after the bar's tip).
-# Sized so the whole run -- DASH_GAP + DASH_COUNT*DASH_WIDTH +
-# (DASH_COUNT-1)*DASH_GAP, as a fraction of cap_length -- lands comfortably
-# inside XLIM_PAD's headroom past the widest bar.
-DASH_COUNT = 5
-DASH_WIDTH = 0.012
-DASH_GAP = 0.01
-
-
-def dash_positions(cap_length):
-    """Left-edge x-positions for DASH_COUNT dashes continuing a capped bar
-    of length `cap_length` past its own tip."""
-    step = (DASH_WIDTH + DASH_GAP) * cap_length
-    first = cap_length + DASH_GAP * cap_length
-    return [first + i * step for i in range(DASH_COUNT)]
-
 
 def draw_body_bars(
     ax,
@@ -339,28 +311,11 @@ def draw_body_bars(
     unit,
     small_unit,
     color,
-    cap_lib=None,
-    cap_length=None,
 ):
     """Draws one body's bars (one per library in `lib_names`, at the matching
     `y_positions`) on `ax`, skipping libraries with no value for `key`, and
     annotates each with its value (see `format_value`) just past its tip --
     plain "xxx unit", no parens.
-
-    If `cap_lib` names one of `lib_names` and `cap_length` is given, that
-    bar is instead drawn at the (already-scaled) `cap_length` rather than
-    its true length -- since running it out to its true value would flatten
-    every other bar down near zero on a linear axis. The caller computes
-    `cap_length` once per metric (shared across both bodies -- see
-    CAPPED_METRIC_BARS), so both bodies' bars for `cap_lib` end up the same
-    length even though their true values differ. That one bar's true value
-    plus "(capped in chart)" is written inside it, and a few small
-    same-color, same-height blocks continue past its tip (see
-    dash_positions()) -- a dashed-line cue that the bar keeps going -- in
-    place of the plain label every other bar gets there. Those blocks are
-    deliberately excluded from this function's returned widest extent (they
-    size themselves off of it, via dash_positions(cap_length)), so they land
-    inside the caller's XLIM_PAD headroom rather than pushing it out further.
 
     Every QuickIK bar is drawn at QUICKIK_ALPHA with its value label bold;
     every other library's bar gets OTHER_ALPHA and a plain-weight label.
@@ -368,8 +323,6 @@ def draw_body_bars(
     Returns the widest x-extent actually drawn (unpadded, so the caller
     decides how much room to leave past it), or 0.0 if no library had data.
     """
-    from matplotlib.patches import Rectangle
-
     present = [
         (y, lib, results_by_name[lib][key] * scale)
         for y, lib in zip(y_positions, lib_names, strict=True)
@@ -380,44 +333,14 @@ def draw_body_bars(
 
     ys = [y for y, _, _ in present]
     values = [v for _, _, v in present]
-    display_values = list(values)
-    cap_idx = next((i for i, (_, lib, _) in enumerate(present) if lib == cap_lib), None)
-    if cap_idx is not None and cap_length is not None:
-        display_values[cap_idx] = cap_length
 
-    bars = ax.barh(ys, display_values, height=BAR_HEIGHT, color=color, zorder=3)
-    for i, (bar, (_, lib, _)) in enumerate(zip(bars, present, strict=True)):
+    bars = ax.barh(ys, values, height=BAR_HEIGHT, color=color, zorder=3)
+    for bar, (_, lib, value) in zip(bars, present, strict=True):
         is_quickik = lib.startswith("quickik-")
         bar.set_alpha(QUICKIK_ALPHA if is_quickik else OTHER_ALPHA)
         weight = "bold" if is_quickik else "normal"
-        text = format_value(values[i], unit, small_unit)
-        if i == cap_idx and cap_length is not None:
-            ax.annotate(
-                f"{text} (capped in chart)",
-                (bar.get_width(), bar.get_y() + bar.get_height() / 2),
-                xytext=(-4, 0),
-                fontsize=TEXT_NUMBER_FONTSIZE,
-                fontweight=weight,
-                textcoords="offset points",
-                ha="right",
-                va="center",
-                zorder=4,
-            )
-            for dash_x in dash_positions(cap_length):
-                ax.add_patch(
-                    Rectangle(
-                        (dash_x, bar.get_y()),
-                        DASH_WIDTH * cap_length,
-                        bar.get_height(),
-                        facecolor=color,
-                        alpha=bar.get_alpha(),
-                        edgecolor="none",
-                        zorder=3,
-                    )
-                )
-            continue
         ax.annotate(
-            text,
+            format_value(value, unit, small_unit),
             (bar.get_width(), bar.get_y() + bar.get_height() / 2),
             xytext=(4, 0),
             fontsize=TEXT_NUMBER_FONTSIZE,
@@ -427,7 +350,7 @@ def draw_body_bars(
             va="center",
             zorder=4,
         )
-    return max(display_values)
+    return max(values)
 
 
 def plot_chart(results_by_body):
@@ -490,18 +413,6 @@ def plot_chart(results_by_body):
             metric["scale"],
         )
 
-        cap_lib = CAPPED_METRIC_BARS.get(key)
-        cap_length = None
-        if cap_lib:
-            other_values = [
-                r[key]
-                for by_name in (nmf_by_name, g1_by_name)
-                for name, r in by_name.items()
-                if name != cap_lib and r.get(key) is not None
-            ]
-            if other_values:
-                cap_length = CAP_MULTIPLE * max(other_values) * scale
-
         nmf_ys = [y + BAR_OFFSET for y in group_ys]
         g1_ys = [y - BAR_OFFSET for y in group_ys]
         widest_nmf = draw_body_bars(
@@ -514,8 +425,6 @@ def plot_chart(results_by_body):
             unit,
             small_unit,
             NEUROMECHFLY_COLOR,
-            cap_lib,
-            cap_length,
         )
         widest_g1 = draw_body_bars(
             ax,
@@ -527,8 +436,6 @@ def plot_chart(results_by_body):
             unit,
             small_unit,
             G1_COLOR,
-            cap_lib,
-            cap_length,
         )
         widest = max(widest_nmf, widest_g1)
         if widest == 0.0:
@@ -553,10 +460,6 @@ def plot_chart(results_by_body):
             label.set_fontweight("bold")
         ax.set_ylim(-0.5, len(ordered_libs) - 1 + 0.5)
         despine(ax)
-        # Even a capped bar's tip gets the usual padding now: its "..."
-        # label past the tip (see draw_body_bars) needs the room, and the
-        # in-bar "(capped in chart)" text already marks it as truncated, so
-        # a flush-to-the-edge tip is no longer the only cue for that.
         ax.set_xlim(0, widest * XLIM_PAD)
 
     legend_handles = [
