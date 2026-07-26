@@ -43,6 +43,8 @@ Assuming you already have the whole recording upfront, the example below solves 
     !!! note "Bigger practical performance win in Python"
         Python's `solve_sequence` takes `positions`/`weights` NumPy arrays instead of a list of per-frame `KeypointObservation` lists, so it never constructs one Python object per keypoint per frame. That construction is what actually dominates call overhead for a long recording.
 
+    Any dtype is accepted for `positions`/`weights` (e.g. the common case of a `float64` array) and cast to `float32`, following NumPy's own casting rules.
+
 === "C++"
 
     ```cpp
@@ -123,6 +125,8 @@ The example below splits a long recording into segments explicitly:
         kinematic_tree, SolverConfig(), long_positions, long_weights, parallel_config
     )
     ```
+
+    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`.
 
 === "C++"
 

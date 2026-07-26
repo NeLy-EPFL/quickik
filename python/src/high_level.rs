@@ -1,4 +1,4 @@
-use numpy::{PyReadonlyArray2, PyReadonlyArray3};
+use numpy::{AllowTypeChange, PyArrayLike2, PyArrayLike3};
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
@@ -65,12 +65,14 @@ impl SequenceSolver {
     /// Given as raw arrays rather than a list of per-frame
     /// `KeypointObservation` lists so this never constructs one Python
     /// object per keypoint per frame, which otherwise dominates call
-    /// overhead for long recordings.
+    /// overhead for long recordings. Any dtype is accepted and cast to
+    /// `float32` (e.g. the common case of a `float64` array), following
+    /// NumPy's own casting rules.
     fn solve_sequence(
         &mut self,
         py: Python<'_>,
-        positions: PyReadonlyArray3<'_, f32>,
-        weights: PyReadonlyArray2<'_, f32>,
+        positions: PyArrayLike3<'_, f32, AllowTypeChange>,
+        weights: PyArrayLike2<'_, f32, AllowTypeChange>,
     ) -> PyResult<Vec<State>> {
         self.sync_config(py);
         let positions_arr = positions.as_array();
@@ -181,7 +183,9 @@ impl ParallelSolveConfig {
 /// as [`missing`](crate::observation::KeypointObservation::missing). This
 /// avoids constructing one Python `KeypointObservation` object per keypoint
 /// per frame, which otherwise dominates call overhead for large sequences
-/// (e.g. a whole recording's worth of frames in one call).
+/// (e.g. a whole recording's worth of frames in one call). Any dtype is
+/// accepted and cast to `float32` (e.g. the common case of a `float64`
+/// array), following NumPy's own casting rules.
 #[pyfunction]
 #[pyo3(signature = (kinematic_tree, config, positions, weights, parallel_config, mapper=None))]
 #[allow(clippy::too_many_arguments)]
@@ -189,8 +193,8 @@ pub(crate) fn solve_sequence_segmented_parallel(
     py: Python<'_>,
     kinematic_tree: KinematicTree,
     config: SolverConfig,
-    positions: PyReadonlyArray3<'_, f32>,
-    weights: PyReadonlyArray2<'_, f32>,
+    positions: PyArrayLike3<'_, f32, AllowTypeChange>,
+    weights: PyArrayLike2<'_, f32, AllowTypeChange>,
     parallel_config: ParallelSolveConfig,
     mapper: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Vec<State>> {

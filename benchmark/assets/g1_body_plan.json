@@ -1,7 +1,6 @@
 {
-  "metadata": {
-    "name": "g1_29dof"
-  },
+  "fixed_base": false,
+  "x-name": "g1_29dof",
   "joints": [
     {
       "name": "pelvis",

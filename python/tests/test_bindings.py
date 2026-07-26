@@ -10,7 +10,7 @@ directly from the chain's known geometry, in [root, joint1, joint2, tip]
 order, to build observations for a target pose.
 
 Run with QuickIK's Python extension already built for this interpreter (see
-docs/installation.md):
+docs/getting-started/installation.md):
 
     cd python && maturin develop --release
     pytest tests/
@@ -242,6 +242,22 @@ def test_solve_sequence_returns_one_state_per_frame(tree):
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
 
 
+def test_solve_sequence_casts_float64_arrays_to_float32(tree):
+    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
+    positions = np.array(
+        [two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float64
+    )
+    weights = np.ones((len(angles), tree.n_joints), dtype=np.float64)
+
+    states = solver.solve_sequence(positions, weights)
+
+    assert len(states) == 3
+    last = states[2]
+    assert last.dof_angles[0] == pytest.approx(0.3, abs=1e-2)
+    assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
+
+
 def test_solve_sequence_rejects_wrong_keypoint_count(tree):
     positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
     weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
@@ -285,6 +301,24 @@ def test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory(tree
     positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
 
     parallel_config = quickik.ParallelSolveConfig.for_recording(len(true_angles))
+    states = quickik.solve_sequence_segmented_parallel(
+        tree, quickik.SolverConfig(), positions, weights, parallel_config
+    )
+
+    assert len(states) == len(true_angles)
+    for state, (a1, a2) in zip(states, true_angles, strict=True):
+        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
+def test_solve_sequence_segmented_parallel_casts_float64_arrays_to_float32(tree):
+    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
+    positions = positions.astype(np.float64)
+    weights = weights.astype(np.float64)
+
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
+    )
     states = quickik.solve_sequence_segmented_parallel(
         tree, quickik.SolverConfig(), positions, weights, parallel_config
     )

@@ -17,7 +17,7 @@ The following plots show a comparison of QuickIK against three other whole-tree 
     - **Throughput (single thread):** frames per second solving a long recording, each warm-started from the previous frame's solution.
     - **Throughput (multi-thread, 8 threads):** the same recording split across 8 threads and solved in parallel.
 
-![Benchmark comparison across both the NeuroMechFly fly body and the Unitree G1 humanoid body](assets/benchmarks/comparison.svg){ width="480" }
+![Benchmark comparison across both the NeuroMechFly fly body and the Unitree G1 humanoid body](../assets/benchmarks/comparison.svg){ width="480" }
 
 ??? note "Implementation notes"
     === "QuickIK (Python/C++/Rust)"
@@ -36,4 +36,4 @@ The following plots show a comparison of QuickIK against three other whole-tree 
 
 A separate <abbr title="Scaling the total workload proportionally to the number of workers to measure parallel computing performance. Under ideal scaling, the relative speed-up is the same as the number of workers. As we reach hardware limits, overhead dominates and the speed-up drops. By contrast, a &quot;strong scaling test&quot; keeps the total workload constant.">weak scaling test</abbr> (QuickIK's Rust API, using NeuroMechFly) measures how throughput grows as both thread count and total workload grow together.
 
-![Speedup vs. worker threads](assets/benchmarks/scaling.svg)
+![Speedup vs. worker threads](../assets/benchmarks/scaling.svg)

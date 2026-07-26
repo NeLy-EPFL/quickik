@@ -210,7 +210,8 @@ impl KinematicTree {
 // =============================================================================
 
 /// Root-level data structure for body plans serialized in JSON.
-/// The "metadata" field in the JSON is ignored (it's for JSON self-documentation only).
+/// Unrecognized fields (e.g. an "x-name" key) are ignored, for JSON
+/// self-documentation only.
 #[derive(Deserialize)]
 struct BodyPlanSpec {
     /// See [`KinematicTree::fixed_base`]. Optional, defaults to `false`.

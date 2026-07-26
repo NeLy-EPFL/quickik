@@ -26,9 +26,9 @@ In QuickIK, joints double as **keypoints**[^1] – the points on the body whose 
 
 - A **type**: can be `hinge` or `slide`.
 - An **axis**: this is the rotational axis for hinge joints or translational axis for slide joints.
-- A **neutral** value: the solver favors poses that are closer to this is the "natural" rotation angle or slide position. For slide joints, the value is in radians; for hinge DOFs, the value is given in or whatever unit the joint's position offset is given in.
-- A **weight scaler** controlling the _scale_[^3] of how strongly the solver favors the neutral state defined above.
+- A **neutral** value: the "natural" rotation angle or slide position the solver favors poses being closer to. For hinge DOFs, this is in radians; for slide DOFs, it's in whatever unit the joint's position offset uses.
 - Optionally, the **limits** for the value of this DOF (angle for hinge joints, positions for slide joints). Same unit as the neutral value. Set to `null` if unbounded.
+- A **weight scaler** controlling the _scale_[^3] of how strongly the solver favors the neutral state defined above.
 
 [^3]:
     Upon initiating the inverse kinematics solver, the user can define a weight for the pull toward the neutral pose. Like the weight scaler for the joint's weight, the final weight toward the neutral value for each DOF is the product of the weight supplied at runtime and the scaler specified here in the body plan.
@@ -39,7 +39,7 @@ In QuickIK, joints double as **keypoints**[^1] – the points on the body whose 
 In QuickIK, the body plan is specified in JSON. An example JSON file is as follows.
 
 !!! info "JSON schema"
-    A formal schema of the JSON format is [available here](https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/bodyplan_20260726.schema.json). You can use it for formal [syntax check with you IDE](https://code.visualstudio.com/docs/languages/json).
+    A formal schema of the JSON format is [available here](https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/bodyplan_20260726.schema.json). You can use it for formal [syntax check with your IDE](https://code.visualstudio.com/docs/languages/json).
 
 ```json
 {
@@ -64,8 +64,8 @@ In QuickIK, the body plan is specified in JSON. An example JSON file is as follo
           "type": "hinge",
           "axis": [0.0, 0.0, 1.0],
           "neutral": 0.0,
-          "weight_scaler": 1.0,
-          "limits": [-3.0, 3.0]
+          "limits": [-3.0, 3.0],
+          "weight_scaler": 1.0
         }
       ]
     },
