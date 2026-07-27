@@ -311,15 +311,22 @@ std::vector<double> bench_single_frame_latency(SolverBundle &sb, const JntArray 
 // over the 300-frame native-rate fixture (frame i seeded from frame i-1's
 // solution).
 std::vector<double> bench_sequence(SolverBundle &sb, const JntArray &q_neutral, const std::vector<Frames> &frames) {
+  // max_iter=10 (not this file's own kMaxIter=100) to match quickik's/RBDL's
+  // hard iteration cap for the equivalent metric -- see run_body's own
+  // single_frame_latency calls and README.md's methodology note. Without
+  // this, KDL's warm-started throughput solves can silently run up to 10x
+  // more iterations per frame than the other two libraries' for the same
+  // metric, biasing the comparison.
+  constexpr unsigned int kThroughputMaxIter = 10;
   JntArray q(q_neutral);
-  for (auto &target : frames) q = solve(sb, q, target);  // untimed warmup pass
+  for (auto &target : frames) q = solve(sb, q, target, kThroughputMaxIter);  // untimed warmup pass
 
   q = q_neutral;
   std::vector<double> samples;
   samples.reserve(frames.size());
   for (auto &target : frames) {
     auto t0 = Clock::now();
-    q = solve(sb, q, target);
+    q = solve(sb, q, target, kThroughputMaxIter);
     samples.push_back(elapsed_us(t0));
   }
   return samples;
@@ -361,7 +368,8 @@ double run_multithread_once(const BodyPlan &plan, const std::vector<double> &neu
     threads.emplace_back([&plan, &neutral_angles, &sequence, start, end] {
       SolverBundle sb(plan);
       JntArray q = sb.neutral(neutral_angles);
-      for (size_t i = start; i < end; i++) q = solve(sb, q, sequence[i]);
+      // max_iter=10: see bench_sequence's own comment on kThroughputMaxIter.
+      for (size_t i = start; i < end; i++) q = solve(sb, q, sequence[i], 10);
     });
     start = end;
   }

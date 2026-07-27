@@ -8,9 +8,10 @@
 //! `../README.md`), so -- unlike before that field existed -- this no longer
 //! needs `taskset` to vary the thread count; one run of this binary sweeps
 //! 1/2/4/8/16 workers itself. Writes `../plot/results/quickik-scaling.json`
-//! (a JSON array, not the single-object shape `RESULTS_SCHEMA.md` describes
-//! for the other benchmarks, since this is a sweep over several data points
-//! rather than one result) for `../plot/plot_scaling.py` to chart.
+//! (a JSON array, not the single-object shape `write_results_json` in
+//! `../quickik_rust/src/perf.rs` builds for the other benchmarks, since this
+//! is a sweep over several data points rather than one result) for
+//! `../plot/plot_scaling.py` to chart.
 
 use std::sync::Arc;
 
