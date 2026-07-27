@@ -56,3 +56,7 @@ Of course, limitations exist: The green fit matches the observations about as we
 <video style="width: 70%" autoplay loop muted controls>
   <source src="https://datasets.epfl.ch/nely-public-share/quickik_assets/docs/example_clip_2d_xyview.mp4" type="video/mp4">
 </video>
+
+The figure below shows a comparison of the throughput and error (from ground-truth 3D keypoint positions) of the 2D and 3D inverse kinematics solutions.
+
+![2D vs. 3D solutions](../assets/benchmarks/comparison-2d.svg)

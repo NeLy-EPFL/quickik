@@ -4,7 +4,7 @@ icon: lucide/house
 
 # QuickIK
 
-QuickIK is a fast <abbr title="Computing XYZ world coordinates of joint keypoints given joint angles. Can be solved analytically..">forward</abbr> and <abbr title="Fitting joint angles and base state needed to place joint keypoints at their observed place. Generally requires iterative optimization.">inverse</abbr> kinematics library. It provides high-level APIs for processing consecutive frames with warm starts and multi-threaded batch processing, as well as a low-level API for more specific use cases (e.g., real-time applications). QuickIK is written in Rust but comes with Python and C++ bindings.
+QuickIK is a fast <abbr title="Computing XYZ world coordinates of joint keypoints given joint angles. Can be solved analytically.">forward</abbr> and <abbr title="Fitting joint angles and base state needed to place joint keypoints at their observed place. Generally requires iterative optimization.">inverse</abbr> kinematics library. It provides high-level APIs for processing consecutive frames with warm starts and multi-threaded batch processing, as well as a low-level API for more specific use cases (e.g., real-time applications). QuickIK is written in Rust but comes with Python and C++ bindings.
 
 ## Feature highlights
 
