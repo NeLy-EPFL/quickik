@@ -1,16 +1,12 @@
 # QuickIK
 
-Fast inverse kinematics library aimed for both high throughput and low latency.
+QuickIK is a fast inverse kinematics library written in Rust, with Python and C++ bindings.
 
-QuickIK provides high-level APIs for processing consecutive frames (i.e. with warm starts) and multi-threaded batch processing, as well as low-level APIs for more specific use cases (e.g. real-time application). QuickIK is written in Rust but comes with Python and C++ bindings.
-
-## Documentation
-
-See the [docs site](https://nely-epfl.github.io/quickik/) for installation, usage examples, and benchmarks against KDL, Pinocchio, and RBDL.
-
-Not yet published to crates.io or PyPI – see [`docs/getting-started/installation.md`](docs/getting-started/installation.md) for building from a local clone.
+[**Documentation**](https://nely-epfl.github.io/quickik/)
 
 ## For developers
+
+### Toolchain
 
 A series of Python tools are used for development (Python bindings build tools, linting, benchmark plotting, unit testing, etc.). These are provided in a uv-managed environment under [`devtools-pyenv/`](devtools-pyenv/). This environment is unrelated to the QuickIK Python bindings, which lives under [`python/`](python/). The rest of the section assumes you have activated this environment:
 
