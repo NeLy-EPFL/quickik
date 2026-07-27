@@ -337,6 +337,47 @@ bool test_solve_sequence_returns_one_state_per_frame() {
   return ok;
 }
 
+bool test_state_list_at_out_of_range_throws() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto solver = quickik::new_sequence_solver(*tree, quickik::default_solver_config(), quickik::no_mapper());
+
+  std::vector<quickik::KeypointObservation> flat;
+  for (auto &obs : observations_for(0.1f, 0.05f)) flat.push_back(obs);
+  auto states = solver->solve_sequence(slice_of(flat), tree->n_joints());
+
+  try {
+    states->at(states->len());
+    std::fprintf(stderr, "  FAILED: expected an exception for an out-of-range StateList index\n");
+    ok = false;
+  } catch (const std::exception &) {
+    // expected: caught and rethrown as a C++ exception rather than aborting
+    // the process.
+  }
+  return ok;
+}
+
+bool test_solve_sequence_rejects_length_not_a_multiple_of_n_joints() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto solver = quickik::new_sequence_solver(*tree, quickik::default_solver_config(), quickik::no_mapper());
+
+  // One fewer than a whole frame's worth of observations.
+  std::vector<quickik::KeypointObservation> flat = observations_for(0.1f, 0.05f);
+  flat.pop_back();
+
+  try {
+    solver->solve_sequence(slice_of(flat), tree->n_joints());
+    std::fprintf(stderr, "  FAILED: expected an exception for a misaligned observations length\n");
+    ok = false;
+  } catch (const std::exception &) {
+    // expected: caught and rethrown as a C++ exception rather than aborting
+    // the process (regression test for the validation running outside the
+    // catch_panic boundary).
+  }
+  return ok;
+}
+
 bool test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory() {
   bool ok = true;
   auto tree = two_joint_chain();
@@ -453,6 +494,9 @@ int main() {
        test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory},
       {"solve_sequence_segmented_parallel_honors_explicit_n_workers",
        test_solve_sequence_segmented_parallel_honors_explicit_n_workers},
+      {"state_list_at_out_of_range_throws", test_state_list_at_out_of_range_throws},
+      {"solve_sequence_rejects_length_not_a_multiple_of_n_joints",
+       test_solve_sequence_rejects_length_not_a_multiple_of_n_joints},
   };
 
   int n_failed = 0;

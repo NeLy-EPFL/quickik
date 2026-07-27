@@ -158,8 +158,9 @@ mod ffi {
         type StateList;
         /// Number of states in the list.
         fn len(self: &StateList) -> usize;
-        /// The state at index `i`.
-        fn at(self: &StateList, i: usize) -> Box<State>;
+        /// The state at index `i`. Raises an exception (rather than
+        /// aborting the process) if `i >= len()`.
+        fn at(self: &StateList, i: usize) -> Result<Box<State>>;
 
         /// The inverse kinematics solver, backed by a single `Mapper` fixed
         /// at construction (see this module's top-level docs).
@@ -516,8 +517,9 @@ impl StateList {
     fn len(&self) -> usize {
         self.0.len()
     }
-    fn at(&self, i: usize) -> Box<State> {
-        Box::new(State(self.0[i].clone()))
+    fn at(&self, i: usize) -> Result<Box<State>, String> {
+        let states = &self.0;
+        catch_panic(move || Box::new(State(states[i].clone())))
     }
 }
 
@@ -615,9 +617,11 @@ impl SequenceSolver {
         observations: &[ffi::KeypointObservation],
         n_joints: usize,
     ) -> Result<Box<StateList>, String> {
-        let sequence = split_into_frames(observations, n_joints);
         let inner = &mut self.inner;
-        catch_panic(move || Box::new(StateList(inner.solve_sequence(&sequence))))
+        catch_panic(move || {
+            let sequence = split_into_frames(observations, n_joints);
+            Box::new(StateList(inner.solve_sequence(&sequence)))
+        })
     }
     fn state(&self) -> Box<State> {
         Box::new(State(self.inner.state.clone()))
@@ -660,7 +664,6 @@ fn solve_sequence_segmented_parallel(
     mapper: ffi::Mapper,
 ) -> Result<Box<StateList>, String> {
     let mapper = to_runtime_mapper(&mapper);
-    let sequence = split_into_frames(observations, n_joints);
     let core_parallel_config = quickik_core::high_level::ParallelSolveConfig {
         segment_len: parallel_config.segment_len,
         overlap_len: parallel_config.overlap_len,
@@ -669,6 +672,7 @@ fn solve_sequence_segmented_parallel(
     };
     let core_config = to_core_config(config, mapper);
     catch_panic(move || {
+        let sequence = split_into_frames(observations, n_joints);
         Box::new(StateList(
             quickik_core::high_level::solve_sequence_segmented_parallel(
                 &tree.0,
