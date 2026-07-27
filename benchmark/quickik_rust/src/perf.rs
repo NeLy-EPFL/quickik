@@ -25,12 +25,12 @@ use crate::twod::observations_2d_xyview;
 pub const SEGMENT_LEN: usize = 200;
 pub const OVERLAP_LEN: usize = 20;
 /// Worker count for the main "multi-thread sequence throughput" metric,
-/// passed explicitly via `ParallelSolveConfig::n_workers` -- fixed rather
+/// passed explicitly via `ParallelSolveConfig::n_workers`: fixed rather
 /// than detected, so the number is reproducible regardless of the machine's
 /// core count. See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
 const MULTITHREAD_N_THREADS: usize = 8;
 /// Frame count for the single-thread sequence-throughput metric, tiled from
-/// the 300-frame native-rate fixture -- larger than the multi-thread
+/// the 300-frame native-rate fixture: larger than the multi-thread
 /// metric's per-worker segment since this one has no worker count to divide
 /// by.
 const SINGLE_THREAD_N_FRAMES: usize = 1000;
@@ -38,7 +38,7 @@ const SINGLE_THREAD_N_FRAMES: usize = 1000;
 /// Total frame count that `solve_sequence_segmented_parallel`'s own
 /// `segment_bounds` splits into exactly `n_segments` segments of
 /// `SEGMENT_LEN` frames each (stride `SEGMENT_LEN - OVERLAP_LEN` between
-/// segment starts) -- so a `n_segments`-worker run gets exactly one segment
+/// segment starts), so a `n_segments`-worker run gets exactly one segment
 /// per worker, rather than some workers getting two while others idle.
 pub fn frames_for_n_segments(n_segments: usize) -> usize {
     SEGMENT_LEN + n_segments.saturating_sub(1) * (SEGMENT_LEN - OVERLAP_LEN)
@@ -141,7 +141,7 @@ fn bench_single_thread_sequence_throughput<M: Mapper3Dto2D>(
 
 /// Multi-thread sequence throughput: `solve_sequence_segmented_parallel` on
 /// a longer tiled sequence, using exactly `n_workers` threads (joblib
-/// convention -- see `ParallelSolveConfig::n_workers`). Warms up once, then
+/// convention, see `ParallelSolveConfig::n_workers`). Warms up once, then
 /// times a second run.
 pub fn bench_multithread_sequence_throughput(
     tree: &Arc<KinematicTree>,
@@ -275,7 +275,7 @@ fn write_results_json(
 }
 
 /// Tiles the native-rate fixture up to `len` frames, reprojecting each
-/// frame's `target_ego` to 2D via `to_2d` -- the 2D counterpart of
+/// frame's `target_ego` to 2D via `to_2d`: the 2D counterpart of
 /// [`tiled_native_rate_sequence`].
 fn tiled_native_rate_sequence_2d(
     native_rate_frames: &[NativeRateFrame],

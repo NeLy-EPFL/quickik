@@ -7,7 +7,7 @@ use nalgebra::{Dyn, Matrix, Matrix2x3, Matrix3, Storage, StorageMut, Vector2, Ve
 
 /// Observation of a single keypoint, e.g. from MoCap data.
 ///
-/// A [`Position2D`] observation carries no mapper of its own -- the mapper
+/// A [`Position2D`] observation carries no mapper of its own: the mapper
 /// used to project the forward-kinematics position into 2D is specified once
 /// when [`Solver`] is constructed.
 ///
@@ -43,7 +43,7 @@ pub enum KeypointObservation {
 pub trait Mapper3Dto2D: Copy + std::fmt::Debug {
     /// Maps a 3D world position and its Jacobian to 2D, writing the projected
     /// Jacobian into `jacobian_2d_out` (shape `2 x jacobian_world3d.ncols()`)
-    /// in place rather than allocating a new matrix -- this runs once per
+    /// in place rather than allocating a new matrix: this runs once per
     /// keypoint per Gauss-Newton iteration, on the solver's hot path.
     /// `jacobian_world3d`/`jacobian_2d_out` accept any storage (owned or a
     /// view) so callers don't need to copy a view into an owned matrix just

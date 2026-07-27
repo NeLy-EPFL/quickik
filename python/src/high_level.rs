@@ -137,8 +137,8 @@ impl ParallelSolveConfig {
     /// per-DOF angle disagreement (radians) tolerated between neighboring
     /// segments' overlapping frames before logging a warning. `n_workers`:
     /// number of worker threads. A positive value is used directly, unless it
-    /// exceeds the number of available cores -- in that case it's clipped to
-    /// that count and a warning is logged. A negative value counts backward
+    /// exceeds the number of available cores: it's then clipped to that
+    /// count and a warning is logged. A negative value counts backward
     /// from all available cores: `-1` uses all, `-2` uses all but one, etc.
     /// `0` is invalid.
     #[new]
@@ -161,8 +161,8 @@ impl ParallelSolveConfig {
     /// A `ParallelSolveConfig` that spreads `total_len` frames evenly across
     /// every available core: one segment per core, `total_len / n_workers`
     /// frames each (plus a fixed default overlap). For finer control over
-    /// cold-start frequency -- how often a segment restarts from the neutral
-    /// pose, trading accuracy for finer-grained parallelism -- build a
+    /// cold-start frequency (how often a segment restarts from the neutral
+    /// pose, trading accuracy for finer-grained parallelism), build a
     /// `ParallelSolveConfig` directly instead.
     #[staticmethod]
     fn for_recording(total_len: usize) -> Self {
@@ -174,7 +174,7 @@ impl ParallelSolveConfig {
 
 /// Solves a single long sequence in parallel by splitting it into slightly
 /// overlapping segments, each solved on its own thread. `mapper` is a
-/// `Camera`, an `XYView`, or `None` -- see [`Solver`](crate::solver::Solver).
+/// `Camera`, an `XYView`, or `None`; see [`Solver`](crate::solver::Solver).
 ///
 /// Observations are given as raw arrays rather than a list of per-frame
 /// `KeypointObservation` lists: `positions` is `(n_frames, n_keypoints, 3)`

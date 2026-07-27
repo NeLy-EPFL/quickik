@@ -75,7 +75,7 @@ mod ffi {
 
     /// Configuration for the inverse kinematics solver. See Rust's
     /// `quickik::solver::SolverConfig` for field docs. Unlike the Rust/Python
-    /// APIs, this is a plain value type here (no shared live handle) --
+    /// APIs, this is a plain value type here (no shared live handle):
     /// retune a solver by calling `set_config` again.
     #[derive(Clone, Copy, Debug)]
     struct SolverConfig {
@@ -93,8 +93,8 @@ mod ffi {
         overlap_len: usize,
         overlap_tolerance: f32,
         /// Number of worker threads. A positive value is used directly,
-        /// unless it exceeds the number of available cores -- in that case
-        /// it's clipped to that count and a warning is logged. A negative
+        /// unless it exceeds the number of available cores: it's then
+        /// clipped to that count and a warning is logged. A negative
         /// value counts backward from all available cores: `-1` uses all,
         /// `-2` uses all but one, etc. `0` is invalid.
         n_workers: isize,
@@ -437,9 +437,9 @@ fn from_core_config(
 struct KinematicTree(Arc<quickik_core::body_plan::KinematicTree>);
 
 /// Runs `f`, converting a panic (e.g. from malformed JSON, or a `Position2D`
-/// observation given to a mapper-less solver) into an `Err` instead of
-/// aborting -- unlike a plain (non-`Result`) bridged function, where an
-/// unwinding panic would abort the whole process. Every mutation `f` might
+/// observation given to a mapper-less solver) into an `Err`. In a plain
+/// (non-`Result`) bridged function, an unwinding panic would instead abort
+/// the whole process. Every mutation `f` might
 /// have made before panicking is just plain data with no unsafe invariants
 /// to uphold, so asserting unwind-safety here is fine.
 fn catch_panic<T>(f: impl FnOnce() -> T) -> Result<T, String> {

@@ -3,7 +3,8 @@
 PROJECT_NAME           = "QuickIK"
 PROJECT_BRIEF          = "C++ bindings"
 OUTPUT_DIRECTORY       = docs/api/cpp
-INPUT                  = docs/api/cpp-staging
+INPUT                  = docs/api/cpp-staging docs/doxygen/mainpage.md
+USE_MDFILE_AS_MAINPAGE = docs/doxygen/mainpage.md
 FILE_PATTERNS          = *.h
 RECURSIVE              = NO
 EXTRACT_ALL            = YES

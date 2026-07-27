@@ -35,11 +35,11 @@ impl SyntheticFrame {
 }
 
 /// A real (noisy) mocap frame, rigidly aligned into this model's own frame
-/// convention, plus -- for bodies with a reference solver to cross-check
-/// against (currently only NeuroMechFly/flygym.ik) -- that solver's own
+/// convention, plus, for bodies with a reference solver to cross-check
+/// against (currently only NeuroMechFly/flygym.ik), that solver's own
 /// reconstruction for the same target. Sparsely sampled (every 30th recorded
 /// frame, ~91ms apart): good for a diverse correctness check, but understates
-/// how warm "warm start" is in real continuous use -- see [`NativeRateFrame`]
+/// how warm "warm start" is in real continuous use. See [`NativeRateFrame`]
 /// for a warm-start *performance* benchmark instead.
 #[derive(Deserialize)]
 pub struct RealFrame {
@@ -56,7 +56,7 @@ pub struct RealFrame {
 /// One frame of a *contiguous* run of consecutive recorded frames (no gaps),
 /// for benchmarking `solve_frame`'s warm start under the frame-to-frame
 /// motion an actual continuous tracking pipeline would see. Performance-only
-/// (no flygym.ik reconstruction -- this isn't a correctness fixture).
+/// (no flygym.ik reconstruction: this isn't a correctness fixture).
 #[derive(Deserialize)]
 pub struct NativeRateFrame {
     #[allow(dead_code)]
