@@ -119,6 +119,34 @@ fn solve_sequence_segmented_parallel_reconstructs_smooth_trajectory() {
 }
 
 #[test]
+fn parallel_solve_config_for_recording_reconstructs_smooth_trajectory() {
+    let tree = common::two_joint_chain();
+    let n_frames = 40;
+    // A smooth trajectory well within joint2's [-0.5, 0.5] limit, so limit
+    // clamping doesn't confound the closeness check below.
+    let true_angles: Vec<[f32; 2]> = (0..n_frames)
+        .map(|t| {
+            let a = 0.3 * (t as f32 * 0.15).sin();
+            [a, a * 0.5]
+        })
+        .collect();
+    let sequence: Vec<Vec<KeypointObservation>> = true_angles
+        .iter()
+        .map(|angles| observations_for(&tree, angles))
+        .collect();
+
+    let parallel_config = ParallelSolveConfig::for_recording(n_frames);
+    let config: SolverConfig = SolverConfig::default();
+    let states = solve_sequence_segmented_parallel(&tree, config, &sequence, parallel_config);
+
+    assert_eq!(states.len(), n_frames);
+    for (state, angles) in states.iter().zip(&true_angles) {
+        assert!((state.dof_angles[0] - angles[0]).abs() < 1e-2);
+        assert!((state.dof_angles[1] - angles[1]).abs() < 1e-2);
+    }
+}
+
+#[test]
 fn solve_sequence_segmented_parallel_honors_explicit_n_workers() {
     let tree = common::two_joint_chain();
     let n_frames = 40;
