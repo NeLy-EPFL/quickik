@@ -13,7 +13,7 @@ QuickIK is a fast <abbr title="Computing XYZ world coordinates of joint keypoint
 - **Incomplete observation:** QuickIK allows some keypoints to be missing on some of the frames and does its best using only the available ones.
 - **From 2D keypoint positions:** QuickIK can accept keypoint positions that are only in 2D projections. The problem is intrinsically underconstrained, but it can still work if the camera angle is reasonable and the pull toward "natural" states is properly tuned.
 - **Differential weights:** When not all keypoint positions are equally reliable in the upstream MoCap data, QuickIK can consider them with different weights.
-- **Very fast:** QuickIK is [>5x faster](technical/benchmarks.md) than RBDL/Pinocchio.
+- **Very fast:** QuickIK is about [5 or more times faster](technical/benchmarks.md) than RBDL/Pinocchio.
 
 ## Example
 

@@ -51,6 +51,7 @@ The example below loads a body plan, then creates a solver with the default conf
 
     ```cpp
     #include <iostream>
+    #include <vector>
     #include "quickik.h"
 
     auto tree = quickik::kinematic_tree_from_json_file("body_plan.json");
@@ -58,7 +59,7 @@ The example below loads a body plan, then creates a solver with the default conf
     auto solver = quickik::new_solver(
         *tree,
         solver_config,
-        quickik::no_mapper(),  // mapper must be written out explicitly in C++
+        quickik::no_mapper()  // mapper must be written out explicitly in C++
     );
 
     // Initiate a state object once, reuse across many solves (to be used later)

@@ -34,7 +34,7 @@ Assuming you already have the whole recording upfront, the example below solves 
 
     # positions: NDArray of shape (n_frames, n_joints, 3), in kinematic_tree.joints order
     positions = ...
-    # weights: NDArray of shape (n_frames, n_joints); 0 or below indicates keypoint is missing
+    # weights: NDArray of shape (n_frames, n_joints); 0, below, or NaN indicates keypoint is missing
     weights = ...
 
     poses = seq_solver.solve_sequence(positions, weights)
@@ -44,6 +44,9 @@ Assuming you already have the whole recording upfront, the example below solves 
         Python's `solve_sequence` takes `positions`/`weights` NumPy arrays instead of a list of per-frame `KeypointObservation` lists, so it never constructs one Python object per keypoint per frame. That construction is what actually dominates call overhead for a long recording.
 
     Any dtype is accepted for `positions`/`weights` (e.g. the common case of a `float64` array) and cast to `float32`, following NumPy's own casting rules.
+
+    !!! note "2D keypoints"
+        `positions`'s last dimension follows `mapper` (see ["From 2D keypoint positions"](2d-keypoints.md)): shape `(n_frames, n_joints, 3)` if `mapper` is `None` (the default), or `(n_frames, n_joints, 2)` if a `Camera`/`XYView` mapper was passed to `SequenceSolver`. A mismatch between the two raises `ValueError`.
 
 === "C++"
 
@@ -118,7 +121,7 @@ The example below splits a long recording into segments explicitly:
 
     # long_positions: NDArray of shape (n_frames, n_joints, 3), in kinematic_tree.joints order
     long_positions = ...
-    # long_weights: NDArray of shape (n_frames, n_joints); 0 or below indicates keypoint is missing
+    # long_weights: NDArray of shape (n_frames, n_joints); 0, below, or NaN indicates keypoint is missing
     long_weights = ...
 
     poses = solve_sequence_segmented_parallel(
@@ -126,7 +129,7 @@ The example below splits a long recording into segments explicitly:
     )
     ```
 
-    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`.
+    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`; `long_positions`'s last dimension is 2 instead of 3 if `mapper` is a `Camera`/`XYView` (see the note above).
 
 === "C++"
 
@@ -147,7 +150,7 @@ The example below splits a long recording into segments explicitly:
         observations,
         tree->n_joints(),
         parallel_config,
-        quickik::no_mapper(),
+        quickik::no_mapper()
     );
 
     // poses is a StateList, not a std::vector<State>. Read it out with .len()/.at(i).
