@@ -115,9 +115,11 @@ fn resolve_n_workers(n_workers: isize) -> usize {
 /// overlapping segments (see [`ParallelSolveConfig`]), each solved on its
 /// own thread via [`solve_sequence`](SequenceSolver::solve_sequence).
 /// Since segments are solved independently, their overlapping frames can
-/// converge to slightly different poses; any disagreement in `dof_angles`
-/// beyond `parallel_config.overlap_tolerance` generates a warning and the
-/// earlier segment's version is kept.
+/// converge to slightly different poses; any disagreement in `dof_angles` or
+/// root rotation beyond `parallel_config.overlap_tolerance` generates a
+/// warning and the earlier segment's version is kept. Root *position*
+/// disagreement isn't checked (there's no comparable position tolerance in
+/// [`ParallelSolveConfig`]).
 pub fn solve_sequence_segmented_parallel<M: Mapper3Dto2D + Sync>(
     kinematic_tree: &Arc<KinematicTree>,
     config: SolverConfig<M>,
@@ -193,8 +195,11 @@ fn segment_bounds(total_len: usize, config: ParallelSolveConfig) -> Vec<(usize, 
 
 /// Concatenates overlapping `segment_states` into one sequence, dropping each
 /// segment's overlap with the previous one (i.e. results from the previous
-/// segment are used). Logs a warning if any overlapping frame disagrees between
-/// segments by more than `overlap_tolerance`.
+/// segment are used). Logs a warning if any overlapping frame's `dof_angles`
+/// or root rotation disagree between segments by more than
+/// `overlap_tolerance` (radians for both, so they're compared on the same
+/// scale). Root *position* disagreement isn't covered by this check: there's
+/// no comparable position tolerance in [`ParallelSolveConfig`].
 fn stitch_overlapping_segments(
     segment_states: Vec<Vec<State>>,
     overlap_len: usize,
@@ -209,12 +214,16 @@ fn stitch_overlapping_segments(
 
         let overlap_start = result.len() - overlap_len;
         for i in 0..overlap_len {
-            let max_angle_diff = result[overlap_start + i]
+            let earlier = &result[overlap_start + i];
+            let later = &segment[i];
+            let max_dof_angle_diff = earlier
                 .dof_angles
                 .iter()
-                .zip(&segment[i].dof_angles)
+                .zip(&later.dof_angles)
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f32, f32::max);
+            let root_rot_diff = earlier.root_rot.angle_to(&later.root_rot);
+            let max_angle_diff = max_dof_angle_diff.max(root_rot_diff);
             if max_angle_diff > overlap_tolerance {
                 log::warn!(
                     "solve_sequence_segmented_parallel: overlapping frame {} disagrees between \
