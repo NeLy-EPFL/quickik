@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Regenerates everything Zensical can't build itself -- the Rust/Python/C++
-# API references (cargo doc / pdoc / Doxygen) and the benchmark charts
-# (copied from wherever benchmark/plot/*.py last wrote them) -- then builds
-# or serves the site.
+# Regenerates everything Zensical can't build itself -- the Rust/C++ API
+# references (cargo doc / Doxygen) and the benchmark charts (copied from
+# wherever benchmark/plot/*.py last wrote them) -- then builds or serves the
+# site. The Python API reference (docs/api/python.md) is rendered natively by
+# Zensical itself, via mkdocstrings; it just needs quickik built into the
+# same venv Zensical runs under (devtools-pyenv), done below.
 #
 # Prerequisites on PATH: cargo, uv, doxygen (system package manager).
-# zensical comes from devtools-pyenv (`uv sync` there); uv itself is used
-# to manage a throwaway venv for maturin/pdoc.
+# zensical and maturin come from devtools-pyenv (`uv sync` there).
 #
 # Usage: docs/build.sh [build|serve]  (default: build)
 set -euo pipefail
@@ -18,15 +19,13 @@ rm -rf docs/api/rust
 mkdir -p docs/api/rust
 cp -r target/doc/. docs/api/rust/
 
-# --- Python API reference (pdoc) ---
-VENV=docs/.venv-docs
-if [ ! -x "$VENV/bin/python" ]; then
-    uv venv --python 3.12 "$VENV"
-    uv pip install --python "$VENV/bin/python" maturin pdoc
-fi
-(cd python && VIRTUAL_ENV="$OLDPWD/$VENV" "$OLDPWD/$VENV/bin/maturin" develop --release)
-rm -rf docs/api/python
-"$VENV/bin/pdoc" -o docs/api/python -d google quickik
+# --- Python API reference (mkdocstrings, via devtools-pyenv's quickik) ---
+# Rebuilt through `uv sync --reinstall-package`, not a direct `maturin
+# develop`: `uv run` (below) does its own implicit sync before running
+# Zensical, and if that sync doesn't already agree the editable install is
+# current, it silently reinstalls quickik from uv's cache -- discarding
+# whatever `maturin develop` had just built from the current sources.
+uv sync --reinstall-package quickik --project devtools-pyenv
 
 # --- C++ API reference (Doxygen) ---
 cargo build -p quickik-cpp
@@ -61,4 +60,14 @@ else
     echo "docs/build.sh: no charts in benchmark/plot/results/ yet -- see benchmark/README.md" >&2
 fi
 
-uv run --project devtools-pyenv zensical "${1:-build}"
+# `--clean` (build only; `serve` has no such flag) drops Zensical's own
+# page-render cache (repo-root `.cache/`), which otherwise keys the Python
+# API page purely off docs/api/python.md's own content -- oblivious to the
+# fact that mkdocstrings' actual output depends on the freshly rebuilt
+# quickik extension above, so a stale render survives every rebuild until
+# something else happens to touch that .md file.
+if [ "${1:-build}" = "build" ]; then
+    uv run --project devtools-pyenv zensical build --clean
+else
+    uv run --project devtools-pyenv zensical "$1"
+fi

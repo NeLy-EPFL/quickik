@@ -56,7 +56,7 @@ fn angle_error_deg(solved: &[f32], ground_truth: &[f32]) -> f32 {
 
 /// Bug-hunt test: feed keypoint targets that are *exactly* reachable (they
 /// were generated from this same model's own forward kinematics, driven by
-/// real recorded ground-truth joint angles -- see
+/// real recorded ground-truth joint angles, see
 /// `scripts/generate_fixtures.py`) and check that `Solver` both converges to
 /// near-zero residual and recovers the known angles.
 pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticFrame]) {
@@ -167,8 +167,8 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
 
 /// Same bug-hunt check as [`run_synthetic_frame_tests`], but the solver only
 /// ever sees `to_2d`'s projection of each frame's exactly-reachable target.
-/// Fit quality is still measured in 3D -- the distance between the solved
-/// pose's FK output and the *original* 3D target -- since that's the
+/// Fit quality is still measured in 3D (the distance between the solved
+/// pose's FK output and the *original* 3D target), since that's the
 /// physical quantity that matters, even though the solver never saw it.
 pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
     tree: &Arc<KinematicTree>,

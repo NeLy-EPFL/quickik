@@ -29,7 +29,7 @@ pub enum DofType {
 #[derive(Clone, Copy, Debug)]
 pub struct Dof {
     /// Rotational or translational axis in local frame (relative to the
-    /// joint's `offset_quat`). Must be unit length -- forward kinematics
+    /// joint's `offset_quat`). Must be unit length: forward kinematics
     /// trusts this invariant (rather than re-normalizing on every solve
     /// iteration) instead of checking it, so a `Dof` built directly (rather
     /// than parsed from JSON, which normalizes it) must provide one itself.
@@ -63,7 +63,7 @@ pub struct Joint {
     /// consistent with MoCap data.
     pub dofs: Vec<Dof>,
     /// Index of the parent joint in the body plan. Should be `None` for the
-    /// root joint, which is attached to the world -- either via an imaginary
+    /// root joint, which is attached to the world: either via an imaginary
     /// free joint (floating base), or fixed in place if the tree's
     /// [`fixed_base`](KinematicTree::fixed_base) is set.
     pub parent: Option<usize>,
@@ -91,13 +91,13 @@ pub struct KinematicTree {
     /// Whether the root is fixed in the world (e.g. a robot arm bolted to a
     /// table) rather than a free-floating base with its own `N_ROOT_DOFS`.
     ///
-    /// A semi-fixed base -- one that only slides along a rail or spins on a
-    /// turntable -- isn't modeled by this flag. Instead, keep `fixed_base`
+    /// A semi-fixed base (one that only slides along a rail or spins on a
+    /// turntable) isn't modeled by this flag. Instead, keep `fixed_base`
     /// set and give the root a zero-offset child joint carrying the one
     /// hinge/slide DOF the base actually has, then attach the rest of the
     /// body to that joint: since a joint's own DOF only moves its
     /// descendants (never its own keypoint), this joint acts as exactly that
-    /// one-DOF base, and -- unlike the root's own DOFs -- it gets `limits`
+    /// one-DOF base, and, unlike the root's own DOFs, it gets `limits`
     /// and `weight_scaler` like any other DOF.
     pub fixed_base: bool,
 }
@@ -109,7 +109,7 @@ impl KinematicTree {
         Self::new_impl(joints, root_idx, false)
     }
 
-    /// Same as [`new`](Self::new), but the root is fixed in the world --
+    /// Same as [`new`](Self::new), but the root is fixed in the world;
     /// see [`fixed_base`](Self::fixed_base).
     pub fn new_fixed_base(joints: Vec<Joint>, root_idx: usize) -> Self {
         Self::new_impl(joints, root_idx, true)

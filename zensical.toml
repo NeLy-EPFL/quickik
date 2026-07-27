@@ -18,7 +18,7 @@ nav = [
     ] },
   { "API references" = [
       { "Rust (native)" = "api/rust/quickik/index.html" },
-      { "Python bindings" = "api/python/quickik.html" },
+      { "Python bindings" = "api/python.md" },
       { "C++ bindings" = "api/cpp/html/index.html" },
     ] },
   { "Technical information" = [
@@ -68,6 +68,28 @@ toggle.name = "Switch to dark mode"
 scheme = "slate"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
+
+# Renders docs/api/python.md's `:::` directives (native equivalent of the
+# Rust/C++ API references, which are instead pre-built by cargo doc/Doxygen
+# and linked in as static HTML -- see docs/build.sh).
+[project.plugins.mkdocstrings]
+default_handler = "python"
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = false
+merge_init_into_class = true
+# Recovers constructor signatures for quickik's PyO3 classes -- see
+# docs/griffe_pyo3_constructors.py for why griffe can't do this on its own.
+extensions = ["docs/griffe_pyo3_constructors.py"]
+# On top of the default "!^_[^_]" (hide single-underscore-private members):
+# quickik's classes are compiled PyO3 extension types, so dynamic inspection
+# (see docs/api/python.md) surfaces a few dunders as noise -- `__doc__`/
+# `__module__` (generic str-typed class attributes) and `__new__` (PyO3's
+# constructor slot, generic and undocumented at runtime; its real signature
+# is recovered onto a synthetic `__init__` instead -- see
+# docs/griffe_pyo3_constructors.py -- and shown on the class heading via
+# merge_init_into_class).
+filters = ["!^_[^_]", "!^__(?:doc|module|new)__$"]
 
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.abbr]

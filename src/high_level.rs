@@ -57,8 +57,8 @@ pub struct ParallelSolveConfig {
     /// neighboring segments' overlapping frames before logging a warning.
     pub overlap_tolerance: f32,
     /// Number of worker threads. A positive value is used directly, unless it
-    /// exceeds the number of available cores -- in that case it's clipped to
-    /// that count and a warning is logged. A negative value counts backward
+    /// exceeds the number of available cores: it's then clipped to that
+    /// count and a warning is logged. A negative value counts backward
     /// from all available cores: `-1` uses all, `-2` uses all but one, etc.
     /// `0` is invalid.
     pub n_workers: isize,
@@ -73,9 +73,9 @@ impl ParallelSolveConfig {
     /// A `ParallelSolveConfig` that spreads `total_len` frames evenly across
     /// every available core: one segment per core, `total_len / n_workers`
     /// frames each (plus a fixed default overlap of 10 frames on top). For
-    /// finer control over cold-start frequency -- how often a segment
+    /// finer control over cold-start frequency (how often a segment
     /// restarts from the neutral pose, trading accuracy for finer-grained
-    /// parallelism -- build a `ParallelSolveConfig` directly instead.
+    /// parallelism), build a `ParallelSolveConfig` directly instead.
     pub fn for_recording(total_len: usize) -> Self {
         let n_workers = resolve_n_workers(-1);
         let overlap_len = DEFAULT_OVERLAP_LEN;

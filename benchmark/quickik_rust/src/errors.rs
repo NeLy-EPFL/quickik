@@ -19,7 +19,7 @@ use crate::twod::observations_2d_xyview;
 
 /// Per-frame average (RMS) 3D distance from the solved pose's FK output to
 /// the *original* 3D target, one value per one of `frames` (warm-started
-/// sequence, adaptive early stop) -- the same per-frame quantity
+/// sequence, adaptive early stop): the same per-frame quantity
 /// `correctness::residual_stats` computes, kept here across every frame
 /// instead of reduced further to a single aggregate.
 fn per_frame_average_distances<M: Mapper3Dto2D>(

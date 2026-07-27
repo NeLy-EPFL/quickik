@@ -39,8 +39,8 @@ fn apply_delta_updates_root_position_and_rotation() {
     assert!((state.root_pos - nalgebra::Vector3::new(1.0, 2.0, 3.0)).norm() < 1e-6);
 }
 
-/// On a fixed-base tree, `delta` has no root columns at all -- index 0 is
-/// already the first DOF -- and `apply_delta` must never touch `root_pos`/
+/// On a fixed-base tree, `delta` has no root columns at all (index 0 is
+/// already the first DOF), and `apply_delta` must never touch `root_pos`/
 /// `root_rot`, which stay at `neutral_pose`'s default.
 #[test]
 fn apply_delta_on_fixed_base_tree_never_touches_root() {

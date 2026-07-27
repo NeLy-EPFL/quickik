@@ -7,13 +7,13 @@ use crate::observation::{
 use crate::state::State;
 
 /// Configuration for the inverse kinematics solver. Does not include the
-/// mapper -- see [`Solver`]'s and [`SequenceSolver`](crate::high_level::SequenceSolver)'s
+/// mapper; see [`Solver`]'s and [`SequenceSolver`](crate::high_level::SequenceSolver)'s
 /// `mapper` argument.
 #[pyclass(module = "quickik", from_py_object)]
 #[derive(Clone, Copy)]
 pub(crate) struct SolverConfig {
     /// Number of Gauss-Newton steps per `solve` call. Also the cap on early
-    /// termination -- see `position_tolerance`/`angle_tolerance`.
+    /// termination: see `position_tolerance`/`angle_tolerance`.
     #[pyo3(get, set)]
     n_iterations: usize,
     /// Weight pulling every joint angle toward the neutral pose. Improves
@@ -77,7 +77,7 @@ impl SolverConfig {
 ///
 /// `mapper` is a `Camera`, an `XYView`, or `None` (the default, for 3D-only
 /// observations); it's fixed for this `Solver`'s lifetime, mirroring Rust's
-/// `Solver<M>` generic parameter -- there's no setter, only the read-only
+/// `Solver<M>` generic parameter. There's no setter, only the read-only
 /// `mapper` property.
 ///
 /// `config` is a live, shared handle: `solver.config` always returns the

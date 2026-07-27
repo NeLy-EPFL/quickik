@@ -234,7 +234,7 @@ pub(crate) fn extract_observations(
 /// Builds one frame's-worth of `Position3D`/`Missing` observations per row
 /// of `positions`/`weights` (a keypoint with `weight <= 0.0` is treated as
 /// [`KeypointObservation::missing`]), without ever constructing a Python
-/// `KeypointObservation` object -- unlike [`extract_observations`], which
+/// `KeypointObservation` object, unlike [`extract_observations`], which
 /// unwraps objects a caller already built one per keypoint. Used by
 /// array-based entry points (e.g.
 /// [`solve_sequence_segmented_parallel`](crate::high_level::solve_sequence_segmented_parallel))

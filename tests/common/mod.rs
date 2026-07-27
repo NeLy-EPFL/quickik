@@ -71,7 +71,7 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
 }
 
 /// A root with two independent single-DOF branches (each a joint + a fixed
-/// tip keypoint downstream of it), sharing no keypoints between them -- so
+/// tip keypoint downstream of it), sharing no keypoints between them, so
 /// each DOF's contribution to the Gauss-Newton normal equations is entirely
 /// decoupled from the other, unlike `two_joint_chain`'s single serial chain.
 ///
@@ -166,7 +166,7 @@ pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
 ///   -> joint1: offset (1,0,0), 1 slide DOF along local X, unbounded
 ///     -> tip: offset (1,0,0), no DOFs
 ///
-/// Like a hinge DOF, joint1's own slide never moves joint1's own keypoint --
+/// Like a hinge DOF, joint1's own slide never moves joint1's own keypoint,
 /// only `tip`'s, which is why `tip` is here at all (see this module's doc
 /// comment).
 #[allow(dead_code)] // only used by tests/forward_test.rs, not every binary sharing this module
@@ -211,7 +211,7 @@ pub fn slide_joint_chain() -> Arc<KinematicTree> {
 }
 
 /// A chain combining a hinge and a slide DOF on separate joints, so the
-/// slide's world-frame axis is rotated by the upstream hinge -- this is what
+/// slide's world-frame axis is rotated by the upstream hinge: this is what
 /// exercises the cross-term where perturbing the hinge angle also perturbs a
 /// downstream slide's direction (and therefore the position it produces).
 ///
@@ -280,7 +280,7 @@ pub fn hinge_then_slide_chain() -> Arc<KinematicTree> {
 }
 
 /// Same joints as [`two_joint_chain`], but with a fixed (not free-floating)
-/// root -- used to test [`KinematicTree::fixed_base`].
+/// root, used to test [`KinematicTree::fixed_base`].
 ///
 /// root (fixed, no local DOFs)
 ///   -> joint1: offset (1,0,0), 1 DOF about local Z, unbounded
@@ -348,7 +348,7 @@ pub fn fixed_base_two_joint_chain() -> Arc<KinematicTree> {
 
 /// A single joint carrying both a hinge DOF (applied first) and a slide DOF,
 /// so the slide's own translation is expressed along an axis that the same
-/// joint's own hinge has already rotated -- the tightest version of the
+/// joint's own hinge has already rotated: the tightest version of the
 /// hinge/slide cross-term, entirely within one joint's own DOF list.
 ///
 /// root (free joint, no local DOFs)

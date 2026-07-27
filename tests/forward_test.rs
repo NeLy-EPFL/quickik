@@ -33,7 +33,7 @@ fn bent_pose_positions() {
 /// keypoint's Jacobian row can have a nonzero entry in: root's N_ROOT_DOFS
 /// always, plus each ancestor joint's own DOF in root-to-parent order
 /// (never a joint's *own* DOF, since rotating a joint only moves its
-/// descendants -- see the module's doc comment).
+/// descendants; see the module's doc comment).
 #[test]
 fn active_indices_track_ancestor_dofs_not_own_dof() {
     let tree = common::two_joint_chain();
@@ -65,7 +65,7 @@ fn active_indices_track_ancestor_dofs_not_own_dof() {
 }
 
 /// On a tree with two independent single-DOF branches sharing no keypoints,
-/// a keypoint's active indices must include only its *own* branch's DOF --
+/// a keypoint's active indices must include only its *own* branch's DOF:
 /// this is the sparsity the accumulation step in `solver.rs` relies on to
 /// skip work for keypoints unaffected by a given DOF.
 #[test]
@@ -155,7 +155,7 @@ fn jacobian_matches_finite_differences_with_hinge_and_slide_on_same_joint() {
 }
 
 /// A slide DOF translates its joint's frame along its (world-rotated) axis,
-/// but -- like a hinge DOF's rotation -- never moves its own joint's tracked
+/// but, like a hinge DOF's rotation, never moves its own joint's tracked
 /// keypoint, only its descendants'.
 #[test]
 fn slide_dof_moves_only_descendants() {
@@ -172,7 +172,7 @@ fn slide_dof_moves_only_descendants() {
 
 /// A downstream slide's world-frame axis follows an upstream hinge's
 /// rotation, so rotating the hinge also swings the slide's translation
-/// direction -- and therefore every keypoint past it.
+/// direction, and therefore every keypoint past it.
 #[test]
 fn hinge_then_slide_positions() {
     let tree = common::hinge_then_slide_chain();
@@ -206,7 +206,7 @@ fn fixed_base_tree_has_no_root_dofs_in_active_indices() {
 
 /// A fixed-base tree's keypoints move exactly like its free-floating
 /// counterpart's when the root state is left at `neutral_pose`'s default
-/// (zero position, identity rotation) -- `fixed_base` only removes the
+/// (zero position, identity rotation): `fixed_base` only removes the
 /// root's own state variables, it doesn't change where the root sits.
 #[test]
 fn fixed_base_tree_neutral_pose_matches_free_floating_counterpart() {
