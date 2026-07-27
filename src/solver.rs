@@ -126,7 +126,11 @@ impl<M: Mapper3Dto2D> Solver<M> {
     ///
     /// [`Missing`]: crate::observation::KeypointObservation::Missing
     pub fn solve(&mut self, state: &mut State, observations: &[KeypointObservation]) {
-        debug_assert_eq!(observations.len(), state.kinematic_tree.n_joints());
+        assert_eq!(
+            observations.len(),
+            state.kinematic_tree.n_joints(),
+            "observations.len() must equal kinematic_tree.n_joints()"
+        );
 
         let state_dim = state.state_dim();
         for _ in 0..self.config.n_iterations {
