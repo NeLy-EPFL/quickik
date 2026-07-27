@@ -12,7 +12,7 @@ nav = [
   { "Getting started" = [
       { "Installation" = "getting-started/installation.md" },
       { "Body plan" = "getting-started/body-plan.md" },
-      { "Solve for a single frame" = "getting-started/single-frame.md" },
+      { "Solve a single frame" = "getting-started/single-frame.md" },
       { "Solve sequences of frames" = "getting-started/sequences.md" },
       { "From 2D keypoint positions" = "getting-started/2d-keypoints.md" },
     ] },
