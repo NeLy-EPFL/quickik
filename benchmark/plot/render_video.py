@@ -432,18 +432,6 @@ def render_comparison():
         return artists
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    # A static SVG of frame 0 -- scatters start out empty (see setup_panel),
-    # so this needs one update() call before saving, unlike the bones (already
-    # seeded with frame 0 to satisfy add_collection3d; see its own comment).
-    # The speed labels are hidden just for this export, then restored so the
-    # mp4 animation (built from the same figure/artists below) still shows
-    # them.
-    update(0)
-    for _mocap_scatter, _fit_scatter, _fit_bones, speed_text in panels:
-        speed_text.set_visible(False)
-    fig.savefig(OUT_DIR / "example_clips_frame0.svg")
-    for _mocap_scatter, _fit_scatter, _fit_bones, speed_text in panels:
-        speed_text.set_visible(True)
 
     anim = animation.FuncAnimation(fig, update, frames=total_output_frames, blit=False)
     out_path = OUT_DIR / "example_clips.mp4"

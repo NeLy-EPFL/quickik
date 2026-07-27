@@ -362,15 +362,6 @@ def render():
         return list(artists.values())
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    # A static SVG of frame 0 -- scatters start out empty (see setup_panel),
-    # so this needs one update() call before saving, unlike the bones (already
-    # seeded with frame 0 to satisfy add_collection3d; see its own comment).
-    # The speed label is hidden just for this export, then restored so the
-    # mp4 animation (built from the same figure/artists below) still shows it.
-    update(0)
-    artists["speed_text"].set_visible(False)
-    fig.savefig(OUT_DIR / "example_clip_2d_xyview_frame0.svg")
-    artists["speed_text"].set_visible(True)
 
     anim = animation.FuncAnimation(fig, update, frames=total_output_frames, blit=False)
     out_path = OUT_DIR / "example_clip_2d_xyview.mp4"
