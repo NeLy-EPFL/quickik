@@ -17,7 +17,25 @@ mod observation;
 mod solver;
 mod state;
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+/// Runs `f`, converting a panic (e.g. from malformed body-plan JSON, an
+/// invalid `ParallelSolveConfig`, or a mismatched observation count) into a
+/// `PyValueError` instead of an uncaught `pyo3_runtime.PanicException`.
+/// Mirrors the C++ bindings' own `catch_panic` (`cpp/src/lib.rs`). Every
+/// mutation `f` might have made before panicking is just plain data with no
+/// unsafe invariants to uphold, so asserting unwind-safety here is fine.
+pub(crate) fn catch_panic<T>(f: impl FnOnce() -> T) -> PyResult<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|payload| {
+        let msg = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("unknown panic");
+        PyValueError::new_err(msg.to_string())
+    })
+}
 
 use body_plan::KinematicTree;
 use high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};

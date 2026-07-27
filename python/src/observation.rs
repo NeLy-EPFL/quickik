@@ -231,8 +231,9 @@ pub(crate) fn extract_observations(
     observations.iter().map(|obs| obs.inner).collect()
 }
 
-/// Builds one frame's-worth of `Position3D`/`Missing` observations per row
-/// of `positions`/`weights` (a keypoint with `weight <= 0.0` is treated as
+/// Builds one frame's-worth of `Position3D`/`Position2D`/`Missing`
+/// observations per row of `positions`/`weights` (a keypoint with
+/// `!(weight > 0.0)` -- i.e. zero, negative, or NaN -- is treated as
 /// [`KeypointObservation::missing`]), without ever constructing a Python
 /// `KeypointObservation` object, unlike [`extract_observations`], which
 /// unwraps objects a caller already built one per keypoint. Used by
@@ -240,10 +241,15 @@ pub(crate) fn extract_observations(
 /// [`solve_sequence_segmented_parallel`](crate::high_level::solve_sequence_segmented_parallel))
 /// for callers that already have their data in numpy arrays, to avoid that
 /// per-keypoint Python object construction and unwrapping.
+///
+/// `positions`'s last dimension selects the observation kind: 3 builds
+/// `Position3D`, 2 builds `Position2D`. Call [`validate_position_weight_shapes`]
+/// first to ensure this matches whether a mapper is set.
 pub(crate) fn observations_from_arrays(
     positions: ArrayView3<'_, f32>,
     weights: ArrayView2<'_, f32>,
 ) -> Vec<Vec<quickik_core::observation::KeypointObservation>> {
+    let is_2d = positions.dim().2 == 2;
     positions
         .outer_iter()
         .zip(weights.outer_iter())
@@ -252,8 +258,16 @@ pub(crate) fn observations_from_arrays(
                 .outer_iter()
                 .zip(frame_weights.iter())
                 .map(|(pos, &weight)| {
-                    if weight <= 0.0 {
+                    // A NaN weight counts as missing, not poison this frame's
+                    // shared normal-equations matrices
+                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                    if !(weight > 0.0) {
                         quickik_core::observation::KeypointObservation::Missing
+                    } else if is_2d {
+                        quickik_core::observation::KeypointObservation::Position2D {
+                            obs_pos: nalgebra::Vector2::new(pos[0], pos[1]),
+                            weight,
+                        }
                     } else {
                         quickik_core::observation::KeypointObservation::Position3D {
                             obs_pos: nalgebra::Vector3::new(pos[0], pos[1], pos[2]),
@@ -267,17 +281,24 @@ pub(crate) fn observations_from_arrays(
 }
 
 /// Checks that `positions`/`weights` have the shapes
-/// [`observations_from_arrays`] expects: `(n_frames, n_joints, 3)` and
-/// `(n_frames, n_joints)`.
+/// [`observations_from_arrays`] expects: `(n_frames, n_joints)` for
+/// `weights`, and for `positions`, `(n_frames, n_joints, 3)` if `has_mapper`
+/// is `false` (3D observations), or `(n_frames, n_joints, 2)` if `true` (2D
+/// observations, projected by whichever mapper the solver was constructed
+/// with).
 pub(crate) fn validate_position_weight_shapes(
     positions: &ArrayView3<'_, f32>,
     weights: &ArrayView2<'_, f32>,
     n_joints: usize,
+    has_mapper: bool,
 ) -> PyResult<()> {
     let (n_frames, n_keypoints, dim) = positions.dim();
-    if dim != 3 {
+    let expected_dim = if has_mapper { 2 } else { 3 };
+    if dim != expected_dim {
         return Err(PyValueError::new_err(format!(
-            "positions must have shape (n_frames, n_keypoints, 3), got last dimension {dim}"
+            "positions must have shape (n_frames, n_keypoints, {expected_dim}) since mapper is \
+             {}, got last dimension {dim}",
+            if has_mapper { "set" } else { "None" }
         )));
     }
     if n_keypoints != n_joints {

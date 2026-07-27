@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
+use crate::catch_panic;
 use crate::observation::{
     KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
 };
@@ -117,16 +118,18 @@ impl Solver {
     /// Runs up to `config.n_iterations` Gauss-Newton steps in place on
     /// `state`, given one `KeypointObservation` per joint (in
     /// `kinematic_tree.joints` order; use `KeypointObservation.missing()`
-    /// for keypoints not observed this frame).
+    /// for keypoints not observed this frame). Raises `ValueError` if
+    /// `len(observations) != kinematic_tree.n_joints`.
     fn solve(
         &mut self,
         py: Python<'_>,
         mut state: PyRefMut<'_, State>,
         observations: Vec<PyRef<'_, KeypointObservation>>,
-    ) {
+    ) -> PyResult<()> {
         self.sync_config(py);
-        self.inner
-            .solve(&mut state.inner, &extract_observations(observations));
+        let observations = extract_observations(observations);
+        let inner = &mut self.inner;
+        catch_panic(move || inner.solve(&mut state.inner, &observations))
     }
 
     /// The live config; see the class docstring for mutation semantics.

@@ -2,6 +2,7 @@ use numpy::{AllowTypeChange, PyArrayLike2, PyArrayLike3};
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
+use crate::catch_panic;
 use crate::observation::{
     KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
     observations_from_arrays, validate_position_weight_shapes,
@@ -44,30 +45,34 @@ impl SequenceSolver {
     }
 
     /// Solves the next frame, warm-started from the current pose, and
-    /// returns the converged state (also available as `.state`).
+    /// returns the converged state (also available as `.state`). Raises
+    /// `ValueError` if `len(observations) != kinematic_tree.n_joints`.
     fn solve_frame(
         &mut self,
         py: Python<'_>,
         observations: Vec<PyRef<'_, KeypointObservation>>,
-    ) -> State {
+    ) -> PyResult<State> {
         self.sync_config(py);
-        let state = self.inner.solve_frame(&extract_observations(observations));
-        State {
-            inner: state.clone(),
-        }
+        let observations = extract_observations(observations);
+        let inner = &mut self.inner;
+        catch_panic(move || State {
+            inner: inner.solve_frame(&observations).clone(),
+        })
     }
 
     /// Solves every frame in order, each warm-started from the previous one;
-    /// returns the converged pose after each frame. `positions` is
-    /// `(n_frames, n_joints, 3)` and `weights` is `(n_frames, n_joints)`,
-    /// both in `kinematic_tree.joints` order; a keypoint with `weight <= 0`
-    /// is treated as [`missing`](crate::observation::KeypointObservation::missing).
-    /// Given as raw arrays rather than a list of per-frame
-    /// `KeypointObservation` lists so this never constructs one Python
-    /// object per keypoint per frame, which otherwise dominates call
-    /// overhead for long recordings. Any dtype is accepted and cast to
-    /// `float32` (e.g. the common case of a `float64` array), following
-    /// NumPy's own casting rules.
+    /// returns the converged pose after each frame. `weights` is
+    /// `(n_frames, n_joints)`; `positions` is `(n_frames, n_joints, 3)` if
+    /// this solver has no mapper (3D observations), or `(n_frames, n_joints,
+    /// 2)` if it does (2D observations, projected by that mapper) -- see
+    /// `mapper`. Both are in `kinematic_tree.joints` order; a keypoint with
+    /// `weight <= 0` (or NaN) is treated as
+    /// [`missing`](crate::observation::KeypointObservation::missing). Given
+    /// as raw arrays rather than a list of per-frame `KeypointObservation`
+    /// lists so this never constructs one Python object per keypoint per
+    /// frame, which otherwise dominates call overhead for long recordings.
+    /// Any dtype is accepted and cast to `float32` (e.g. the common case of
+    /// a `float64` array), following NumPy's own casting rules.
     fn solve_sequence(
         &mut self,
         py: Python<'_>,
@@ -78,7 +83,12 @@ impl SequenceSolver {
         let positions_arr = positions.as_array();
         let weights_arr = weights.as_array();
         let n_joints = self.inner.state.kinematic_tree.n_joints();
-        validate_position_weight_shapes(&positions_arr, &weights_arr, n_joints)?;
+        validate_position_weight_shapes(
+            &positions_arr,
+            &weights_arr,
+            n_joints,
+            self.mapper.is_some(),
+        )?;
         let sequence = observations_from_arrays(positions_arr, weights_arr);
         Ok(self
             .inner
@@ -177,15 +187,17 @@ impl ParallelSolveConfig {
 /// `Camera`, an `XYView`, or `None`; see [`Solver`](crate::solver::Solver).
 ///
 /// Observations are given as raw arrays rather than a list of per-frame
-/// `KeypointObservation` lists: `positions` is `(n_frames, n_keypoints, 3)`
-/// and `weights` is `(n_frames, n_keypoints)`, both in
-/// `kinematic_tree.joints` order; a keypoint with `weight <= 0` is treated
-/// as [`missing`](crate::observation::KeypointObservation::missing). This
-/// avoids constructing one Python `KeypointObservation` object per keypoint
-/// per frame, which otherwise dominates call overhead for large sequences
-/// (e.g. a whole recording's worth of frames in one call). Any dtype is
-/// accepted and cast to `float32` (e.g. the common case of a `float64`
-/// array), following NumPy's own casting rules.
+/// `KeypointObservation` lists: `weights` is `(n_frames, n_keypoints)`;
+/// `positions` is `(n_frames, n_keypoints, 3)` if `mapper` is `None` (3D
+/// observations), or `(n_frames, n_keypoints, 2)` if it's set (2D
+/// observations, projected by that mapper). Both are in
+/// `kinematic_tree.joints` order; a keypoint with `weight <= 0` (or NaN) is
+/// treated as [`missing`](crate::observation::KeypointObservation::missing).
+/// This avoids constructing one Python `KeypointObservation` object per
+/// keypoint per frame, which otherwise dominates call overhead for large
+/// sequences (e.g. a whole recording's worth of frames in one call). Any
+/// dtype is accepted and cast to `float32` (e.g. the common case of a
+/// `float64` array), following NumPy's own casting rules.
 #[pyfunction]
 #[pyo3(signature = (kinematic_tree, config, positions, weights, parallel_config, mapper=None))]
 #[allow(clippy::too_many_arguments)]
@@ -199,21 +211,24 @@ pub(crate) fn solve_sequence_segmented_parallel(
     mapper: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Vec<State>> {
     let n_joints = kinematic_tree.inner.n_joints();
+    let mapper = extract_mapper(mapper.as_ref())?;
     let positions_arr = positions.as_array();
     let weights_arr = weights.as_array();
-    validate_position_weight_shapes(&positions_arr, &weights_arr, n_joints)?;
+    validate_position_weight_shapes(&positions_arr, &weights_arr, n_joints, mapper.is_some())?;
 
-    let config = config.as_rust(extract_mapper(mapper.as_ref())?);
+    let config = config.as_rust(mapper);
     Ok(py
         .detach(|| {
-            let sequence = observations_from_arrays(positions_arr, weights_arr);
-            quickik_core::high_level::solve_sequence_segmented_parallel(
-                &kinematic_tree.inner,
-                config,
-                &sequence,
-                parallel_config.inner,
-            )
-        })
+            catch_panic(|| {
+                let sequence = observations_from_arrays(positions_arr, weights_arr);
+                quickik_core::high_level::solve_sequence_segmented_parallel(
+                    &kinematic_tree.inner,
+                    config,
+                    &sequence,
+                    parallel_config.inner,
+                )
+            })
+        })?
         .into_iter()
         .map(|inner| State { inner })
         .collect())

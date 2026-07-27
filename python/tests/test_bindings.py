@@ -66,10 +66,7 @@ def no_prior_config():
 
 
 def test_malformed_json_raises():
-    # PyO3 surfaces the underlying Rust panic as pyo3_runtime.PanicException,
-    # which (deliberately, on PyO3's part) subclasses BaseException, not
-    # Exception -- a bare `except Exception:` in caller code won't catch it.
-    with pytest.raises(BaseException):  # noqa: B017
+    with pytest.raises(ValueError):
         quickik.KinematicTree.from_json_str("not valid json")
 
 
@@ -88,8 +85,28 @@ def test_position2d_observation_on_mapperless_solver_raises(tree):
     observations[1] = quickik.KeypointObservation.position_2d([1.0, 0.0], 1.0)
 
     solver = quickik.Solver(tree, quickik.SolverConfig())
-    with pytest.raises(BaseException):  # noqa: B017 -- see test_malformed_json_raises
+    with pytest.raises(ValueError):
         solver.solve(state, observations)
+
+
+def test_solve_rejects_wrong_observation_count(tree):
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree, quickik.SolverConfig())
+
+    too_few = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints - 1)]
+    with pytest.raises(ValueError):
+        solver.solve(state, too_few)
+
+    too_many = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints + 1)]
+    with pytest.raises(ValueError):
+        solver.solve(state, too_many)
+
+
+def test_solve_frame_rejects_wrong_observation_count(tree):
+    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    too_few = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints - 1)]
+    with pytest.raises(ValueError):
+        solver.solve_frame(too_few)
 
 
 def test_recovers_pose_from_xyview_observations(tree):
@@ -267,6 +284,75 @@ def test_solve_sequence_rejects_wrong_keypoint_count(tree):
         )
 
 
+def test_solve_sequence_treats_nan_weight_as_missing(tree):
+    """Regression test: a NaN weight (a common "no confidence" sentinel from
+    upstream pose-estimation pipelines) must be treated as missing, like a
+    zero/negative weight, rather than poisoning the whole frame's solve (which
+    would otherwise leave every DOF frozen at its prior every frame)."""
+    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
+    weights[:, 1] = np.nan  # joint1's own keypoint unobserved every frame
+
+    states = quickik.SequenceSolver(tree, quickik.SolverConfig()).solve_sequence(
+        positions, weights
+    )
+
+    # Losing one keypoint's worth of evidence in this whole-body joint solve
+    # shifts the converged fit slightly system-wide (not just for the DOFs
+    # that keypoint constrains), so this uses a looser tolerance than the
+    # fully-observed tests above -- the point is to distinguish "converged
+    # near the true trajectory" from "frozen at exactly zero" (what the NaN
+    # bug caused), not to assert high precision.
+    last, (a1, a2) = states[-1], true_angles[-1]
+    assert last.dof_angles[0] == pytest.approx(a1, abs=5e-2)
+    assert last.dof_angles[1] == pytest.approx(a2, abs=5e-2)
+
+
+def sine_trajectory_2d_xyview_arrays(tree, n_frames):
+    """2D (XYView-projected) counterpart to `sine_trajectory_arrays`: same
+    sine trajectory, but `positions` drops each keypoint's Z coordinate,
+    matching XYView's own (identity, Z-dropping) projection."""
+    true_angles = []
+    positions = np.zeros((n_frames, tree.n_joints, 2), dtype=np.float32)
+    weights = np.ones((n_frames, tree.n_joints), dtype=np.float32)
+    for t in range(n_frames):
+        a = 0.3 * math.sin(t * 0.15)
+        true_angles.append((a, a * 0.5))
+        positions[t] = [(x, y) for x, y, _z in two_link_positions(a, a * 0.5)]
+    return positions, weights, true_angles
+
+
+def test_solve_sequence_xyview_reconstructs_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
+        tree, n_frames=10
+    )
+
+    solver = quickik.SequenceSolver(tree, no_prior_config(), mapper=quickik.XYView())
+    states = solver.solve_sequence(positions, weights)
+
+    assert len(states) == len(true_angles)
+    last, (a1, a2) = states[-1], true_angles[-1]
+    assert last.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+    assert last.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
+def test_solve_sequence_rejects_3d_positions_when_mapper_set(tree):
+    positions = np.zeros((3, tree.n_joints, 3), dtype=np.float32)
+    weights = np.ones((3, tree.n_joints), dtype=np.float32)
+    solver = quickik.SequenceSolver(
+        tree, quickik.SolverConfig(), mapper=quickik.XYView()
+    )
+    with pytest.raises(ValueError, match="2"):
+        solver.solve_sequence(positions, weights)
+
+
+def test_solve_sequence_rejects_2d_positions_without_mapper(tree):
+    positions = np.zeros((3, tree.n_joints, 2), dtype=np.float32)
+    weights = np.ones((3, tree.n_joints), dtype=np.float32)
+    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    with pytest.raises(ValueError, match="3"):
+        solver.solve_sequence(positions, weights)
+
+
 def sine_trajectory_arrays(tree, n_frames):
     """positions/weights (all keypoints observed, weight 1.0) for a smooth
     sine trajectory of the two-joint chain, plus the true (a1, a2) angles
@@ -329,6 +415,29 @@ def test_solve_sequence_segmented_parallel_casts_float64_arrays_to_float32(tree)
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
+def test_solve_sequence_segmented_parallel_xyview_reconstructs_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
+        tree, n_frames=40
+    )
+
+    parallel_config = quickik.ParallelSolveConfig(
+        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
+    )
+    states = quickik.solve_sequence_segmented_parallel(
+        tree,
+        quickik.SolverConfig(),
+        positions,
+        weights,
+        parallel_config,
+        mapper=quickik.XYView(),
+    )
+
+    assert len(states) == len(true_angles)
+    for state, (a1, a2) in zip(states, true_angles, strict=True):
+        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
 def test_solve_sequence_segmented_parallel_rejects_wrong_keypoint_count(tree):
     positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
     weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
@@ -358,3 +467,25 @@ def test_solve_sequence_segmented_parallel_honors_explicit_n_workers(tree):
     for state, (a1, a2) in zip(states, true_angles, strict=True):
         assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
         assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+
+
+def test_invalid_parallel_solve_config_raises_value_error(tree):
+    positions, weights, _ = sine_trajectory_arrays(tree, n_frames=5)
+
+    # n_workers=0 is documented as invalid.
+    zero_workers = quickik.ParallelSolveConfig(
+        segment_len=5, overlap_len=0, overlap_tolerance=0.05, n_workers=0
+    )
+    with pytest.raises(ValueError):
+        quickik.solve_sequence_segmented_parallel(
+            tree, quickik.SolverConfig(), positions, weights, zero_workers
+        )
+
+    # overlap_len must be smaller than segment_len.
+    bad_overlap = quickik.ParallelSolveConfig(
+        segment_len=5, overlap_len=5, overlap_tolerance=0.05, n_workers=1
+    )
+    with pytest.raises(ValueError):
+        quickik.solve_sequence_segmented_parallel(
+            tree, quickik.SolverConfig(), positions, weights, bad_overlap
+        )
