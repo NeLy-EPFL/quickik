@@ -79,6 +79,9 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     joint_weight_scalers: Vec<f32>,
     jtj: DMatrix<f32>,
     jtr: DVector<f32>,
+    /// Gauss-Newton update step, reused across iterations and solved into in
+    /// place by `Cholesky::solve_mut` to avoid a per-iteration allocation.
+    delta: DVector<f32>,
     /// Per-keypoint Jacobian buffer in compact form: shape is 3 x state_dim,
     /// but nonzero columns are moved to the left, and the rest is ignored.
     jacobian_buffer: DMatrix<f32>,
@@ -114,6 +117,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
             joint_weight_scalers,
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
+            delta: DVector::zeros(state_dim),
             jacobian_buffer: DMatrix::zeros(3, state_dim),
             jacobian_2d_buffer: DMatrix::zeros(2, state_dim),
             config,
@@ -203,11 +207,11 @@ impl<M: Mapper3Dto2D> Solver<M> {
             // contains garbage value after decomposition. But this is fine
             // because jtj is zeroed at the start of each solver iteration.
             let jtj_owned = std::mem::replace(&mut self.jtj, DMatrix::zeros(0, 0));
-            let delta = match nalgebra::linalg::Cholesky::new(jtj_owned) {
+            match nalgebra::linalg::Cholesky::new(jtj_owned) {
                 Some(chol) => {
-                    let delta = chol.solve(&self.jtr);
+                    self.delta.copy_from(&self.jtr);
+                    chol.solve_mut(&mut self.delta);
                     self.jtj = chol.unpack();
-                    delta
                 }
                 None => {
                     // Not positive-definite (numerically unstable): no
@@ -215,12 +219,12 @@ impl<M: Mapper3Dto2D> Solver<M> {
                     // is observed (even if some are observed, the root might
                     // be underconstrained and matches the targets exactly).
                     self.jtj = DMatrix::zeros(state_dim, state_dim);
-                    DVector::zeros(state_dim)
+                    self.delta.as_mut_slice().fill(0.0);
                 }
             };
-            state.apply_delta(&delta);
+            state.apply_delta(&self.delta);
 
-            if self.has_converged(&delta) {
+            if self.has_converged(&self.delta) {
                 break;
             }
         }
