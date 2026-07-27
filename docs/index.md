@@ -8,7 +8,7 @@ QuickIK is a fast <abbr title="Computing XYZ world coordinates of joint keypoint
 
 ## Feature highlights
 
-- **Whole-body kinematics:** Traditionally, inverse kinematics solves for joint angles to match the position of only the end effector (e.g., foot). QuickIK finds the joint angles and <abbr title="The position and orientation of the root body link. Freely moving animals and robots have &quot;freely floating&quot; bases, while fixed robotic arms have fixed bases.">base state</abbr> that best matches many tracked keypoints, possibly spread across multiple kinematic chains (e.g., limbs), in a single solve.
+- **Whole-body kinematics:** Traditionally, inverse kinematics solves for joint angles to match the position of only the end effector (e.g., foot). QuickIK finds the joint angles and <abbr title="The position and orientation of the root body link. Freely moving animals and robots have &quot;freely floating&quot; bases, while fixed robotic arms have fixed bases.">base state</abbr> that best match all tracked keypoints, possibly spread across multiple kinematic chains (e.g., limbs), in a single solve.
 - **Favoring "natural" poses:** QuickIK can be configured with a bias to favor more neutral joint angles when the problem is underconstrained.
 - **Incomplete observation:** QuickIK allows some keypoints to be missing on some of the frames and does its best using only the available ones.
 - **From 2D keypoint positions:** QuickIK can accept keypoint positions that are only in 2D projections. The problem is intrinsically underconstrained, but it can still work if the camera angle is reasonable and the pull toward "natural" states is properly tuned.
