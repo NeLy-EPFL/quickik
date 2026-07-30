@@ -19,12 +19,11 @@ import math
 import subprocess
 import sys
 
-import numpy as np
 import pytest
 import quickik
 
 torch = pytest.importorskip("torch")
-import quickik.torch as qtorch  # noqa: E402 (must follow the importorskip above)
+import quickik.torch as qtorch
 
 # gradcheck needs double precision to distinguish a real analytical-gradient
 # bug from finite-difference roundoff.
@@ -104,11 +103,13 @@ def positions_2d_in_keypoints_order(angles):
     return positions_in_keypoints_order(angles)[..., :2].clone()
 
 
-def default_config(**overrides):
-    kwargs = dict(n_iterations=20, neutral_weight=1e-3, damping=1e-6,
-                   position_tolerance=0.0, angle_tolerance=0.0)
-    kwargs.update(overrides)
-    return quickik.SolverConfig(**kwargs)
+def batched_solver(tree, mapper=None, **kwargs):
+    kwargs.setdefault("n_iterations", 20)
+    kwargs.setdefault("neutral_weight", 1e-3)
+    kwargs.setdefault("damping", 1e-6)
+    kwargs.setdefault("position_tolerance", 0.0)
+    kwargs.setdefault("angle_tolerance", 0.0)
+    return quickik.BatchedSolver(tree, KEYPOINTS_ORDER, mapper=mapper, **kwargs)
 
 
 def test_joint_names_and_weight_scalers(weighted_tree):
@@ -116,10 +117,7 @@ def test_joint_names_and_weight_scalers(weighted_tree):
     assert weighted_tree.joint_weight_scalers == pytest.approx([1.0, 2.5, 1.0, 0.3])
 
 
-def test_solve_batch_with_grad_rejects_camera(tree):
-    config = default_config()
-    positions = np.zeros((1, 4, 2), dtype=np.float32)
-    weights = np.ones((1, 4), dtype=np.float32)
+def test_batched_solver_rejects_camera_mapper(tree):
     camera = quickik.Camera(
         fx=500.0,
         fy=500.0,
@@ -128,31 +126,11 @@ def test_solve_batch_with_grad_rejects_camera(tree):
         world2cam_pos=[0.0, 0.0, 5.0],
         world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     )
+    solver = batched_solver(tree, mapper=camera)
+    positions = torch.zeros(1, 4, 2)
+    weights = torch.ones(1, 4)
     with pytest.raises(ValueError, match="Camera"):
-        quickik.solve_batch_with_grad(
-            tree, config, KEYPOINTS_ORDER, positions, weights, mapper=camera
-        )
-
-
-def test_solve_batch_with_grad_accepts_xyview(tree):
-    config = default_config(neutral_weight=0.0)
-    positions = np.array(
-        [[p[0], p[1]] for p in two_link_positions(0.4, 0.3)], dtype=np.float32
-    )[ORDER_JOINT_INDICES]
-    positions = positions[None, ...]  # (1, 4, 2)
-    weights = np.ones((1, 4), dtype=np.float32)
-
-    joint_angles, base_pos, base_quat, jacobian, cholesky_l, valid = (
-        quickik.solve_batch_with_grad(
-            tree, config, KEYPOINTS_ORDER, positions, weights, mapper=quickik.XYView()
-        )
-    )
-
-    assert valid[0]
-    assert joint_angles[0, 0] == pytest.approx(0.4, abs=1e-2)
-    assert joint_angles[0, 1] == pytest.approx(0.3, abs=1e-2)
-    # Jacobian is always the raw 3D one, regardless of mapper.
-    assert jacobian.shape == (1, 3 * 4, tree.n_dofs + 6)
+        qtorch.SolveIK.apply(solver, positions, weights)
 
 
 def test_forward_recovers_pose_in_keypoints_order(tree):
@@ -160,13 +138,11 @@ def test_forward_recovers_pose_in_keypoints_order(tree):
     `quickik.Solver.solve` given an equivalent, reachable target -- this
     catches the keypoints_order remapping being wrong in a way that gradcheck
     (which only checks *sensitivity*, not absolute correctness) wouldn't."""
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(tree, neutral_weight=0.0)
     positions = positions_in_keypoints_order([(0.4, 0.3)])
     weights = torch.ones(1, 4, dtype=torch.float64)
 
-    joint_angles, base_pos, base_quat = qtorch.SolveIK.apply(
-        tree, config, KEYPOINTS_ORDER, None, positions, weights
-    )
+    joint_angles, base_pos, base_quat = qtorch.SolveIK.apply(solver, positions, weights)
 
     assert joint_angles[0, 0].item() == pytest.approx(0.4, abs=1e-2)
     assert joint_angles[0, 1].item() == pytest.approx(0.3, abs=1e-2)
@@ -175,13 +151,13 @@ def test_forward_recovers_pose_in_keypoints_order(tree):
 
 
 def test_gradcheck_positions(tree):
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(tree, neutral_weight=0.0)
     angles = [(0.3, 0.2), (0.35, 0.15), (0.25, 0.25)]
     positions = positions_in_keypoints_order(angles).clone().requires_grad_(True)
     weights = torch.ones(len(angles), 4, dtype=torch.float64)
 
     def func(positions):
-        return qtorch.SolveIK.apply(tree, config, KEYPOINTS_ORDER, None, positions, weights)
+        return qtorch.SolveIK.apply(solver, positions, weights)
 
     # eps/atol/rtol looser than gradcheck's defaults: quickik_core computes
     # entirely in f32 regardless of this test's float64 tensors, so an eps
@@ -194,7 +170,7 @@ def test_gradcheck_positions_with_nonuniform_weights_and_weight_scaler(weighted_
     """Same as test_gradcheck_positions, but with a non-1.0 joint
     weight_scaler and non-uniform per-keypoint weights, both of which the
     plain identity-weight_scaler case above doesn't exercise."""
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(weighted_tree, neutral_weight=0.0)
     angles = [(0.3, 0.2), (0.35, 0.15)]
     positions = positions_in_keypoints_order(angles).clone().requires_grad_(True)
     weights = torch.ones(len(angles), 4, dtype=torch.float64)
@@ -202,9 +178,7 @@ def test_gradcheck_positions_with_nonuniform_weights_and_weight_scaler(weighted_
     weights[:, 2] = 1.3
 
     def func(positions):
-        return qtorch.SolveIK.apply(
-            weighted_tree, config, KEYPOINTS_ORDER, None, positions, weights
-        )
+        return qtorch.SolveIK.apply(solver, positions, weights)
 
     assert torch.autograd.gradcheck(func, (positions,), eps=1e-3, atol=2e-2, rtol=2e-2)
 
@@ -213,33 +187,15 @@ def test_gradcheck_positions_xyview(tree):
     """Same as test_gradcheck_positions, but through the XYView mapper:
     regression coverage for slicing the raw 3D Jacobian down to its first
     two rows in `SolveIK.backward` (see `ctx.n_obs_dims`)."""
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
     angles = [(0.3, 0.2), (0.35, 0.15), (0.25, 0.25)]
     positions = positions_2d_in_keypoints_order(angles).clone().requires_grad_(True)
     weights = torch.ones(len(angles), 4, dtype=torch.float64)
 
     def func(positions):
-        return qtorch.SolveIK.apply(
-            tree, config, KEYPOINTS_ORDER, quickik.XYView(), positions, weights
-        )
+        return qtorch.SolveIK.apply(solver, positions, weights)
 
     assert torch.autograd.gradcheck(func, (positions,), eps=1e-3, atol=2e-2, rtol=2e-2)
-
-
-def test_solveik_rejects_camera(tree):
-    config = default_config()
-    positions = positions_2d_in_keypoints_order([(0.3, 0.2)])
-    weights = torch.ones(1, 4, dtype=torch.float64)
-    camera = quickik.Camera(
-        fx=500.0,
-        fy=500.0,
-        cx=320.0,
-        cy=240.0,
-        world2cam_pos=[0.0, 0.0, 5.0],
-        world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    )
-    with pytest.raises(ValueError, match="Camera"):
-        qtorch.SolveIK.apply(tree, config, KEYPOINTS_ORDER, camera, positions, weights)
 
 
 def test_invalid_item_gets_zero_gradient_not_nan(tree):
@@ -247,16 +203,16 @@ def test_invalid_item_gets_zero_gradient_not_nan(tree):
     linearization to differentiate through; its gradient should be exactly
     zero (not NaN/Inf), while a well-posed item in the same batch still gets
     a real gradient."""
-    config = default_config(neutral_weight=0.0, position_tolerance=1e-3, angle_tolerance=1e-3)
+    solver = batched_solver(
+        tree, neutral_weight=0.0, position_tolerance=1e-3, angle_tolerance=1e-3
+    )
     positions = torch.zeros(2, 4, 3, dtype=torch.float64, requires_grad=True)
     with torch.no_grad():
         positions[1] = positions_in_keypoints_order([(0.3, 0.2)])[0]
     weights = torch.zeros(2, 4, dtype=torch.float64)
     weights[1] = 1.0  # only item 1 is observed
 
-    joint_angles, base_pos, base_quat = qtorch.SolveIK.apply(
-        tree, config, KEYPOINTS_ORDER, None, positions, weights
-    )
+    joint_angles, base_pos, base_quat = qtorch.SolveIK.apply(solver, positions, weights)
     (joint_angles.sum() + base_pos.sum() + base_quat.sum()).backward()
 
     assert torch.all(positions.grad[0] == 0)
@@ -265,38 +221,50 @@ def test_invalid_item_gets_zero_gradient_not_nan(tree):
 
 
 def test_weights_requires_grad_raises(tree):
-    config = default_config()
+    solver = batched_solver(tree)
     positions = positions_in_keypoints_order([(0.3, 0.2)])
     weights = torch.ones(1, 4, dtype=torch.float64, requires_grad=True)
     with pytest.raises(ValueError, match="weights"):
-        qtorch.SolveIK.apply(tree, config, KEYPOINTS_ORDER, None, positions, weights)
+        qtorch.SolveIK.apply(solver, positions, weights)
 
 
 def test_quickiksolve_module_matches_solveik_directly(tree):
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(tree, neutral_weight=0.0)
     positions = positions_in_keypoints_order([(0.4, 0.3)])
     weights = torch.ones(1, 4, dtype=torch.float64)
 
-    module = qtorch.QuickIKSolve(tree, config, KEYPOINTS_ORDER)
+    module = qtorch.QuickIKSolve(solver)
     from_module = module(positions, weights)
-    from_function = qtorch.SolveIK.apply(
-        tree, config, KEYPOINTS_ORDER, None, positions, weights
-    )
+    from_function = qtorch.SolveIK.apply(solver, positions, weights)
 
     for a, b in zip(from_module, from_function, strict=True):
         assert torch.equal(a, b)
 
 
 def test_quickiksolve_module_with_xyview_mapper(tree):
-    config = default_config(neutral_weight=0.0)
+    solver = batched_solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
     positions = positions_2d_in_keypoints_order([(0.4, 0.3)])
     weights = torch.ones(1, 4, dtype=torch.float64)
 
-    module = qtorch.QuickIKSolve(tree, config, KEYPOINTS_ORDER, mapper=quickik.XYView())
+    module = qtorch.QuickIKSolve(solver)
     joint_angles, _, _ = module(positions, weights)
 
     assert joint_angles[0, 0].item() == pytest.approx(0.4, abs=1e-2)
     assert joint_angles[0, 1].item() == pytest.approx(0.3, abs=1e-2)
+
+
+def test_quickiksolve_rejects_camera_mapper_at_construction(tree):
+    camera = quickik.Camera(
+        fx=500.0,
+        fy=500.0,
+        cx=320.0,
+        cy=240.0,
+        world2cam_pos=[0.0, 0.0, 5.0],
+        world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    )
+    solver = batched_solver(tree, mapper=camera)
+    with pytest.raises(ValueError, match="Camera"):
+        qtorch.QuickIKSolve(solver)
 
 
 def test_torch_py_raises_informative_error_without_pytorch():
@@ -318,7 +286,7 @@ def test_torch_py_raises_informative_error_without_pytorch():
         "sys.exit(1)\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout

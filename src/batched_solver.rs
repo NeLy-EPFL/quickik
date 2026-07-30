@@ -114,6 +114,14 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
         }
     }
 
+    /// `keypoint_to_joint_idx()[i]` is the internal joint/keypoint index that
+    /// `solve`'s `observations_array` keypoint axis position `i` corresponds
+    /// to (the resolved inverse of the by-name `keypoints_order` this solver
+    /// was constructed with).
+    pub fn keypoint_to_joint_idx(&self) -> &[usize] {
+        &self.keypoint_to_joint_idx
+    }
+
     /// Solves every item in `observations_array` in parallel via rayon, each
     /// starting from `kinematic_tree`'s neutral pose with its own freshly
     /// constructed [`Solver`] (so items never contend over solver-internal

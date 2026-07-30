@@ -1,13 +1,8 @@
 """Tests for QuickIK's Python bindings, mirroring cpp/tests/test_main.cpp and
-tests/solver_test.rs / tests/high_level_test.rs. Uses the same "two-joint
-chain" fixture as those (see tests/common/mod.rs): a root, joint1 and joint2
-(each with one Z-axis DOF, joint2 limited to [-0.5, 0.5]), and a trailing
-fixed tip.
-
-Forward kinematics isn't exposed to Python (same as C++), so
-`two_link_positions` below computes the four keypoints' world positions
-directly from the chain's known geometry, in [root, joint1, joint2, tip]
-order, to build observations for a target pose.
+tests/solver_test.rs / tests/sequential_solver_test.rs / tests/batched_solver_test.rs.
+Uses the same "two-joint chain" fixture as those (see tests/common/mod.rs): a
+root, joint1 and joint2 (each with one Z-axis DOF, joint2 limited to
+[-0.5, 0.5]), and a trailing fixed tip.
 
 Run with QuickIK's Python extension already built for this interpreter (see
 docs/getting-started/installation.md):
@@ -37,9 +32,29 @@ TWO_JOINT_CHAIN_JSON = """
 """
 
 
+FIXED_BASE_TWO_JOINT_CHAIN_JSON = """
+{
+    "fixed_base": true,
+    "joints": [
+        {"name": "root", "parent": null, "offset_pos": [0.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []},
+        {"name": "joint1", "parent": "root", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
+         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": null}]},
+        {"name": "joint2", "parent": "joint1", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
+         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": [-0.5, 0.5]}]},
+        {"name": "tip", "parent": "joint2", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []}
+    ]
+}
+"""
+
+
 @pytest.fixture
 def tree():
     return quickik.KinematicTree.from_json_str(TWO_JOINT_CHAIN_JSON)
+
+
+@pytest.fixture
+def fixed_base_tree():
+    return quickik.KinematicTree.from_json_str(FIXED_BASE_TWO_JOINT_CHAIN_JSON)
 
 
 def two_link_positions(a1, a2):
@@ -61,10 +76,6 @@ def observations_for(a1, a2):
     ]
 
 
-def no_prior_config():
-    return quickik.SolverConfig(neutral_weight=0.0)
-
-
 def test_malformed_json_raises():
     with pytest.raises(ValueError):
         quickik.KinematicTree.from_json_str("not valid json")
@@ -72,27 +83,43 @@ def test_malformed_json_raises():
 
 def test_recovers_pose_from_3d_observations(tree):
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, no_prior_config())
-    solver.solve(state, observations_for(0.4, 0.3))
+    solver = quickik.Solver(tree, neutral_weight=0.0)
+    result = solver.solve(state, observations_for(0.4, 0.3))
 
-    assert state.dof_angles[0] == pytest.approx(0.4, abs=1e-3)
-    assert state.dof_angles[1] == pytest.approx(0.3, abs=1e-3)
+    assert result.dof_angles[0] == pytest.approx(0.4, abs=1e-3)
+    assert result.dof_angles[1] == pytest.approx(0.3, abs=1e-3)
 
 
-def test_solver_last_fk_positions_matches_recovered_pose(tree):
-    """last_fk_positions should reflect the exact same pose reported in
-    dof_angles (see this feature's design discussion: forward kinematics
-    isn't otherwise exposed to Python, so this is the only way to sanity
-    check fit quality without recomputing it by hand)."""
+def test_solve_with_fk_reports_keypoint_positions_matching_recovered_pose(tree):
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, no_prior_config())
-    solver.solve(state, observations_for(0.4, 0.3))
+    solver = quickik.Solver(tree, neutral_weight=0.0)
+    result = solver.solve(state, observations_for(0.4, 0.3), with_fk=True)
 
     expected = two_link_positions(0.4, 0.3)
-    actual = solver.last_fk_positions
-    assert actual.shape == (tree.n_joints, 3)
-    for a, e in zip(actual, expected, strict=True):
+    assert result.keypoint_pos.shape == (tree.n_joints, 3)
+    for a, e in zip(result.keypoint_pos, expected, strict=True):
         assert a == pytest.approx(e, abs=1e-2)
+
+
+def test_solve_without_with_fk_or_with_grad_leaves_optional_fields_none(tree):
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree)
+    result = solver.solve(state, observations_for(0.4, 0.3))
+
+    assert result.keypoint_pos is None
+    assert result.jacobian is None
+    assert result.cholesky_l is None
+
+
+def test_solve_with_grad_reports_jacobian_and_cholesky_l(tree):
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree, neutral_weight=0.0)
+    result = solver.solve(state, observations_for(0.4, 0.3), with_grad=True)
+
+    n_joints = tree.n_joints
+    state_dim = tree.n_dofs + 6
+    assert result.jacobian.shape == (3 * n_joints, state_dim)
+    assert result.cholesky_l.shape == (state_dim, state_dim)
 
 
 def test_position2d_observation_on_mapperless_solver_raises(tree):
@@ -100,14 +127,14 @@ def test_position2d_observation_on_mapperless_solver_raises(tree):
     observations = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints)]
     observations[1] = quickik.KeypointObservation.position_2d([1.0, 0.0], 1.0)
 
-    solver = quickik.Solver(tree, quickik.SolverConfig())
+    solver = quickik.Solver(tree)
     with pytest.raises(ValueError):
         solver.solve(state, observations)
 
 
 def test_solve_rejects_wrong_observation_count(tree):
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, quickik.SolverConfig())
+    solver = quickik.Solver(tree)
 
     too_few = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints - 1)]
     with pytest.raises(ValueError):
@@ -118,13 +145,6 @@ def test_solve_rejects_wrong_observation_count(tree):
         solver.solve(state, too_many)
 
 
-def test_solve_frame_rejects_wrong_observation_count(tree):
-    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    too_few = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints - 1)]
-    with pytest.raises(ValueError):
-        solver.solve_frame(too_few)
-
-
 def test_recovers_pose_from_xyview_observations(tree):
     positions = two_link_positions(0.35, -0.25)
     observations = [
@@ -132,11 +152,11 @@ def test_recovers_pose_from_xyview_observations(tree):
     ]
 
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, no_prior_config(), mapper=quickik.XYView())
-    solver.solve(state, observations)
+    solver = quickik.Solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+    result = solver.solve(state, observations)
 
-    assert state.dof_angles[0] == pytest.approx(0.35, abs=1e-3)
-    assert state.dof_angles[1] == pytest.approx(-0.25, abs=1e-3)
+    assert result.dof_angles[0] == pytest.approx(0.35, abs=1e-3)
+    assert result.dof_angles[1] == pytest.approx(-0.25, abs=1e-3)
 
 
 def test_recovers_pose_from_camera_observations(tree):
@@ -159,11 +179,11 @@ def test_recovers_pose_from_camera_observations(tree):
         observations.append(quickik.KeypointObservation.position_2d([u, v], 1.0))
 
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, no_prior_config(), mapper=camera)
-    solver.solve(state, observations)
+    solver = quickik.Solver(tree, mapper=camera, neutral_weight=0.0)
+    result = solver.solve(state, observations)
 
-    assert state.dof_angles[0] == pytest.approx(0.2, abs=1e-3)
-    assert state.dof_angles[1] == pytest.approx(0.15, abs=1e-3)
+    assert result.dof_angles[0] == pytest.approx(0.2, abs=1e-3)
+    assert result.dof_angles[1] == pytest.approx(0.15, abs=1e-3)
 
 
 def test_xyview_latency_not_much_worse_than_3d(tree):
@@ -176,7 +196,7 @@ def test_xyview_latency_not_much_worse_than_3d(tree):
     fixture is dominated by Python/FFI call overhead common to both paths."""
 
     def mean_solve_seconds(observations, mapper=None):
-        solver = quickik.Solver(tree, quickik.SolverConfig(), mapper)
+        solver = quickik.Solver(tree, mapper=mapper)
         state = quickik.State.neutral_pose(tree)
         solver.solve(state, observations)  # warm up
 
@@ -203,24 +223,24 @@ def test_missing_observations_leave_state_at_neutral_prior(tree):
     state = quickik.State.neutral_pose(tree)
     observations = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints)]
 
-    solver = quickik.Solver(tree, quickik.SolverConfig())
-    solver.solve(state, observations)
+    solver = quickik.Solver(tree)
+    result = solver.solve(state, observations)
 
-    for angle in state.dof_angles:
+    for angle in result.dof_angles:
         assert abs(angle) < 1e-6
 
 
-def test_config_can_be_tuned_between_solve_calls(tree):
+def test_solver_fields_can_be_tuned_between_solve_calls(tree):
     state = quickik.State.neutral_pose(tree)
     observations = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints)]
 
-    solver = quickik.Solver(tree, quickik.SolverConfig())
+    solver = quickik.Solver(tree)
     solver.solve(state, observations)
 
-    solver.config.n_iterations = 3
+    solver.n_iterations = 3
     solver.solve(state, observations)
 
-    assert solver.config.n_iterations == 3
+    assert solver.n_iterations == 3
 
 
 def test_solve_respects_joint_limits(tree):
@@ -234,101 +254,97 @@ def test_solve_respects_joint_limits(tree):
         quickik.KeypointObservation.position_3d([2.3624, 0.9320, 0.0], 1.0),
     ]
 
-    solver = quickik.Solver(tree, quickik.SolverConfig())
-    solver.solve(state, observations)
+    solver = quickik.Solver(tree)
+    result = solver.solve(state, observations)
 
-    joint2_angle = state.dof_angles[1]
+    joint2_angle = result.dof_angles[1]
     assert -0.5 - 1e-6 <= joint2_angle <= 0.5 + 1e-6
     assert joint2_angle > 0.45
 
 
-def test_sequence_solver_warm_start_converges_faster(tree):
-    config = no_prior_config()
-    config.n_iterations = 1
-    target = observations_for(0.4, 0.3)
+def test_sequence_solver_warm_starts_across_separate_calls(tree):
+    target = np.array([two_link_positions(0.4, 0.3)], dtype=np.float32)
+    weights = np.ones((1, tree.n_joints), dtype=np.float32)
 
-    cold = quickik.SequenceSolver(tree, config)
-    cold.solve_frame(target)
-    cold_error = abs(cold.state.dof_angles[0] - 0.4)
+    cold = quickik.SequenceSolver(tree, n_iterations=1, neutral_weight=0.0)
+    cold_result = cold.solve(target, weights)[0]
+    cold_error = abs(cold_result.dof_angles[0] - 0.4)
 
-    warm = quickik.SequenceSolver(tree, config)
-    warm.solve_frame(target)
-    warm.solve_frame(target)
-    warm_error = abs(warm.state.dof_angles[0] - 0.4)
+    warm = quickik.SequenceSolver(tree, n_iterations=1, neutral_weight=0.0)
+    warm.solve(target, weights)
+    warm_result = warm.solve(target, weights)[0]
+    warm_error = abs(warm_result.dof_angles[0] - 0.4)
 
     assert warm_error < cold_error
 
 
-def test_solve_sequence_returns_one_state_per_frame(tree):
-    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+def sine_trajectory_arrays(tree, n_frames):
+    """positions/weights (all keypoints observed, weight 1.0) for a smooth
+    sine trajectory of the two-joint chain, plus the true (a1, a2) angles
+    used to generate it."""
+    true_angles = []
+    positions = np.zeros((n_frames, tree.n_joints, 3), dtype=np.float32)
+    weights = np.ones((n_frames, tree.n_joints), dtype=np.float32)
+    for t in range(n_frames):
+        a = 0.3 * math.sin(t * 0.15)
+        true_angles.append((a, a * 0.5))
+        positions[t] = two_link_positions(a, a * 0.5)
+    return positions, weights, true_angles
+
+
+def test_sequence_solver_solve_returns_one_result_per_frame(tree):
+    solver = quickik.SequenceSolver(tree)
     angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
     positions = np.array(
         [two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float32
     )
     weights = np.ones((len(angles), tree.n_joints), dtype=np.float32)
 
-    states = solver.solve_sequence(positions, weights)
+    results = solver.solve(positions, weights)
 
-    assert len(states) == 3
-    last = states[2]
+    assert len(results) == 3
+    last = results[2]
     assert last.dof_angles[0] == pytest.approx(0.3, abs=1e-2)
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
 
 
-def test_sequence_solver_last_fk_positions_matches_state(tree):
-    solver = quickik.SequenceSolver(tree, no_prior_config())
-    solver.solve_frame(observations_for(0.4, 0.3))
+def test_sequence_solver_solve_with_fk_matches_recovered_pose(tree):
+    target = np.array([two_link_positions(0.4, 0.3)], dtype=np.float32)
+    weights = np.ones((1, tree.n_joints), dtype=np.float32)
+
+    solver = quickik.SequenceSolver(tree, neutral_weight=0.0)
+    result = solver.solve(target, weights, with_fk=True)[0]
 
     expected = two_link_positions(0.4, 0.3)
-    actual = solver.last_fk_positions
-    assert actual.shape == (tree.n_joints, 3)
-    for a, e in zip(actual, expected, strict=True):
+    assert result.keypoint_pos.shape == (tree.n_joints, 3)
+    for a, e in zip(result.keypoint_pos, expected, strict=True):
         assert a == pytest.approx(e, abs=1e-2)
 
 
-def test_solve_sequence_with_fk_matches_solve_sequence(tree):
-    angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
-    positions = np.array([two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float32)
-    weights = np.ones((len(angles), tree.n_joints), dtype=np.float32)
-
-    plain_solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    plain_states = plain_solver.solve_sequence(positions, weights)
-
-    fk_solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
-    states, fk_positions = fk_solver.solve_sequence_with_fk(positions, weights)
-
-    assert len(states) == len(plain_states)
-    assert fk_positions.shape == (len(angles), tree.n_joints, 3)
-    for state, plain_state in zip(states, plain_states, strict=True):
-        assert state.dof_angles == pytest.approx(plain_state.dof_angles)
-
-
-def test_solve_sequence_casts_float64_arrays_to_float32(tree):
-    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+def test_sequence_solver_casts_float64_arrays_to_float32(tree):
+    solver = quickik.SequenceSolver(tree)
     angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
     positions = np.array(
         [two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float64
     )
     weights = np.ones((len(angles), tree.n_joints), dtype=np.float64)
 
-    states = solver.solve_sequence(positions, weights)
+    results = solver.solve(positions, weights)
 
-    assert len(states) == 3
-    last = states[2]
+    assert len(results) == 3
+    last = results[2]
     assert last.dof_angles[0] == pytest.approx(0.3, abs=1e-2)
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
 
 
-def test_solve_sequence_rejects_wrong_keypoint_count(tree):
+def test_sequence_solver_solve_rejects_wrong_keypoint_count(tree):
     positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
     weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
     with pytest.raises(ValueError, match="keypoints"):
-        quickik.SequenceSolver(tree, quickik.SolverConfig()).solve_sequence(
-            positions, weights
-        )
+        quickik.SequenceSolver(tree).solve(positions, weights)
 
 
-def test_solve_sequence_treats_nan_weight_as_missing(tree):
+def test_sequence_solver_treats_nan_weight_as_missing(tree):
     """Regression test: a NaN weight (a common "no confidence" sentinel from
     upstream pose-estimation pipelines) must be treated as missing, like a
     zero/negative weight, rather than poisoning the whole frame's solve (which
@@ -336,9 +352,7 @@ def test_solve_sequence_treats_nan_weight_as_missing(tree):
     positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
     weights[:, 1] = np.nan  # joint1's own keypoint unobserved every frame
 
-    states = quickik.SequenceSolver(tree, quickik.SolverConfig()).solve_sequence(
-        positions, weights
-    )
+    results = quickik.SequenceSolver(tree).solve(positions, weights)
 
     # Losing one keypoint's worth of evidence in this whole-body joint solve
     # shifts the converged fit slightly system-wide (not just for the DOFs
@@ -346,7 +360,7 @@ def test_solve_sequence_treats_nan_weight_as_missing(tree):
     # fully-observed tests above -- the point is to distinguish "converged
     # near the true trajectory" from "frozen at exactly zero" (what the NaN
     # bug caused), not to assert high precision.
-    last, (a1, a2) = states[-1], true_angles[-1]
+    last, (a1, a2) = results[-1], true_angles[-1]
     assert last.dof_angles[0] == pytest.approx(a1, abs=5e-2)
     assert last.dof_angles[1] == pytest.approx(a2, abs=5e-2)
 
@@ -365,171 +379,207 @@ def sine_trajectory_2d_xyview_arrays(tree, n_frames):
     return positions, weights, true_angles
 
 
-def test_solve_sequence_xyview_reconstructs_trajectory(tree):
+def test_sequence_solver_xyview_reconstructs_trajectory(tree):
     positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
         tree, n_frames=10
     )
 
-    solver = quickik.SequenceSolver(tree, no_prior_config(), mapper=quickik.XYView())
-    states = solver.solve_sequence(positions, weights)
+    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+    results = solver.solve(positions, weights)
 
-    assert len(states) == len(true_angles)
-    last, (a1, a2) = states[-1], true_angles[-1]
+    assert len(results) == len(true_angles)
+    last, (a1, a2) = results[-1], true_angles[-1]
     assert last.dof_angles[0] == pytest.approx(a1, abs=1e-2)
     assert last.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_solve_sequence_rejects_3d_positions_when_mapper_set(tree):
+def test_sequence_solver_solve_rejects_3d_positions_when_mapper_set(tree):
     positions = np.zeros((3, tree.n_joints, 3), dtype=np.float32)
     weights = np.ones((3, tree.n_joints), dtype=np.float32)
-    solver = quickik.SequenceSolver(
-        tree, quickik.SolverConfig(), mapper=quickik.XYView()
-    )
+    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView())
     with pytest.raises(ValueError, match="2"):
-        solver.solve_sequence(positions, weights)
+        solver.solve(positions, weights)
 
 
-def test_solve_sequence_rejects_2d_positions_without_mapper(tree):
+def test_sequence_solver_solve_rejects_2d_positions_without_mapper(tree):
     positions = np.zeros((3, tree.n_joints, 2), dtype=np.float32)
     weights = np.ones((3, tree.n_joints), dtype=np.float32)
-    solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    solver = quickik.SequenceSolver(tree)
     with pytest.raises(ValueError, match="3"):
-        solver.solve_sequence(positions, weights)
+        solver.solve(positions, weights)
 
 
-def sine_trajectory_arrays(tree, n_frames):
-    """positions/weights (all keypoints observed, weight 1.0) for a smooth
-    sine trajectory of the two-joint chain, plus the true (a1, a2) angles
-    used to generate it."""
-    true_angles = []
-    positions = np.zeros((n_frames, tree.n_joints, 3), dtype=np.float32)
-    weights = np.ones((n_frames, tree.n_joints), dtype=np.float32)
-    for t in range(n_frames):
-        a = 0.3 * math.sin(t * 0.15)
-        true_angles.append((a, a * 0.5))
-        positions[t] = two_link_positions(a, a * 0.5)
-    return positions, weights, true_angles
-
-
-def test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory(tree):
+def test_solve_segments_parallel_reconstructs_smooth_trajectory(tree):
     positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
 
-    parallel_config = quickik.ParallelSolveConfig(
-        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
-    )
-    states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), positions, weights, parallel_config
-    )
+    solver = quickik.SequenceSolver(tree)
+    results = solver.solve_segments_parallel(positions, weights, n_workers=4)
 
-    assert len(states) == len(true_angles)
-    for state, (a1, a2) in zip(states, true_angles, strict=True):
-        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
-        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+    assert len(results) == len(true_angles)
+    for result, (a1, a2) in zip(results, true_angles, strict=True):
+        assert result.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert result.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_parallel_solve_config_for_recording_reconstructs_smooth_trajectory(tree):
-    positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
-
-    parallel_config = quickik.ParallelSolveConfig.for_recording(len(true_angles))
-    states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), positions, weights, parallel_config
-    )
-
-    assert len(states) == len(true_angles)
-    for state, (a1, a2) in zip(states, true_angles, strict=True):
-        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
-        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
-
-
-def test_solve_sequence_segmented_parallel_casts_float64_arrays_to_float32(tree):
+def test_solve_segments_parallel_casts_float64_arrays_to_float32(tree):
     positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
     positions = positions.astype(np.float64)
     weights = weights.astype(np.float64)
 
-    parallel_config = quickik.ParallelSolveConfig(
-        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
-    )
-    states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), positions, weights, parallel_config
-    )
+    solver = quickik.SequenceSolver(tree)
+    results = solver.solve_segments_parallel(positions, weights, n_workers=4)
 
-    assert len(states) == len(true_angles)
-    for state, (a1, a2) in zip(states, true_angles, strict=True):
-        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
-        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+    assert len(results) == len(true_angles)
+    for result, (a1, a2) in zip(results, true_angles, strict=True):
+        assert result.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert result.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_solve_sequence_segmented_parallel_xyview_reconstructs_trajectory(tree):
+def test_solve_segments_parallel_xyview_reconstructs_trajectory(tree):
     positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
         tree, n_frames=40
     )
 
-    parallel_config = quickik.ParallelSolveConfig(
-        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=-1
-    )
-    states = quickik.solve_sequence_segmented_parallel(
-        tree,
-        quickik.SolverConfig(),
-        positions,
-        weights,
-        parallel_config,
-        mapper=quickik.XYView(),
-    )
+    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView())
+    results = solver.solve_segments_parallel(positions, weights, n_workers=4)
 
-    assert len(states) == len(true_angles)
-    for state, (a1, a2) in zip(states, true_angles, strict=True):
-        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
-        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+    assert len(results) == len(true_angles)
+    for result, (a1, a2) in zip(results, true_angles, strict=True):
+        assert result.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert result.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_solve_sequence_segmented_parallel_rejects_wrong_keypoint_count(tree):
+def test_solve_segments_parallel_rejects_wrong_keypoint_count(tree):
     positions = np.zeros((5, tree.n_joints - 1, 3), dtype=np.float32)
     weights = np.zeros((5, tree.n_joints - 1), dtype=np.float32)
-    parallel_config = quickik.ParallelSolveConfig(
-        segment_len=5, overlap_len=0, overlap_tolerance=0.05, n_workers=1
-    )
+    solver = quickik.SequenceSolver(tree)
     with pytest.raises(ValueError, match="keypoints"):
-        quickik.solve_sequence_segmented_parallel(
-            tree, quickik.SolverConfig(), positions, weights, parallel_config
-        )
+        solver.solve_segments_parallel(positions, weights, n_workers=1)
 
 
-def test_solve_sequence_segmented_parallel_honors_explicit_n_workers(tree):
+def test_solve_segments_parallel_honors_explicit_n_workers(tree):
     positions, weights, true_angles = sine_trajectory_arrays(tree, n_frames=40)
 
-    # n_workers=1 forces every segment through a single spawned thread,
-    # exercising a different code path than the -1 (all available cores)
-    # used above.
-    parallel_config = quickik.ParallelSolveConfig(
-        segment_len=10, overlap_len=3, overlap_tolerance=0.05, n_workers=1
-    )
-    states = quickik.solve_sequence_segmented_parallel(
-        tree, quickik.SolverConfig(), positions, weights, parallel_config
-    )
+    # n_workers=1 forces the whole sequence through a single segment,
+    # exercising a different code path than the >1 case used above.
+    solver = quickik.SequenceSolver(tree)
+    results = solver.solve_segments_parallel(positions, weights, n_workers=1)
 
-    assert len(states) == len(true_angles)
-    for state, (a1, a2) in zip(states, true_angles, strict=True):
-        assert state.dof_angles[0] == pytest.approx(a1, abs=1e-2)
-        assert state.dof_angles[1] == pytest.approx(a2, abs=1e-2)
+    assert len(results) == len(true_angles)
+    for result, (a1, a2) in zip(results, true_angles, strict=True):
+        assert result.dof_angles[0] == pytest.approx(a1, abs=1e-2)
+        assert result.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_invalid_parallel_solve_config_raises_value_error(tree):
+def test_solve_segments_parallel_rejects_zero_workers(tree):
     positions, weights, _ = sine_trajectory_arrays(tree, n_frames=5)
-
-    # n_workers=0 is documented as invalid.
-    zero_workers = quickik.ParallelSolveConfig(
-        segment_len=5, overlap_len=0, overlap_tolerance=0.05, n_workers=0
-    )
+    solver = quickik.SequenceSolver(tree)
     with pytest.raises(ValueError):
-        quickik.solve_sequence_segmented_parallel(
-            tree, quickik.SolverConfig(), positions, weights, zero_workers
+        solver.solve_segments_parallel(positions, weights, n_workers=0)
+
+
+def joint_names(names):
+    return list(names)
+
+
+def test_batched_solver_matches_sequential_solve(tree):
+    # A permutation of the tree's own joint order, so this actually exercises
+    # name-based remapping rather than happening to pass only for the
+    # identity order.
+    keypoints_order = joint_names(["tip", "root", "joint2", "joint1"])
+    order_joint_indices = [3, 0, 2, 1]
+    targets = [(0.4, 0.3), (-0.2, 0.1), (0.3, -0.4), (0.15, 0.25)]
+
+    expected_dof_angles = []
+    for angles in targets:
+        state = quickik.State.neutral_pose(tree)
+        solver = quickik.Solver(tree, neutral_weight=0.0)
+        result = solver.solve(state, observations_for(*angles))
+        expected_dof_angles.append(result.dof_angles)
+
+    positions = np.array(
+        [
+            [two_link_positions(*angles)[i] for i in order_joint_indices]
+            for angles in targets
+        ],
+        dtype=np.float32,
+    )
+    weights = np.ones((len(targets), tree.n_joints), dtype=np.float32)
+
+    batched_solver = quickik.BatchedSolver(tree, keypoints_order, neutral_weight=0.0)
+    result = batched_solver.solve(positions, weights)
+
+    assert result.joint_angles.shape == (len(targets), tree.n_dofs)
+    for i in range(len(targets)):
+        assert result.joint_angles[i] == pytest.approx(expected_dof_angles[i], abs=1e-4)
+
+
+def test_batched_solver_with_grad_reports_jacobian_and_valid(tree):
+    keypoints_order = joint_names(["root", "joint1", "joint2", "tip"])
+    positions = np.array([two_link_positions(0.4, 0.3)], dtype=np.float32)
+    weights = np.ones((1, tree.n_joints), dtype=np.float32)
+
+    solver = quickik.BatchedSolver(tree, keypoints_order, neutral_weight=0.0)
+    result = solver.solve(positions, weights, with_grad=True)
+
+    n_joints = tree.n_joints
+    state_dim = tree.n_dofs + 6
+    assert result.valid[0]
+    assert result.jacobian.shape == (1, 3 * n_joints, state_dim)
+    assert result.cholesky_l.shape == (1, state_dim, state_dim)
+
+
+def test_batched_solver_without_with_grad_or_with_fk_leaves_optional_fields_none(tree):
+    keypoints_order = joint_names(["root", "joint1", "joint2", "tip"])
+    positions = np.array(
+        [two_link_positions(0.4, 0.3), two_link_positions(-0.1, 0.2)], dtype=np.float32
+    )
+    weights = np.ones((2, tree.n_joints), dtype=np.float32)
+
+    solver = quickik.BatchedSolver(tree, keypoints_order)
+    result = solver.solve(positions, weights)
+
+    assert result.joint_angles.shape == (2, tree.n_dofs)
+    assert result.keypoint_pos is None
+    assert result.jacobian is None
+    assert result.cholesky_l is None
+    assert result.valid is None
+
+
+def test_batched_solver_with_fk_reports_keypoint_positions(tree):
+    keypoints_order = joint_names(["root", "joint1", "joint2", "tip"])
+    positions = np.array([two_link_positions(0.4, 0.3)], dtype=np.float32)
+    weights = np.ones((1, tree.n_joints), dtype=np.float32)
+
+    solver = quickik.BatchedSolver(tree, keypoints_order)
+    result = solver.solve(positions, weights, with_fk=True)
+
+    expected = two_link_positions(0.4, 0.3)
+    assert result.keypoint_pos.shape == (1, tree.n_joints, 3)
+    for a, e in zip(result.keypoint_pos[0], expected, strict=True):
+        assert a == pytest.approx(e, abs=1e-2)
+
+
+def test_batched_solver_keypoint_to_joint_idx_matches_keypoints_order(tree):
+    keypoints_order = joint_names(["tip", "root", "joint2", "joint1"])
+    solver = quickik.BatchedSolver(tree, keypoints_order)
+    assert solver.keypoint_to_joint_idx == [3, 0, 2, 1]
+
+
+def test_batched_solver_rejects_unknown_joint_name(tree):
+    with pytest.raises(ValueError):
+        quickik.BatchedSolver(
+            tree, joint_names(["root", "joint1", "joint2", "nonexistent"])
         )
 
-    # overlap_len must be smaller than segment_len.
-    bad_overlap = quickik.ParallelSolveConfig(
-        segment_len=5, overlap_len=5, overlap_tolerance=0.05, n_workers=1
-    )
+
+def test_batched_solver_rejects_duplicate_joint_name(tree):
     with pytest.raises(ValueError):
-        quickik.solve_sequence_segmented_parallel(
-            tree, quickik.SolverConfig(), positions, weights, bad_overlap
+        quickik.BatchedSolver(tree, joint_names(["root", "joint1", "joint1", "tip"]))
+
+
+def test_batched_solver_rejects_fixed_base_tree(fixed_base_tree):
+    with pytest.raises(ValueError):
+        quickik.BatchedSolver(
+            fixed_base_tree, joint_names(["root", "joint1", "joint2", "tip"])
         )

@@ -3,11 +3,23 @@ use numpy::{IntoPyArray, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-/// Runtime stand-in for Rust's generic mapper type parameter `M`.
+/// Runtime stand-in for Rust's generic mapper type parameter `M`. Unlike
+/// Rust, where "no mapper" is a distinct compile-time type
+/// ([`NoMapper`](quickik_core::observation::NoMapper)), Python's `Solver`
+/// (etc.) always instantiates the same concrete `Solver<Mapper>`, so `None`
+/// has to be one more runtime variant of this same enum rather than a
+/// separate type.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Mapper {
+    None,
     Camera(quickik_core::observation::Camera),
     XYView,
+}
+
+impl Mapper {
+    pub(crate) fn is_set(&self) -> bool {
+        !matches!(self, Mapper::None)
+    }
 }
 
 impl quickik_core::observation::Mapper3Dto2D for Mapper {
@@ -22,6 +34,11 @@ impl quickik_core::observation::Mapper3Dto2D for Mapper {
         S2: nalgebra::StorageMut<f32, nalgebra::Dyn, nalgebra::Dyn>,
     {
         match self {
+            // Mirrors NoMapper::project_3d_to_2d's own panic.
+            Mapper::None => unreachable!(
+                "a Solver/SequenceSolver/BatchedSolver constructed with mapper=None was given a \
+                 Position2D observation"
+            ),
             Mapper::Camera(camera) => {
                 camera.project_3d_to_2d(pos_world3d, jacobian_world3d, jacobian_2d_out)
             }
@@ -34,14 +51,14 @@ impl quickik_core::observation::Mapper3Dto2D for Mapper {
     }
 }
 
-pub(crate) fn extract_mapper(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Mapper>> {
+pub(crate) fn extract_mapper(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Mapper> {
     let Some(obj) = obj else {
-        return Ok(None);
+        return Ok(Mapper::None);
     };
     if let Ok(camera) = obj.extract::<Camera>() {
-        Ok(Some(Mapper::Camera(camera.as_rust())))
+        Ok(Mapper::Camera(camera.as_rust()))
     } else if obj.extract::<XYView>().is_ok() {
-        Ok(Some(Mapper::XYView))
+        Ok(Mapper::XYView)
     } else {
         Err(PyValueError::new_err(
             "mapper must be a Camera, an XYView, or None",
@@ -49,11 +66,11 @@ pub(crate) fn extract_mapper(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<
     }
 }
 
-pub(crate) fn mapper_to_py(py: Python<'_>, mapper: Option<Mapper>) -> PyResult<Py<PyAny>> {
+pub(crate) fn mapper_to_py(py: Python<'_>, mapper: Mapper) -> PyResult<Py<PyAny>> {
     match mapper {
-        None => Ok(py.None()),
-        Some(Mapper::Camera(inner)) => Ok(Py::new(py, Camera::from_rust(inner))?.into_any()),
-        Some(Mapper::XYView) => Ok(Py::new(py, XYView)?.into_any()),
+        Mapper::None => Ok(py.None()),
+        Mapper::Camera(inner) => Ok(Py::new(py, Camera::from_rust(inner))?.into_any()),
+        Mapper::XYView => Ok(Py::new(py, XYView)?.into_any()),
     }
 }
 
@@ -245,7 +262,10 @@ pub(crate) fn extract_observations(
 ///
 /// `positions`'s last dimension selects the observation kind: 3 builds
 /// `Position3D`, 2 builds `Position2D`. Call [`validate_position_weight_shapes`]
-/// first to ensure this matches whether a mapper is set.
+/// first to ensure this matches whether a mapper is set. Used by
+/// [`SequenceSolver`](crate::sequential_solver::SequenceSolver) and
+/// [`BatchedSolver`](crate::batched_solver::BatchedSolver)'s array-based
+/// `solve` methods.
 pub(crate) fn observations_from_arrays(
     positions: ArrayView3<'_, f32>,
     weights: ArrayView2<'_, f32>,
@@ -282,14 +302,14 @@ pub(crate) fn observations_from_arrays(
 }
 
 /// Converts world-space keypoint positions (e.g. from
-/// [`Solver::last_fk_positions`](quickik_core::solver::Solver::last_fk_positions))
+/// [`SolverResult::keypoint_pos`](quickik_core::solver::SolverResult::keypoint_pos))
 /// into a `(n_joints, 3)` float32 NumPy array, in the same joint order.
-pub(crate) fn fk_positions_to_pyarray<'py>(
+pub(crate) fn positions_to_pyarray<'py>(
     py: Python<'py>,
-    fk_positions: &[nalgebra::Vector3<f32>],
+    positions: &[nalgebra::Vector3<f32>],
 ) -> Bound<'py, PyArray2<f32>> {
-    let mut arr = Array2::<f32>::zeros((fk_positions.len(), 3));
-    for (mut row, pos) in arr.rows_mut().into_iter().zip(fk_positions) {
+    let mut arr = Array2::<f32>::zeros((positions.len(), 3));
+    for (mut row, pos) in arr.rows_mut().into_iter().zip(positions) {
         row[0] = pos.x;
         row[1] = pos.y;
         row[2] = pos.z;
