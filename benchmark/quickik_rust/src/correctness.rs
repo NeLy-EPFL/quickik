@@ -75,11 +75,11 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
         let mut state = State::neutral_pose(tree.clone());
         let result = default_solver.solve(&mut state, &obs, false, true);
         let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
-        let angle_err = angle_error_deg(&result.dof_angles, &ground_truth);
+        let angle_err = angle_error_deg(&result.state.dof_angles, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
         let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
-        let angle_err0 = angle_error_deg(&result0.dof_angles, &ground_truth);
+        let angle_err0 = angle_error_deg(&result0.state.dof_angles, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
@@ -185,11 +185,11 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
         let mut state = State::neutral_pose(tree.clone());
         let result = default_solver.solve(&mut state, &obs, false, true);
         let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
-        let angle_err = angle_error_deg(&result.dof_angles, &ground_truth);
+        let angle_err = angle_error_deg(&result.state.dof_angles, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
         let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
-        let angle_err0 = angle_error_deg(&result0.dof_angles, &ground_truth);
+        let angle_err0 = angle_error_deg(&result0.state.dof_angles, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",

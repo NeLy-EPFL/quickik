@@ -51,8 +51,8 @@ fn recovers_pose_from_3d_observations() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.state.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - 0.3).abs() < 1e-3);
 }
 
 /// A fixed-base tree's root has no state to fit, so the solver should recover
@@ -83,10 +83,10 @@ fn recovers_pose_on_fixed_base_tree_without_moving_root() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
-    assert_eq!(result.root_pos, Vector3::zeros());
-    assert_eq!(result.root_rot, nalgebra::UnitQuaternion::identity());
+    assert!((result.state.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert_eq!(result.state.root_pos, Vector3::zeros());
+    assert_eq!(result.state.root_rot, nalgebra::UnitQuaternion::identity());
 }
 
 #[test]
@@ -114,8 +114,8 @@ fn recovers_pose_with_slide_dof_from_3d_observations() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.state.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - 0.3).abs() < 1e-3);
 }
 
 #[test]
@@ -143,8 +143,8 @@ fn recovers_pose_from_xyview_observations() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((result.dof_angles[0] - 0.35).abs() < 1e-3);
-    assert!((result.dof_angles[1] - (-0.25)).abs() < 1e-3);
+    assert!((result.state.dof_angles[0] - 0.35).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - (-0.25)).abs() < 1e-3);
 }
 
 #[test]
@@ -187,8 +187,8 @@ fn recovers_pose_from_camera_observations() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((result.dof_angles[0] - 0.2).abs() < 1e-3);
-    assert!((result.dof_angles[1] - 0.15).abs() < 1e-3);
+    assert!((result.state.dof_angles[0] - 0.2).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - 0.15).abs() < 1e-3);
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn missing_observations_leave_state_at_neutral_prior() {
     );
     let result = solver.solve(&mut state, &observations, false, false);
 
-    for &angle in &result.dof_angles {
+    for &angle in &result.state.dof_angles {
         assert!(angle.abs() < 1e-6, "expected no drift, got {angle}");
     }
 }
@@ -277,17 +277,17 @@ fn solve_respects_joint_limits() {
     let result = solver.solve(&mut state, &observations, false, false);
 
     assert!(
-        result.dof_angles[1] >= -0.5 - 1e-6 && result.dof_angles[1] <= 0.5 + 1e-6,
+        result.state.dof_angles[1] >= -0.5 - 1e-6 && result.state.dof_angles[1] <= 0.5 + 1e-6,
         "joint2 angle {} exceeded its [-0.5, 0.5] limit",
-        result.dof_angles[1]
+        result.state.dof_angles[1]
     );
     // The target is unreachable within the limit, so the solver should be
     // pushing hard against the boundary rather than resting comfortably
     // inside it.
     assert!(
-        result.dof_angles[1] > 0.45,
+        result.state.dof_angles[1] > 0.45,
         "joint2 angle {} did not converge against its upper limit",
-        result.dof_angles[1]
+        result.state.dof_angles[1]
     );
 }
 
@@ -335,8 +335,8 @@ fn convergence_tolerance_stops_iterating_early() {
     // If early termination weren't stopping solver_many after its first
     // iteration too, it would have kept converging further than solver_few
     // over its remaining 49 iterations, and the two states would differ.
-    assert_eq!(result_few.dof_angles, result_many.dof_angles);
-    assert_eq!(result_few.root_pos, result_many.root_pos);
+    assert_eq!(result_few.state.dof_angles, result_many.state.dof_angles);
+    assert_eq!(result_few.state.root_pos, result_many.state.root_pos);
 }
 
 #[test]
@@ -393,7 +393,10 @@ fn joint_weight_scaler_zero_matches_missing_observation() {
     let result_missing =
         solver_missing.solve(&mut state_missing, &observations_missing, false, false);
 
-    assert_eq!(result_zero_weight.dof_angles, result_missing.dof_angles);
+    assert_eq!(
+        result_zero_weight.state.dof_angles,
+        result_missing.state.dof_angles
+    );
 }
 
 #[test]
@@ -436,10 +439,10 @@ fn dof_weight_scaler_zero_recovers_exact_target_despite_nonzero_global_neutral_w
 
     // dof1 (branch_b_joint's), with its neutral-pose contribution zeroed
     // out, recovers the exact target...
-    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.state.dof_angles[1] - 0.3).abs() < 1e-3);
     // ...while dof0 (branch_a_joint's), still pulled toward neutral by the
     // nonzero global weight, is measurably biased away from its exact target.
-    assert!((result.dof_angles[0] - 0.4).abs() > 1e-3);
+    assert!((result.state.dof_angles[0] - 0.4).abs() > 1e-3);
 }
 
 #[test]

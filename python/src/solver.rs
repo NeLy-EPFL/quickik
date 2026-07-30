@@ -41,24 +41,37 @@ impl SolverResult {
 
 #[pymethods]
 impl SolverResult {
-    /// Angles of all joint DOFs, in `KinematicTree`'s own order.
+    /// Angles of all joint DOFs, in `KinematicTree`'s own order. Shorthand
+    /// for `.state.dof_angles`.
     #[getter]
     fn dof_angles(&self) -> Vec<f32> {
-        self.inner.dof_angles.clone()
+        self.inner.state.dof_angles.clone()
     }
 
-    /// Position of the root joint in world coordinates.
+    /// Position of the root joint in world coordinates. Shorthand for
+    /// `.state.root_pos`.
     #[getter]
     fn root_pos(&self) -> (f32, f32, f32) {
-        let p = self.inner.root_pos;
+        let p = self.inner.state.root_pos;
         (p.x, p.y, p.z)
     }
 
-    /// `(w, x, y, z)`.
+    /// `(w, x, y, z)`. Shorthand for `.state.root_rot`.
     #[getter]
     fn root_rot(&self) -> (f32, f32, f32, f32) {
-        let q = self.inner.root_rot.quaternion();
+        let q = self.inner.state.root_rot.quaternion();
         (q.w, q.i, q.j, q.k)
+    }
+
+    /// The converged pose as a full `State` object (e.g. to feed into
+    /// another `Solver.solve` call). Built on demand: prefer `dof_angles`/
+    /// `root_pos`/`root_rot` directly if that's all you need, since those
+    /// don't pay for constructing this.
+    #[getter]
+    fn state(&self) -> State {
+        State {
+            inner: self.inner.state.clone(),
+        }
     }
 
     /// World-space keypoint positions (`(n_joints, 3)` float32, always 3D

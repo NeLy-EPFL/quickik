@@ -1,7 +1,7 @@
 //! This module implements a Gauss-Newton solver for inverse kinematics.
 
 use nalgebra::linalg::Cholesky;
-use nalgebra::{DMatrix, DVector, Dyn, UnitQuaternion, Vector3};
+use nalgebra::{DMatrix, DVector, Dyn, Vector3};
 
 use crate::body_plan::KinematicTree;
 use crate::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
@@ -12,12 +12,8 @@ use crate::state::State;
 /// call, or one item of a [`SequenceSolver`](crate::sequential_solver::SequenceSolver)
 /// sequence.
 pub struct SolverResult {
-    /// Angles of all joint DOFs, in `KinematicTree`'s own order.
-    pub dof_angles: Vec<f32>,
-    /// Position of the root joint in world coordinates.
-    pub root_pos: Vector3<f32>,
-    /// Rotation of the root joint in world coordinates.
-    pub root_rot: UnitQuaternion<f32>,
+    /// The converged pose (`dof_angles`, `root_pos`, `root_rot`).
+    pub state: State,
     /// World-space keypoint positions, in `KinematicTree`'s joint order.
     /// `Some` iff `solve` was called with `with_fk: true`.
     pub keypoint_pos: Option<Vec<Vector3<f32>>>,
@@ -191,9 +187,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
     ) -> SolverResult {
         self.solve_impl(state, observations, with_grad, with_fk);
         SolverResult {
-            dof_angles: state.dof_angles.clone(),
-            root_pos: state.root_pos,
-            root_rot: state.root_rot,
+            state: state.clone(),
             keypoint_pos: with_fk.then(|| self.workspace.kpt_positions.clone()),
             jacobian: with_grad.then(|| self.last_jacobian.clone()),
             cholesky_l: (with_grad && self.last_cholesky_valid)

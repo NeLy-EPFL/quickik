@@ -177,9 +177,9 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
         let mut jacobian = with_grad.then(|| Vec::with_capacity(batch_size));
         let mut cholesky_l = with_grad.then(|| Vec::with_capacity(batch_size));
         for result in per_item_results {
-            joint_angles.push(result.dof_angles);
-            base_pos.push(result.root_pos);
-            base_quat.push(result.root_rot);
+            joint_angles.push(result.state.dof_angles);
+            base_pos.push(result.state.root_pos);
+            base_quat.push(result.state.root_rot);
             if let Some(keypoint_pos) = &mut keypoint_pos {
                 keypoint_pos.push(result.keypoint_pos.unwrap());
             }

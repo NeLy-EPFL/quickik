@@ -111,6 +111,33 @@ def test_solve_without_with_fk_or_with_grad_leaves_optional_fields_none(tree):
     assert result.cholesky_l is None
 
 
+def test_result_state_matches_the_flat_dof_angles_root_pos_root_rot_properties(tree):
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree, neutral_weight=0.0)
+    result = solver.solve(state, observations_for(0.4, 0.3))
+
+    assert result.state.dof_angles == pytest.approx(result.dof_angles)
+    assert result.state.root_pos == pytest.approx(result.root_pos)
+    assert result.state.root_rot == pytest.approx(result.root_rot)
+
+
+def test_result_state_can_be_fed_into_another_solve_call(tree):
+    """`result.state` should be a real, independent `State` -- usable to
+    warm-start a follow-up `Solver.solve` call, same as any other `State`."""
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree, n_iterations=1, neutral_weight=0.0)
+    target = observations_for(0.4, 0.3)
+
+    cold_result = solver.solve(state, target)
+    cold_error = abs(cold_result.dof_angles[0] - 0.4)
+
+    warm_state = cold_result.state
+    warm_result = solver.solve(warm_state, target)
+    warm_error = abs(warm_result.dof_angles[0] - 0.4)
+
+    assert warm_error < cold_error
+
+
 def test_solve_with_grad_reports_jacobian_and_cholesky_l(tree):
     state = quickik.State.neutral_pose(tree)
     solver = quickik.Solver(tree, neutral_weight=0.0)

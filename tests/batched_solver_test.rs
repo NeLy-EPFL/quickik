@@ -71,9 +71,9 @@ fn solve_matches_sequential_solve_with_grad() {
         let result = solver.solve(&mut state, &observations_for(&tree, angles), true, false);
         expected_ok.push(result.cholesky_l.is_some());
         expected_jacobians.push(result.jacobian.unwrap());
-        expected_dof_angles.push(result.dof_angles);
-        expected_root_pos.push(result.root_pos);
-        expected_root_rot.push(result.root_rot);
+        expected_dof_angles.push(result.state.dof_angles);
+        expected_root_pos.push(result.state.root_pos);
+        expected_root_rot.push(result.state.root_rot);
     }
 
     // Same observations, but permuted into `keypoints_order` -- this is what
