@@ -100,6 +100,29 @@ bool test_recovers_pose_from_3d_observations() {
   return ok;
 }
 
+bool test_solver_last_fk_positions_matches_recovered_pose() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto observations = observations_for(0.4f, 0.3f);
+
+  auto state = quickik::state_neutral_pose(*tree);
+  auto solver = quickik::new_solver(*tree, no_prior_config(), quickik::no_mapper());
+  solver->solve(*state, slice_of(observations));
+
+  auto expected = two_link_positions(0.4f, 0.3f);
+  auto actual = solver->last_fk_positions();
+#define CHECK(cond) \
+  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
+  CHECK(actual.size() == tree->n_joints() * 3);
+  for (size_t k = 0; k < tree->n_joints(); k++) {
+    for (size_t d = 0; d < 3; d++) {
+      CHECK(std::abs(actual[k * 3 + d] - expected[k][d]) < 1e-2f);
+    }
+  }
+#undef CHECK
+  return ok;
+}
+
 bool test_position2d_observation_on_mapperless_solver_throws() {
   bool ok = true;
   auto tree = two_joint_chain();
@@ -315,6 +338,26 @@ bool test_sequence_solver_warm_start_converges_faster() {
   return ok;
 }
 
+bool test_sequence_solver_last_fk_positions_matches_state() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto solver = quickik::new_sequence_solver(*tree, no_prior_config(), quickik::no_mapper());
+  solver->solve_frame(slice_of(observations_for(0.4f, 0.3f)));
+
+  auto expected = two_link_positions(0.4f, 0.3f);
+  auto actual = solver->last_fk_positions();
+#define CHECK(cond) \
+  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
+  CHECK(actual.size() == tree->n_joints() * 3);
+  for (size_t k = 0; k < tree->n_joints(); k++) {
+    for (size_t d = 0; d < 3; d++) {
+      CHECK(std::abs(actual[k * 3 + d] - expected[k][d]) < 1e-2f);
+    }
+  }
+#undef CHECK
+  return ok;
+}
+
 bool test_solve_sequence_returns_one_state_per_frame() {
   bool ok = true;
   auto tree = two_joint_chain();
@@ -480,6 +523,7 @@ int main() {
       {"malformed_json_throws", test_malformed_json_throws},
       {"position2d_observation_on_mapperless_solver_throws", test_position2d_observation_on_mapperless_solver_throws},
       {"recovers_pose_from_3d_observations", test_recovers_pose_from_3d_observations},
+      {"solver_last_fk_positions_matches_recovered_pose", test_solver_last_fk_positions_matches_recovered_pose},
       {"recovers_pose_from_xyview_observations", test_recovers_pose_from_xyview_observations},
       {"recovers_pose_from_camera_observations", test_recovers_pose_from_camera_observations},
       {"xyview_latency_not_much_worse_than_3d", test_xyview_latency_not_much_worse_than_3d},
@@ -488,6 +532,7 @@ int main() {
       {"solve_respects_joint_limits", test_solve_respects_joint_limits},
       {"sequence_solver_warm_start_converges_faster", test_sequence_solver_warm_start_converges_faster},
       {"solve_sequence_returns_one_state_per_frame", test_solve_sequence_returns_one_state_per_frame},
+      {"sequence_solver_last_fk_positions_matches_state", test_sequence_solver_last_fk_positions_matches_state},
       {"solve_sequence_segmented_parallel_reconstructs_smooth_trajectory",
        test_solve_sequence_segmented_parallel_reconstructs_smooth_trajectory},
       {"parallel_solve_config_for_recording_reconstructs_smooth_trajectory",

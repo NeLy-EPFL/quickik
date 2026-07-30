@@ -1,10 +1,17 @@
 mod common;
 
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{DMatrix, Matrix3, Vector3};
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
-use quickik::solver::{Solver, SolverConfig};
+use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
+use quickik::solver::Solver;
 use quickik::state::State;
+
+/// Defaults matching the old `SolverConfig::default()`.
+const N_ITERATIONS: usize = 10;
+const NEUTRAL_WEIGHT: f32 = 1e-3;
+const POSITION_TOLERANCE: f32 = 1e-3;
+const ANGLE_TOLERANCE: f32 = 1e-3;
+const DAMPING: f32 = 1e-6;
 
 fn keypoints_at(
     tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,
@@ -35,15 +42,17 @@ fn recovers_pose_from_3d_observations() {
     // neutral-pose prior so an exactly-reachable target is recovered exactly.
     let mut solver: Solver = Solver::new(
         &tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            ..SolverConfig::default()
-        },
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
     );
-    solver.solve(&mut state, &observations);
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((state.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
 }
 
 /// A fixed-base tree's root has no state to fit, so the solver should recover
@@ -65,17 +74,19 @@ fn recovers_pose_on_fixed_base_tree_without_moving_root() {
     let mut state = State::neutral_pose(tree.clone());
     let mut solver: Solver = Solver::new(
         &tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            ..SolverConfig::default()
-        },
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
     );
-    solver.solve(&mut state, &observations);
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((state.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
-    assert_eq!(state.root_pos, Vector3::zeros());
-    assert_eq!(state.root_rot, nalgebra::UnitQuaternion::identity());
+    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert_eq!(result.root_pos, Vector3::zeros());
+    assert_eq!(result.root_rot, nalgebra::UnitQuaternion::identity());
 }
 
 #[test]
@@ -94,15 +105,17 @@ fn recovers_pose_with_slide_dof_from_3d_observations() {
     let mut state = State::neutral_pose(tree.clone());
     let mut solver: Solver = Solver::new(
         &tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            ..SolverConfig::default()
-        },
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
     );
-    solver.solve(&mut state, &observations);
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((state.dof_angles[0] - 0.4).abs() < 1e-3);
-    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.dof_angles[0] - 0.4).abs() < 1e-3);
+    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
 }
 
 #[test]
@@ -121,16 +134,17 @@ fn recovers_pose_from_xyview_observations() {
     let mut state = State::neutral_pose(tree.clone());
     let mut solver = Solver::new(
         &tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            mapper: Some(XYView),
-            ..SolverConfig::default()
-        },
+        XYView,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
     );
-    solver.solve(&mut state, &observations);
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((state.dof_angles[0] - 0.35).abs() < 1e-3);
-    assert!((state.dof_angles[1] - (-0.25)).abs() < 1e-3);
+    assert!((result.dof_angles[0] - 0.35).abs() < 1e-3);
+    assert!((result.dof_angles[1] - (-0.25)).abs() < 1e-3);
 }
 
 #[test]
@@ -164,16 +178,17 @@ fn recovers_pose_from_camera_observations() {
     let mut state = State::neutral_pose(tree.clone());
     let mut solver = Solver::new(
         &tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            mapper: Some(camera),
-            ..SolverConfig::default()
-        },
+        camera,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
     );
-    solver.solve(&mut state, &observations);
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    assert!((state.dof_angles[0] - 0.2).abs() < 1e-3);
-    assert!((state.dof_angles[1] - 0.15).abs() < 1e-3);
+    assert!((result.dof_angles[0] - 0.2).abs() < 1e-3);
+    assert!((result.dof_angles[1] - 0.15).abs() < 1e-3);
 }
 
 #[test]
@@ -182,28 +197,45 @@ fn missing_observations_leave_state_at_neutral_prior() {
     let mut state = State::neutral_pose(tree.clone());
     let observations = vec![KeypointObservation::Missing; tree.n_joints()];
 
-    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
-    solver.solve(&mut state, &observations);
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, false);
 
-    for &angle in &state.dof_angles {
+    for &angle in &result.dof_angles {
         assert!(angle.abs() < 1e-6, "expected no drift, got {angle}");
     }
 }
 
 #[test]
-fn config_can_be_tuned_between_solve_calls() {
+fn solver_fields_can_be_tuned_between_solve_calls() {
     let tree = common::two_joint_chain();
     let mut state = State::neutral_pose(tree.clone());
     let observations = vec![KeypointObservation::Missing; tree.n_joints()];
 
-    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
-    solver.solve(&mut state, &observations);
-    // Mutate the config in place -- no need to reconstruct the Solver (and
-    // its preallocated buffers) to change per-call numerics between frames.
-    solver.config.n_iterations = 3;
-    solver.solve(&mut state, &observations);
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    solver.solve(&mut state, &observations, false, false);
+    // Mutate the field directly in place -- no need to reconstruct the Solver
+    // (and its preallocated buffers) to change per-call numerics between
+    // frames.
+    solver.n_iterations = 3;
+    solver.solve(&mut state, &observations, false, false);
 
-    assert_eq!(solver.config.n_iterations, 3);
+    assert_eq!(solver.n_iterations, 3);
 }
 
 #[test]
@@ -233,21 +265,29 @@ fn solve_respects_joint_limits() {
         },
     ];
 
-    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
-    solver.solve(&mut state, &observations);
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, false);
 
     assert!(
-        state.dof_angles[1] >= -0.5 - 1e-6 && state.dof_angles[1] <= 0.5 + 1e-6,
+        result.dof_angles[1] >= -0.5 - 1e-6 && result.dof_angles[1] <= 0.5 + 1e-6,
         "joint2 angle {} exceeded its [-0.5, 0.5] limit",
-        state.dof_angles[1]
+        result.dof_angles[1]
     );
     // The target is unreachable within the limit, so the solver should be
     // pushing hard against the boundary rather than resting comfortably
     // inside it.
     assert!(
-        state.dof_angles[1] > 0.45,
+        result.dof_angles[1] > 0.45,
         "joint2 angle {} did not converge against its upper limit",
-        state.dof_angles[1]
+        result.dof_angles[1]
     );
 }
 
@@ -266,38 +306,37 @@ fn convergence_tolerance_stops_iterating_early() {
     // Tolerances far larger than any single Gauss-Newton step's magnitude in
     // this toy problem, so every solve below should stop after exactly one
     // iteration regardless of its n_iterations cap.
-    let generous_tolerance_config = SolverConfig {
-        neutral_weight: 0.0,
-        position_tolerance: 10.0,
-        angle_tolerance: 10.0,
-        ..SolverConfig::default()
-    };
+    let generous_tolerance = 10.0;
 
     let mut state_few = State::neutral_pose(tree.clone());
     let mut solver_few: Solver = Solver::new(
         &tree,
-        SolverConfig {
-            n_iterations: 1,
-            ..generous_tolerance_config
-        },
+        NoMapper,
+        1,
+        0.0,
+        generous_tolerance,
+        generous_tolerance,
+        DAMPING,
     );
-    solver_few.solve(&mut state_few, &observations);
+    let result_few = solver_few.solve(&mut state_few, &observations, false, false);
 
     let mut state_many = State::neutral_pose(tree.clone());
     let mut solver_many: Solver = Solver::new(
         &tree,
-        SolverConfig {
-            n_iterations: 50,
-            ..generous_tolerance_config
-        },
+        NoMapper,
+        50,
+        0.0,
+        generous_tolerance,
+        generous_tolerance,
+        DAMPING,
     );
-    solver_many.solve(&mut state_many, &observations);
+    let result_many = solver_many.solve(&mut state_many, &observations, false, false);
 
     // If early termination weren't stopping solver_many after its first
     // iteration too, it would have kept converging further than solver_few
     // over its remaining 49 iterations, and the two states would differ.
-    assert_eq!(state_few.dof_angles, state_many.dof_angles);
-    assert_eq!(state_few.root_pos, state_many.root_pos);
+    assert_eq!(result_few.dof_angles, result_many.dof_angles);
+    assert_eq!(result_few.root_pos, result_many.root_pos);
 }
 
 #[test]
@@ -326,22 +365,35 @@ fn joint_weight_scaler_zero_matches_missing_observation() {
         weight: 1.0,
     };
 
-    let config = SolverConfig {
-        neutral_weight: 0.0,
-        ..SolverConfig::default()
-    };
-
     let mut state_zero_weight = State::neutral_pose(zero_weight_tree.clone());
-    let mut solver_zero_weight: Solver = Solver::new(&zero_weight_tree, config);
-    solver_zero_weight.solve(&mut state_zero_weight, &observations);
+    let mut solver_zero_weight: Solver = Solver::new(
+        &zero_weight_tree,
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result_zero_weight =
+        solver_zero_weight.solve(&mut state_zero_weight, &observations, false, false);
 
     let mut observations_missing = observations;
     observations_missing[2] = KeypointObservation::Missing;
     let mut state_missing = State::neutral_pose(tree.clone());
-    let mut solver_missing: Solver = Solver::new(&tree, config);
-    solver_missing.solve(&mut state_missing, &observations_missing);
+    let mut solver_missing: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result_missing =
+        solver_missing.solve(&mut state_missing, &observations_missing, false, false);
 
-    assert_eq!(state_zero_weight.dof_angles, state_missing.dof_angles);
+    assert_eq!(result_zero_weight.dof_angles, result_missing.dof_angles);
 }
 
 #[test]
@@ -371,19 +423,27 @@ fn dof_weight_scaler_zero_recovers_exact_target_despite_nonzero_global_neutral_w
     // Unlike `recovers_pose_from_3d_observations`, the global neutral-pose
     // weight is deliberately left at its default nonzero value here.
     let mut state = State::neutral_pose(zero_weight_tree.clone());
-    let mut solver: Solver = Solver::new(&zero_weight_tree, SolverConfig::default());
-    solver.solve(&mut state, &observations);
+    let mut solver: Solver = Solver::new(
+        &zero_weight_tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, false);
 
     // dof1 (branch_b_joint's), with its neutral-pose contribution zeroed
     // out, recovers the exact target...
-    assert!((state.dof_angles[1] - 0.3).abs() < 1e-3);
+    assert!((result.dof_angles[1] - 0.3).abs() < 1e-3);
     // ...while dof0 (branch_a_joint's), still pulled toward neutral by the
     // nonzero global weight, is measurably biased away from its exact target.
-    assert!((state.dof_angles[0] - 0.4).abs() > 1e-3);
+    assert!((result.dof_angles[0] - 0.4).abs() > 1e-3);
 }
 
 #[test]
-#[should_panic(expected = "Solver constructed with mapper: None")]
+#[should_panic(expected = "a Solver<NoMapper> (no mapper set) was given a Position2D observation")]
 fn position2d_observation_on_mapperless_solver_panics() {
     let tree = common::two_joint_chain();
     let mut state = State::neutral_pose(tree.clone());
@@ -393,6 +453,267 @@ fn position2d_observation_on_mapperless_solver_panics() {
         weight: 1.0,
     };
 
-    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
-    solver.solve(&mut state, &observations);
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    solver.solve(&mut state, &observations, false, false);
+}
+
+#[test]
+fn solve_with_grad_jacobian_and_cholesky_reconstruct_normal_equations() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    // Started from a bent (not neutral) pose: at the exact neutral pose every
+    // keypoint of this chain is collinear along the x-axis, which leaves the
+    // free root's roll DOF with a zero Jacobian column (a genuine physical
+    // degeneracy, not a bug) and makes jtj singular rather than
+    // positive-definite.
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = 0.2;
+    state.dof_angles[1] = -0.15;
+    // A single iteration, with damping and the neutral-pose prior both
+    // disabled, makes `jtj` exactly `sum_k weight_k * J_k^T J_k` -- so it's
+    // reconstructible from the returned Jacobian alone, without needing
+    // access to the solver's private accumulation logic.
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        1,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        0.0,
+    );
+    let result = solver.solve(&mut state, &observations, true, false);
+    assert!(
+        result.cholesky_l.is_some(),
+        "a well-posed single GN step should be positive-definite"
+    );
+
+    let jacobian = result.jacobian.unwrap();
+    let state_dim = jacobian.ncols();
+    let n_joints = tree.n_joints();
+    assert_eq!(jacobian.nrows(), 3 * n_joints);
+
+    let mut expected_jtj = DMatrix::<f32>::zeros(state_dim, state_dim);
+    for k in 0..n_joints {
+        let block = jacobian.rows(3 * k, 3);
+        expected_jtj += block.transpose() * block;
+    }
+
+    let l = result.cholesky_l.unwrap().l();
+    let reconstructed_jtj = &l * l.transpose();
+
+    let max_abs_diff = (reconstructed_jtj - expected_jtj)
+        .iter()
+        .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(
+        max_abs_diff < 1e-4,
+        "L * L^T should reconstruct jtj built from the returned Jacobian; max abs diff = {max_abs_diff}"
+    );
+}
+
+#[test]
+fn solve_with_grad_tracks_only_the_final_iterations_linearization() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let start_angles = [0.2, -0.15];
+    let n_iterations = 5;
+    // Zero tolerances disable early termination by contract, so this is
+    // guaranteed to run all `n_iterations` steps -- letting this test pin
+    // down exactly which pose the final iteration's linearization should be
+    // at, to catch `solve_impl` snapshotting the wrong (e.g. first) iteration
+    // instead of deferring correctly.
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = start_angles[0];
+    state.dof_angles[1] = start_angles[1];
+    let mut solver: Solver = Solver::new(&tree, NoMapper, n_iterations, 0.0, 0.0, 0.0, 0.0);
+    let result = solver.solve(&mut state, &observations, true, false);
+    assert!(result.cholesky_l.is_some());
+
+    // The final iteration's Jacobian is linearized at the pose from just
+    // before its own update -- i.e. wherever `n_iterations - 1` steps alone
+    // would have landed, starting from the same initial pose.
+    let mut second_to_last_state = State::neutral_pose(tree.clone());
+    second_to_last_state.dof_angles[0] = start_angles[0];
+    second_to_last_state.dof_angles[1] = start_angles[1];
+    let mut warmup_solver: Solver =
+        Solver::new(&tree, NoMapper, n_iterations - 1, 0.0, 0.0, 0.0, 0.0);
+    warmup_solver.solve(&mut second_to_last_state, &observations, false, false);
+
+    let mut expected_workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut expected_workspace, &second_to_last_state);
+
+    let max_abs_diff = (result.jacobian.unwrap() - &expected_workspace.kpt_jacobian)
+        .iter()
+        .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(
+        max_abs_diff < 1e-5,
+        "the returned jacobian should be linearized at the pose from n_iterations-1 steps alone, \
+         max abs diff = {max_abs_diff}"
+    );
+}
+
+#[test]
+fn solve_with_grad_returns_no_cholesky_when_unconstrained() {
+    let tree = common::two_joint_chain();
+    let observations = vec![KeypointObservation::Missing; tree.n_joints()];
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        0.0,
+    );
+    let result = solver.solve(&mut state, &observations, true, false);
+
+    assert!(
+        result.cholesky_l.is_none(),
+        "an all-Missing, unregularized solve has no PD normal equations"
+    );
+    // The Jacobian is still computable regardless of positive-definiteness.
+    assert!(result.jacobian.is_some());
+}
+
+/// Checks `result.keypoint_pos` against a fresh `evaluate_fwdkin` at `state`
+/// (rather than reusing `keypoints_at`, which assumes a neutral root):
+/// `keypoint_pos` must reflect the pose *actually returned*, including
+/// root_pos/root_rot, not just dof_angles.
+fn assert_keypoint_pos_matches_state(
+    result: &quickik::solver::SolverResult,
+    tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,
+    state: &State,
+) {
+    let mut expected_workspace = ForwardKinematicsWorkspace::new(tree);
+    evaluate_fwdkin(&mut expected_workspace, state);
+
+    let actual = result.keypoint_pos.as_ref().expect("with_fk was requested");
+    assert_eq!(actual.len(), expected_workspace.kpt_positions.len());
+    for (a, e) in actual.iter().zip(&expected_workspace.kpt_positions) {
+        assert!((a - e).norm() < 1e-5, "actual={a:?} expected={e:?}");
+    }
+}
+
+#[test]
+fn keypoint_pos_matches_the_returned_state() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, true);
+
+    assert_keypoint_pos_matches_state(&result, &tree, &state);
+}
+
+#[test]
+fn keypoint_pos_matches_the_returned_state_with_grad_also_requested() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, true, true);
+
+    assert_keypoint_pos_matches_state(&result, &tree, &state);
+}
+
+#[test]
+fn keypoint_pos_is_populated_even_with_zero_iterations() {
+    let tree = common::two_joint_chain();
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = 0.3;
+    state.dof_angles[1] = -0.2;
+    let observations = vec![KeypointObservation::Missing; tree.n_joints()];
+
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        0,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, true);
+
+    // n_iterations: 0 means state is untouched, so this should match exactly.
+    assert_keypoint_pos_matches_state(&result, &tree, &state);
+}
+
+#[test]
+fn with_grad_and_with_fk_false_leaves_optional_fields_none() {
+    let tree = common::two_joint_chain();
+    let observations = vec![KeypointObservation::Missing; tree.n_joints()];
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        NEUTRAL_WEIGHT,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+    );
+    let result = solver.solve(&mut state, &observations, false, false);
+
+    assert!(result.keypoint_pos.is_none());
+    assert!(result.jacobian.is_none());
+    assert!(result.cholesky_l.is_none());
 }

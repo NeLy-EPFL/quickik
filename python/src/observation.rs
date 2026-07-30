@@ -1,4 +1,5 @@
-use numpy::ndarray::{ArrayView2, ArrayView3};
+use numpy::ndarray::{Array2, ArrayView2, ArrayView3};
+use numpy::{IntoPyArray, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -278,6 +279,22 @@ pub(crate) fn observations_from_arrays(
                 .collect()
         })
         .collect()
+}
+
+/// Converts world-space keypoint positions (e.g. from
+/// [`Solver::last_fk_positions`](quickik_core::solver::Solver::last_fk_positions))
+/// into a `(n_joints, 3)` float32 NumPy array, in the same joint order.
+pub(crate) fn fk_positions_to_pyarray<'py>(
+    py: Python<'py>,
+    fk_positions: &[nalgebra::Vector3<f32>],
+) -> Bound<'py, PyArray2<f32>> {
+    let mut arr = Array2::<f32>::zeros((fk_positions.len(), 3));
+    for (mut row, pos) in arr.rows_mut().into_iter().zip(fk_positions) {
+        row[0] = pos.x;
+        row[1] = pos.y;
+        row[2] = pos.z;
+    }
+    arr.into_pyarray(py)
 }
 
 /// Checks that `positions`/`weights` have the shapes

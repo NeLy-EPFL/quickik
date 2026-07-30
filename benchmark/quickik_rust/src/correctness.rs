@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::high_level::SequenceSolver;
-use quickik::observation::{KeypointObservation, Mapper3Dto2D, XYView};
-use quickik::solver::{Solver, SolverConfig};
+use quickik::observation::{KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
+use quickik::sequential_solver::SequenceSolver;
+use quickik::solver::Solver;
 use quickik::state::State;
 
 use crate::fixtures::{Fixtures, RealFrame, SyntheticFrame};
@@ -66,29 +65,21 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
         "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)"
     );
 
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    let mut default_solver: Solver = Solver::new(tree, SolverConfig::default());
-    let mut zero_reg_solver: Solver = Solver::new(
-        tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            ..SolverConfig::default()
-        },
-    );
+    let mut default_solver: Solver = Solver::new(tree, NoMapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut zero_reg_solver: Solver = Solver::new(tree, NoMapper, 10, 0.0, 1e-3, 1e-3, 1e-6);
 
     for (i, frame) in frames.iter().enumerate() {
         let obs = build_observations(&frame.target_ego);
         let ground_truth = frame.ground_truth_dof_angles_flat();
 
         let mut state = State::neutral_pose(tree.clone());
-        default_solver.solve(&mut state, &obs);
-        evaluate_fwdkin(&mut workspace, &state);
-        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
-        let angle_err = angle_error_deg(&state.dof_angles, &ground_truth);
+        let result = default_solver.solve(&mut state, &obs, false, true);
+        let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
+        let angle_err = angle_error_deg(&result.dof_angles, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
-        zero_reg_solver.solve(&mut state0, &obs);
-        let angle_err0 = angle_error_deg(&state0.dof_angles, &ground_truth);
+        let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
+        let angle_err0 = angle_error_deg(&result0.dof_angles, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
@@ -112,8 +103,7 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
 
     let mut sequence_solver: SequenceSolver =
-        SequenceSolver::new(tree.clone(), SolverConfig::default());
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
+        SequenceSolver::new(tree, NoMapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
 
     let mut quickik_rms_all = Vec::new();
     let mut quickik_max_all = Vec::new();
@@ -122,16 +112,18 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
 
     for frame in frames {
         let obs = build_observations(&frame.target_ego);
-        let state = sequence_solver.solve_frame(&obs);
-        evaluate_fwdkin(&mut workspace, state);
+        let result = sequence_solver
+            .solve(std::slice::from_ref(&obs), false, true)
+            .pop()
+            .unwrap();
+        let keypoint_pos = result.keypoint_pos.unwrap();
 
-        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
+        let (rms, max) = residual_stats(&keypoint_pos, &frame.target_ego);
         quickik_rms_all.push(rms);
         quickik_max_all.push(max);
 
         if let Some(flygym_ik_reconstructed_ego) = &frame.flygym_ik_reconstructed_ego {
-            let (cross_rms, cross_max) =
-                residual_stats(&workspace.kpt_positions, flygym_ik_reconstructed_ego);
+            let (cross_rms, cross_max) = residual_stats(&keypoint_pos, flygym_ik_reconstructed_ego);
             cross_rms_all.push(cross_rms);
             cross_max_all.push(cross_max);
         }
@@ -183,36 +175,21 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
         "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)"
     );
 
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    let mut default_solver: Solver<M> = Solver::new(
-        tree,
-        SolverConfig {
-            mapper: Some(mapper),
-            ..SolverConfig::default()
-        },
-    );
-    let mut zero_reg_solver: Solver<M> = Solver::new(
-        tree,
-        SolverConfig {
-            neutral_weight: 0.0,
-            mapper: Some(mapper),
-            ..SolverConfig::default()
-        },
-    );
+    let mut default_solver: Solver<M> = Solver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut zero_reg_solver: Solver<M> = Solver::new(tree, mapper, 10, 0.0, 1e-3, 1e-3, 1e-6);
 
     for (i, frame) in frames.iter().enumerate() {
         let obs = to_2d(&frame.target_ego);
         let ground_truth = frame.ground_truth_dof_angles_flat();
 
         let mut state = State::neutral_pose(tree.clone());
-        default_solver.solve(&mut state, &obs);
-        evaluate_fwdkin(&mut workspace, &state);
-        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
-        let angle_err = angle_error_deg(&state.dof_angles, &ground_truth);
+        let result = default_solver.solve(&mut state, &obs, false, true);
+        let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
+        let angle_err = angle_error_deg(&result.dof_angles, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
-        zero_reg_solver.solve(&mut state0, &obs);
-        let angle_err0 = angle_error_deg(&state0.dof_angles, &ground_truth);
+        let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
+        let angle_err0 = angle_error_deg(&result0.dof_angles, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
@@ -229,7 +206,7 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
 
 /// Same real-data check as [`run_real_frame_tests`], but the solver only ever
 /// sees `to_2d`'s projection of each frame's target.
-pub fn run_real_frame_tests_2d<M: Mapper3Dto2D>(
+pub fn run_real_frame_tests_2d<M: Mapper3Dto2D + Sync + Send>(
     tree: &Arc<KinematicTree>,
     frames: &[RealFrame],
     mapper: M,
@@ -238,14 +215,8 @@ pub fn run_real_frame_tests_2d<M: Mapper3Dto2D>(
 ) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik), 2D via {label} ==");
 
-    let mut sequence_solver: SequenceSolver<M> = SequenceSolver::new(
-        tree.clone(),
-        SolverConfig {
-            mapper: Some(mapper),
-            ..SolverConfig::default()
-        },
-    );
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
+    let mut sequence_solver: SequenceSolver<M> =
+        SequenceSolver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
 
     let mut quickik_rms_all = Vec::new();
     let mut quickik_max_all = Vec::new();
@@ -254,16 +225,18 @@ pub fn run_real_frame_tests_2d<M: Mapper3Dto2D>(
 
     for frame in frames {
         let obs = to_2d(&frame.target_ego);
-        let state = sequence_solver.solve_frame(&obs);
-        evaluate_fwdkin(&mut workspace, state);
+        let result = sequence_solver
+            .solve(std::slice::from_ref(&obs), false, true)
+            .pop()
+            .unwrap();
+        let keypoint_pos = result.keypoint_pos.unwrap();
 
-        let (rms, max) = residual_stats(&workspace.kpt_positions, &frame.target_ego);
+        let (rms, max) = residual_stats(&keypoint_pos, &frame.target_ego);
         quickik_rms_all.push(rms);
         quickik_max_all.push(max);
 
         if let Some(flygym_ik_reconstructed_ego) = &frame.flygym_ik_reconstructed_ego {
-            let (cross_rms, cross_max) =
-                residual_stats(&workspace.kpt_positions, flygym_ik_reconstructed_ego);
+            let (cross_rms, cross_max) = residual_stats(&keypoint_pos, flygym_ik_reconstructed_ego);
             cross_rms_all.push(cross_rms);
             cross_max_all.push(cross_max);
         }

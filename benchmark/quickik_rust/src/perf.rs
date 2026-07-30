@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
-use quickik::high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
 use quickik::observation::{KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
-use quickik::solver::{Solver, SolverConfig};
+use quickik::sequential_solver::SequenceSolver;
+use quickik::solver::Solver;
 use quickik::state::State;
 
 use crate::correctness::build_observations;
@@ -23,11 +23,11 @@ use crate::twod::observations_2d_xyview;
 /// Frames per segment/thread for both the multi-thread throughput benchmark
 /// and `quickik_scaling`'s weak-scaling sweep.
 pub const SEGMENT_LEN: usize = 200;
-pub const OVERLAP_LEN: usize = 20;
 /// Worker count for the main "multi-thread sequence throughput" metric,
-/// passed explicitly via `ParallelSolveConfig::n_workers`: fixed rather
-/// than detected, so the number is reproducible regardless of the machine's
-/// core count. See `../../quickik_scaling` for the separate 1/2/4/8/16 sweep.
+/// passed explicitly via `solve_segments_parallel`'s `n_workers`: fixed
+/// rather than detected, so the number is reproducible regardless of the
+/// machine's core count. See `../../quickik_scaling` for the separate
+/// 1/2/4/8/16 sweep.
 const MULTITHREAD_N_THREADS: usize = 8;
 /// Frame count for the single-thread sequence-throughput metric, tiled from
 /// the 300-frame native-rate fixture: larger than the multi-thread
@@ -35,13 +35,82 @@ const MULTITHREAD_N_THREADS: usize = 8;
 /// by.
 const SINGLE_THREAD_N_FRAMES: usize = 1000;
 
-/// Total frame count that `solve_sequence_segmented_parallel`'s own
-/// `segment_bounds` splits into exactly `n_segments` segments of
-/// `SEGMENT_LEN` frames each (stride `SEGMENT_LEN - OVERLAP_LEN` between
-/// segment starts), so a `n_segments`-worker run gets exactly one segment
-/// per worker, rather than some workers getting two while others idle.
+/// Bundles a `Solver`/`SequenceSolver` config so benchmark call sites don't
+/// have to spell out all five numeric constructor args every time. Not part
+/// of `quickik`'s own public API -- purely a benchmark-internal convenience.
+#[derive(Clone, Copy)]
+pub struct BenchConfig<M: Mapper3Dto2D> {
+    pub mapper: M,
+    pub n_iterations: usize,
+    pub neutral_weight: f32,
+    pub position_tolerance: f32,
+    pub angle_tolerance: f32,
+    pub damping: f32,
+}
+
+impl BenchConfig<NoMapper> {
+    /// Default config (adaptive early stop enabled), 3D observations.
+    pub fn default_3d() -> Self {
+        Self::default_with_mapper(NoMapper)
+    }
+}
+
+impl<M: Mapper3Dto2D> BenchConfig<M> {
+    /// Default config (adaptive early stop enabled) with the given mapper.
+    pub fn default_with_mapper(mapper: M) -> Self {
+        Self {
+            mapper,
+            n_iterations: 10,
+            neutral_weight: 1e-3,
+            position_tolerance: 1e-3,
+            angle_tolerance: 1e-3,
+            damping: 1e-6,
+        }
+    }
+
+    /// Same config, but with early stop disabled (`position_tolerance`/
+    /// `angle_tolerance` set to 0), so every call runs the full
+    /// `n_iterations` -- the worst case if a frame never converges early.
+    pub fn forced_max_iterations(self) -> Self {
+        Self {
+            position_tolerance: 0.0,
+            angle_tolerance: 0.0,
+            ..self
+        }
+    }
+
+    pub(crate) fn new_solver(self, tree: &KinematicTree) -> Solver<M> {
+        Solver::new(
+            tree,
+            self.mapper,
+            self.n_iterations,
+            self.neutral_weight,
+            self.position_tolerance,
+            self.angle_tolerance,
+            self.damping,
+        )
+    }
+
+    fn new_sequence_solver(self, tree: &Arc<KinematicTree>) -> SequenceSolver<M>
+    where
+        M: Sync + Send,
+    {
+        SequenceSolver::new(
+            tree,
+            self.mapper,
+            self.n_iterations,
+            self.neutral_weight,
+            self.position_tolerance,
+            self.angle_tolerance,
+            self.damping,
+        )
+    }
+}
+
+/// Total frame count for a `n_segments`-worker `solve_segments_parallel` run
+/// to divide evenly into `n_segments` segments of `SEGMENT_LEN` frames each.
 pub fn frames_for_n_segments(n_segments: usize) -> usize {
-    SEGMENT_LEN + n_segments.saturating_sub(1) * (SEGMENT_LEN - OVERLAP_LEN)
+    SEGMENT_LEN * n_segments
 }
 
 fn percentile(sorted: &[Duration], p: f64) -> Duration {
@@ -95,54 +164,54 @@ fn bench_single_frame_latency<M: Mapper3Dto2D>(
     tree: &Arc<KinematicTree>,
     target_obs: &[KeypointObservation],
     n_calls: usize,
-    config: SolverConfig<M>,
+    config: BenchConfig<M>,
 ) -> Vec<Duration> {
-    let mut solver: Solver<M> = Solver::new(tree, config);
+    let mut solver = config.new_solver(tree);
     for _ in 0..500 {
         let mut state = State::neutral_pose(tree.clone());
-        solver.solve(&mut state, black_box(target_obs));
+        solver.solve(&mut state, black_box(target_obs), false, false);
         black_box(&state);
     }
     let mut samples = Vec::with_capacity(n_calls);
     for _ in 0..n_calls {
         let mut state = State::neutral_pose(tree.clone());
         let t0 = Instant::now();
-        solver.solve(&mut state, black_box(target_obs));
+        solver.solve(&mut state, black_box(target_obs), false, false);
         samples.push(t0.elapsed());
         black_box(&state);
     }
     samples
 }
 
-/// Single-thread sequence throughput: `SequenceSolver::solve_frame` warm
-/// started across a tiled native-rate sequence (the frame-to-frame motion an
-/// actual continuous tracking pipeline would see), default config. A second,
-/// fresh `SequenceSolver` is used for the timed pass after warming up once,
-/// so the sequence's own frame-to-frame warm-starting is what's measured.
-fn bench_single_thread_sequence_throughput<M: Mapper3Dto2D>(
+/// Single-thread sequence throughput: `SequenceSolver::solve` warm started
+/// across a tiled native-rate sequence (the frame-to-frame motion an actual
+/// continuous tracking pipeline would see), default config. A second, fresh
+/// `SequenceSolver` is used for the timed pass after warming up once, so the
+/// sequence's own frame-to-frame warm-starting is what's measured.
+fn bench_single_thread_sequence_throughput<M: Mapper3Dto2D + Sync + Send>(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
-    config: SolverConfig<M>,
+    config: BenchConfig<M>,
 ) -> Vec<Duration> {
-    let mut seq: SequenceSolver<M> = SequenceSolver::new(tree.clone(), config);
+    let mut seq = config.new_sequence_solver(tree);
     for obs in sequence {
-        seq.solve_frame(black_box(obs));
+        seq.solve(std::slice::from_ref(black_box(obs)), false, false);
     }
 
-    let mut timed_seq: SequenceSolver<M> = SequenceSolver::new(tree.clone(), config);
+    let mut timed_seq = config.new_sequence_solver(tree);
     let mut samples = Vec::with_capacity(sequence.len());
     for obs in sequence {
         let t0 = Instant::now();
-        timed_seq.solve_frame(black_box(obs));
+        timed_seq.solve(std::slice::from_ref(black_box(obs)), false, false);
         samples.push(t0.elapsed());
     }
     samples
 }
 
-/// Multi-thread sequence throughput: `solve_sequence_segmented_parallel` on
-/// a longer tiled sequence, using exactly `n_workers` threads (joblib
-/// convention, see `ParallelSolveConfig::n_workers`). Warms up once, then
-/// times a second run.
+/// Multi-thread sequence throughput: `solve_segments_parallel` on a longer
+/// tiled sequence, using exactly `n_workers` threads (joblib convention, see
+/// `SequenceSolver::solve_segments_parallel`). Warms up once, then times a
+/// second run.
 pub fn bench_multithread_sequence_throughput(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
@@ -152,27 +221,22 @@ pub fn bench_multithread_sequence_throughput(
         tree,
         sequence,
         n_workers,
-        SolverConfig::<NoMapper>::default(),
+        BenchConfig::default_3d(),
     )
 }
 
-fn bench_multithread_sequence_throughput_with_config<M: Mapper3Dto2D + Sync>(
+fn bench_multithread_sequence_throughput_with_config<M: Mapper3Dto2D + Sync + Send>(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
     n_workers: isize,
-    config: SolverConfig<M>,
+    config: BenchConfig<M>,
 ) -> Duration {
-    let parallel_config = ParallelSolveConfig {
-        segment_len: SEGMENT_LEN,
-        overlap_len: OVERLAP_LEN,
-        overlap_tolerance: 0.05,
-        n_workers,
-    };
-    let _ = solve_sequence_segmented_parallel(tree, config, sequence, parallel_config);
+    let seq = config.new_sequence_solver(tree);
+    let _ = seq.solve_segments_parallel(sequence, n_workers, false, false);
     let t0 = Instant::now();
-    let states = solve_sequence_segmented_parallel(tree, config, sequence, parallel_config);
+    let results = seq.solve_segments_parallel(sequence, n_workers, false, false);
     let elapsed = t0.elapsed();
-    black_box(&states);
+    black_box(&results);
     elapsed
 }
 
@@ -185,21 +249,12 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!("-- single-frame time (latency), default config (adaptive early stop) --");
     let single_frame_latency = summarize(
         "solve()",
-        bench_single_frame_latency(
-            tree,
-            &target_obs,
-            10_000,
-            SolverConfig::<NoMapper>::default(),
-        ),
+        bench_single_frame_latency(tree, &target_obs, 10_000, BenchConfig::default_3d()),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
     // `n_iterations` -- the worst case if a frame never converges early.
-    let max_iterations_config: SolverConfig = SolverConfig {
-        position_tolerance: 0.0,
-        angle_tolerance: 0.0,
-        ..SolverConfig::default()
-    };
+    let max_iterations_config = BenchConfig::default_3d().forced_max_iterations();
     println!(
         "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
         max_iterations_config.n_iterations
@@ -213,11 +268,11 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     let single_thread_sequence =
         tiled_native_rate_sequence(&fixtures.native_rate_frames, SINGLE_THREAD_N_FRAMES);
     let single_thread_mean = summarize(
-        "SequenceSolver.solve_frame",
+        "SequenceSolver.solve",
         bench_single_thread_sequence_throughput(
             tree,
             &single_thread_sequence,
-            SolverConfig::<NoMapper>::default(),
+            BenchConfig::default_3d(),
         ),
     );
 
@@ -232,7 +287,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         bench_multithread_sequence_throughput(tree, &sequence, MULTITHREAD_N_THREADS as isize);
     let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(
-        "solve_sequence_segmented_parallel   n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s",
+        "solve_segments_parallel             n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s",
         sequence.len(),
         multithread_fps,
     );
@@ -307,21 +362,13 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
             tree,
             &target_obs,
             10_000,
-            SolverConfig {
-                mapper: Some(XYView),
-                ..SolverConfig::default()
-            },
+            BenchConfig::default_with_mapper(XYView),
         ),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
     // `n_iterations` -- the worst case if a frame never converges early.
-    let max_iterations_config = SolverConfig {
-        position_tolerance: 0.0,
-        angle_tolerance: 0.0,
-        mapper: Some(XYView),
-        ..SolverConfig::default()
-    };
+    let max_iterations_config = BenchConfig::default_with_mapper(XYView).forced_max_iterations();
     println!(
         "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
         max_iterations_config.n_iterations
@@ -338,14 +385,11 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         &observations_2d_xyview,
     );
     let single_thread_mean = summarize(
-        "SequenceSolver.solve_frame",
+        "SequenceSolver.solve",
         bench_single_thread_sequence_throughput(
             tree,
             &single_thread_sequence,
-            SolverConfig {
-                mapper: Some(XYView),
-                ..SolverConfig::default()
-            },
+            BenchConfig::default_with_mapper(XYView),
         ),
     );
 
@@ -361,14 +405,11 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         tree,
         &sequence,
         MULTITHREAD_N_THREADS as isize,
-        SolverConfig {
-            mapper: Some(XYView),
-            ..SolverConfig::default()
-        },
+        BenchConfig::default_with_mapper(XYView),
     );
     let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(
-        "solve_sequence_segmented_parallel   n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s\n",
+        "solve_segments_parallel             n_frames={:<6} elapsed={elapsed:>9.3?}  throughput={:>10.1} frames/s\n",
         sequence.len(),
         multithread_fps,
     );

@@ -4,7 +4,7 @@ icon: lucide/house
 
 # QuickIK
 
-QuickIK is a fast <abbr title="Computing positions an orientations of body links given joint angles. Can be solved analytically.">forward</abbr> and <abbr title="Fitting joint angles and base state needed to place body links at their observed places. Generally requires iterative optimization.">inverse</abbr> kinematics library. It provides high-level APIs for processing consecutive frames with warm starts and multi-threaded batch processing, as well as a low-level API for more specific use cases (e.g., real-time applications). QuickIK is written in Rust but comes with Python and C++ bindings.
+QuickIK is a fast <abbr title="Computing XYZ world coordinates of joint keypoints given joint angles. Can be solved analytically.">forward</abbr> and <abbr title="Fitting joint angles and base state needed to place joint keypoints at their observed place. Generally requires iterative optimization.">inverse</abbr> kinematics library. It provides high-level APIs for processing consecutive frames with warm starts and multi-threaded batch processing, as well as a low-level API for more specific use cases (e.g., real-time applications). QuickIK is written in Rust but comes with Python and C++ bindings.
 
 ## Feature highlights
 
@@ -13,7 +13,7 @@ QuickIK is a fast <abbr title="Computing positions an orientations of body links
 - **Incomplete observation:** QuickIK allows some keypoints to be missing on some of the frames and does its best using only the available ones.
 - **From 2D keypoint positions:** QuickIK can accept keypoint positions that are only in 2D projections. The problem is intrinsically underconstrained, but it can still work if the camera angle is reasonable and the pull toward "natural" states is properly tuned.
 - **Differential weights:** When not all keypoint positions are equally reliable in the upstream MoCap data, QuickIK can consider them with different weights.
-- **Very fast:** QuickIK can be [>5 times faster](technical/benchmarks.md) than comparable alternatives.
+- **Very fast:** QuickIK is about [5 or more times faster](technical/benchmarks.md) than RBDL/Pinocchio.
 
 ## Example
 

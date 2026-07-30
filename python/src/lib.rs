@@ -38,7 +38,9 @@ pub(crate) fn catch_panic<T>(f: impl FnOnce() -> T) -> PyResult<T> {
 }
 
 use body_plan::KinematicTree;
-use high_level::{ParallelSolveConfig, SequenceSolver, solve_sequence_segmented_parallel};
+use high_level::{
+    ParallelSolveConfig, SequenceSolver, solve_batch_with_grad, solve_sequence_segmented_parallel,
+};
 use observation::{Camera, KeypointObservation, XYView};
 use solver::{Solver, SolverConfig};
 use state::State;
@@ -55,5 +57,6 @@ fn quickik(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SequenceSolver>()?;
     m.add_class::<ParallelSolveConfig>()?;
     m.add_function(wrap_pyfunction!(solve_sequence_segmented_parallel, m)?)?;
+    m.add_function(wrap_pyfunction!(solve_batch_with_grad, m)?)?;
     Ok(())
 }

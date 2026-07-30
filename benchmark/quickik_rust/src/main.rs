@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use quickik::body_plan::KinematicTree;
-use quickik_benchmark::{correctness, errors, fixtures, perf};
+use quickik_benchmark::{correctness, errors, fixtures, perf, regression};
 
 /// One body to benchmark: its body plan and matching fixtures file.
 struct BodyConfig {
@@ -55,6 +55,7 @@ fn main() {
 
         correctness::run_all(&tree, &fixtures);
         perf::run_all(&tree, &fixtures, body.name);
+        regression::run(&tree, body.name);
 
         // Same task, but observed only in 2D via XYView (see twod.rs) --
         // NeuroMechFly only for now (G1's more symmetric limb structure is

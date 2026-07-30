@@ -1,9 +1,11 @@
+use numpy::PyArray2;
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
 use crate::catch_panic;
 use crate::observation::{
-    KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
+    KeypointObservation, Mapper, extract_mapper, extract_observations, fk_positions_to_pyarray,
+    mapper_to_py,
 };
 use crate::state::State;
 
@@ -147,6 +149,14 @@ impl Solver {
     #[getter]
     fn mapper(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         mapper_to_py(py, self.mapper)
+    }
+
+    /// World-space keypoint positions (`(n_joints, 3)` float32, always 3D
+    /// regardless of `mapper`) at the pose from the most recent `solve`
+    /// call, in `kinematic_tree.joints` order.
+    #[getter]
+    fn last_fk_positions<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f32>> {
+        fk_positions_to_pyarray(py, self.inner.last_fk_positions())
     }
 }
 

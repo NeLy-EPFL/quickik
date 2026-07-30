@@ -8,10 +8,8 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::high_level::SequenceSolver;
 use quickik::observation::{Mapper3Dto2D, NoMapper, XYView};
-use quickik::solver::SolverConfig;
+use quickik::sequential_solver::SequenceSolver;
 
 use crate::correctness::build_observations;
 use crate::fixtures::{Fixtures, RealFrame};
@@ -22,20 +20,23 @@ use crate::twod::observations_2d_xyview;
 /// sequence, adaptive early stop): the same per-frame quantity
 /// `correctness::residual_stats` computes, kept here across every frame
 /// instead of reduced further to a single aggregate.
-fn per_frame_average_distances<M: Mapper3Dto2D>(
+fn per_frame_average_distances<M: Mapper3Dto2D + Sync + Send>(
     tree: &Arc<KinematicTree>,
     frames: &[RealFrame],
-    config: SolverConfig<M>,
+    mapper: M,
     to_obs: impl Fn(&[[f32; 3]]) -> Vec<quickik::observation::KeypointObservation>,
 ) -> Vec<f32> {
-    let mut sequence_solver: SequenceSolver<M> = SequenceSolver::new(tree.clone(), config);
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
+    let mut sequence_solver: SequenceSolver<M> =
+        SequenceSolver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
     let mut frame_rms = Vec::with_capacity(frames.len());
     for frame in frames {
         let obs = to_obs(&frame.target_ego);
-        let state = sequence_solver.solve_frame(&obs);
-        evaluate_fwdkin(&mut workspace, state);
-        let sum_sq: f32 = workspace.kpt_positions[1..]
+        let result = sequence_solver
+            .solve(std::slice::from_ref(&obs), false, true)
+            .pop()
+            .unwrap();
+        let keypoint_pos = result.keypoint_pos.unwrap();
+        let sum_sq: f32 = keypoint_pos[1..]
             .iter()
             .zip(&frame.target_ego)
             .map(|(p, &[x, y, z])| (p - Vector3::new(x, y, z)).norm_squared())
@@ -49,21 +50,10 @@ fn per_frame_average_distances<M: Mapper3Dto2D>(
 /// distances (model units) for 3D and XYView observations of the same real
 /// mocap frames.
 pub fn write_errors_json(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
-    let avg_3d = per_frame_average_distances(
-        tree,
-        &fixtures.real_frames,
-        SolverConfig::<NoMapper>::default(),
-        build_observations,
-    );
-    let avg_xyview = per_frame_average_distances(
-        tree,
-        &fixtures.real_frames,
-        SolverConfig {
-            mapper: Some(XYView),
-            ..SolverConfig::default()
-        },
-        observations_2d_xyview,
-    );
+    let avg_3d =
+        per_frame_average_distances(tree, &fixtures.real_frames, NoMapper, build_observations);
+    let avg_xyview =
+        per_frame_average_distances(tree, &fixtures.real_frames, XYView, observations_2d_xyview);
 
     let results = serde_json::json!({
         "body": body,

@@ -9,5 +9,9 @@ description = "Python bindings for the QuickIK inverse kinematics library"
 requires-python = ">=3.8"
 dependencies = ["numpy"]
 
+[project.optional-dependencies]
+torch = ["torch"]
+
 [tool.maturin]
 module-name = "quickik"
+python-source = "python"

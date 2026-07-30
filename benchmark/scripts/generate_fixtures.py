@@ -4,7 +4,7 @@ Produces two files under `benchmark/assets/`:
 
   - `neuromechfly_ypr_legs.json`: the kinematic tree (re-exported here so the
     fixtures and the body plan always come from the same model), via
-    `../flygym/scripts/export_model_for_flyik.py`.
+    `../flygym/scripts/export_model_for_quickik.py`.
   - `fixtures.json`: sample frames for the Rust benchmark to replay, of three
     kinds:
 
@@ -67,7 +67,7 @@ NATIVE_RATE_LENGTH = 300  # consecutive frames, ~0.91s at this recording's 330 H
 
 def export_bodyplan() -> None:
     """(Re-)generate the body plan JSON via flygym's own export script."""
-    export_script = FLYGYM_ROOT / "scripts" / "export_model_for_flyik.py"
+    export_script = FLYGYM_ROOT / "scripts" / "export_model_for_quickik.py"
     subprocess.run([sys.executable, str(export_script)], cwd=ASSETS_DIR, check=True)
     generated = ASSETS_DIR / f"{BODYPLAN_NAME}.json"
     assert generated.exists(), f"expected export script to write {generated}"

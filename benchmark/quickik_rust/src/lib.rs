@@ -6,4 +6,5 @@ pub mod correctness;
 pub mod errors;
 pub mod fixtures;
 pub mod perf;
+pub mod regression;
 pub mod twod;

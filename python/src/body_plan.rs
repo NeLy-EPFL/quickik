@@ -44,4 +44,21 @@ impl KinematicTree {
     fn n_dofs(&self) -> usize {
         self.inner.n_dofs()
     }
+
+    /// Joint (and keypoint) names, in this tree's internal order -- the same
+    /// order `positions`/`weights` arrays use elsewhere in this API, and
+    /// what `keypoints_order` arguments (e.g. `solve_batch_with_grad`) name
+    /// their entries against.
+    #[getter]
+    fn joint_names(&self) -> Vec<String> {
+        self.inner.joints.iter().map(|j| j.name.clone()).collect()
+    }
+
+    /// Per-joint `weight_scaler` (multiplied together with each frame's
+    /// keypoint observation weight; see `KeypointObservation`), in this
+    /// tree's internal order -- same order as `joint_names`.
+    #[getter]
+    fn joint_weight_scalers(&self) -> Vec<f32> {
+        self.inner.joints.iter().map(|j| j.weight_scaler).collect()
+    }
 }
