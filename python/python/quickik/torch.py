@@ -28,8 +28,7 @@ try:
 except ImportError as e:
     raise ImportError(
         "quickik.torch requires PyTorch, which isn't installed in this environment. "
-        "Install it with `pip install quickik[torch]`, or install PyTorch yourself: "
-        "https://pytorch.org/get-started/locally/"
+        "Install it with `pip install quickik[torch]`, or install PyTorch yourself."
     ) from e
 
 import quickik
@@ -39,12 +38,12 @@ __all__ = ["QuickIKSolve", "SolveIK"]
 
 def _check_supports_grad(batched_solver):
     if isinstance(batched_solver.mapper, quickik.Camera):
-        raise ValueError(
-            "SolveIK/QuickIKSolve don't support a BatchedSolver built with a Camera mapper: "
-            "its returned Jacobian is always the raw 3D keypoint-position Jacobian, and "
-            "unlike XYView's (which is just that Jacobian's first two rows), Camera's own "
-            "projection Jacobian depends on position and isn't retained. Use mapper=None "
-            "(3D) or mapper=XYView (2D) instead."
+        raise NotImplementedError(
+            "SolveIK/QuickIKSolve don't support a BatchedSolver built with a Camera "
+            "mapper: its returned Jacobian is always the raw 3D keypoint-position "
+            "Jacobian, and unlike XYView's, Camera's own projection Jacobian depends "
+            "on position and isn't retained. Use mapper=None (3D) or mapper=XYView "
+            "(2D) instead."
         )
 
 
@@ -70,8 +69,8 @@ class SolveIK(torch.autograd.Function):
         _check_supports_grad(batched_solver)
         if weights.requires_grad:
             raise ValueError(
-                "SolveIK doesn't support gradients w.r.t. weights (only positions): pass "
-                "weights.detach(), or a tensor that never had requires_grad set"
+                "SolveIK doesn't support gradients w.r.t. weights (only positions): "
+                "pass weights.detach(), or a tensor that never had requires_grad set"
             )
 
         positions_np = positions.detach().cpu().numpy()
@@ -167,8 +166,8 @@ class SolveIK(torch.autograd.Function):
         # `H = -jtj` here: `g = J^T W r + prior_grad` with `r = obs_pos -
         # fwdkin_pos(x)`, so `dr/dx = -J` and (dropping the Gauss-Newton
         # second-order term) `dg/dx ~= -J^T W J + prior_hessian = -jtj` (the
-        # prior term's sign in `accumulate_neutral_pose_prior` -- `+weight`
-        # into `jtj` vs. `d(g_prior)/dx = -weight` -- confirms this
+        # prior term's sign in `accumulate_neutral_pose_prior`, `+weight`
+        # into `jtj` vs. `d(g_prior)/dx = -weight`, confirms this
         # independently). So `lambda = -mu`, which flips the sign again
         # below and cancels against the leading `-` in `d(Loss)/dtheta =
         # -lambda^T @ dg/dtheta`, leaving a net `+`.
@@ -179,7 +178,7 @@ class SolveIK(torch.autograd.Function):
 
         # d(Loss)/d(obs_pos_k) = weight_k * J_k @ mu, per keypoint, in the
         # tree's internal keypoint order. `J_k` is the raw 3D Jacobian's
-        # first `ctx.n_obs_dims` rows (all 3, or `XYView`'s first 2 -- see
+        # first `ctx.n_obs_dims` rows (all 3, or `XYView`'s first 2, see
         # `forward`).
         jac_per_keypoint = jacobian.view(batch_size, n_joints, 3, state_dim)[
             ..., : ctx.n_obs_dims, :

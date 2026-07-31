@@ -61,7 +61,7 @@ pub fn write_errors_json(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &
         "note": "Per-frame average (RMS) 3D distance (model units) from the solved \
                  pose's FK output to the original 3D target, one value per real \
                  mocap frame (warm-started sequence, adaptive early stop). Computed \
-                 once from the Rust API -- every binding runs the identical compiled \
+                 once from the Rust API, since every binding runs the identical compiled \
                  solver, so this doesn't depend on which one solved it.",
         "3d": avg_3d,
         "xyview": avg_xyview,

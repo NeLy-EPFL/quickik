@@ -43,7 +43,7 @@ TWO_JOINT_CHAIN_JSON = """
 """
 
 # A joint has a non-1.0 weight_scaler, which SolveIK's gradient must fold in
-# (see torch.py's `joint_weight_scalers` usage) -- the plain two-joint chain
+# (see torch.py's `joint_weight_scalers` usage); the plain two-joint chain
 # above (all scalers 1.0) wouldn't exercise that at all.
 WEIGHTED_TWO_JOINT_CHAIN_JSON = """
 {
@@ -77,7 +77,7 @@ def weighted_tree():
 
 def two_link_positions(a1, a2):
     """Positions of [root, joint1, joint2, tip] when joint1/joint2 are at
-    angles (a1, a2) about the shared Z axis -- see
+    angles (a1, a2) about the shared Z axis. See
     tests/test_bindings.py's `two_link_positions` (same geometry)."""
     return [
         (0.0, 0.0, 0.0),
@@ -129,13 +129,13 @@ def test_batched_solver_rejects_camera_mapper(tree):
     solver = batched_solver(tree, mapper=camera)
     positions = torch.zeros(1, 4, 2)
     weights = torch.ones(1, 4)
-    with pytest.raises(ValueError, match="Camera"):
+    with pytest.raises(NotImplementedError, match="Camera"):
         qtorch.SolveIK.apply(solver, positions, weights)
 
 
 def test_forward_recovers_pose_in_keypoints_order(tree):
     """SolveIK's forward pass should recover the same joint angles as plain
-    `quickik.Solver.solve` given an equivalent, reachable target -- this
+    `quickik.Solver.solve` given an equivalent, reachable target; this
     catches the keypoints_order remapping being wrong in a way that gradcheck
     (which only checks *sensitivity*, not absolute correctness) wouldn't."""
     solver = batched_solver(tree, neutral_weight=0.0)
@@ -263,7 +263,7 @@ def test_quickiksolve_rejects_camera_mapper_at_construction(tree):
         world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     )
     solver = batched_solver(tree, mapper=camera)
-    with pytest.raises(ValueError, match="Camera"):
+    with pytest.raises(NotImplementedError, match="Camera"):
         qtorch.QuickIKSolve(solver)
 
 

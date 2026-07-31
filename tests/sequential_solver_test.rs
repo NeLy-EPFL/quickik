@@ -60,7 +60,7 @@ fn solve_always_warm_starts_across_separate_calls() {
     let cold_error = (cold_result[0].state.dof_angles[0] - 0.4).abs();
 
     // Warm start: two separate `.solve()` calls with the same (static)
-    // target -- the second call continues from the first call's near-answer
+    // target; the second call continues from the first call's near-answer
     // instead of from neutral (SequenceSolver always warm-starts across
     // calls, for its whole lifetime), so it should end up closer after the
     // same one iteration.
@@ -167,7 +167,7 @@ fn solve_segments_parallel_reconstructs_smooth_trajectory() {
 
     let seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
     // A handful of workers (not tied to this machine's core count), giving
-    // segments of ~10 frames each -- large enough for each segment's own
+    // segments of ~10 frames each, large enough for each segment's own
     // internal warm-starting to settle onto the trajectory.
     let results = seq_solver.solve_segments_parallel(&sequence, 4, false, false);
 
@@ -191,7 +191,7 @@ fn solve_segments_parallel_reconstructs_smooth_trajectory() {
 #[test]
 fn solve_segments_parallel_with_one_worker_matches_plain_solve_exactly() {
     // n_workers: 1 forces the whole sequence through a single segment, cold
-    // started once and warm-started throughout -- bit-for-bit the same
+    // started once and warm-started throughout: bit-for-bit the same
     // computation a fresh SequenceSolver's plain `solve` would do over the
     // same sequence.
     let tree = common::two_joint_chain();

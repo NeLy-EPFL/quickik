@@ -76,7 +76,7 @@ fn solve_matches_sequential_solve_with_grad() {
         expected_root_rot.push(result.state.root_rot);
     }
 
-    // Same observations, but permuted into `keypoints_order` -- this is what
+    // Same observations, but permuted into `keypoints_order`: this is what
     // BatchedSolver::solve actually receives.
     let observations_array: Vec<Vec<KeypointObservation>> = targets
         .iter()

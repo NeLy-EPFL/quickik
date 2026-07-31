@@ -2,7 +2,7 @@
 //! numbers recorded before the solver API redesign (config flattened into
 //! constructors, `with_grad`/`with_fk` flags), flagging any measurement more
 //! than [`REGRESSION_THRESHOLD`] slower than its baseline. Not a strict
-//! pass/fail gate, since machine load varies -- a flag is a prompt to
+//! pass/fail gate, since machine load varies; a flag is a prompt to
 //! re-check under controlled conditions, not proof of an actual regression.
 
 use std::hint::black_box;

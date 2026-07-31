@@ -1,6 +1,6 @@
 //! Consolidated throughput/latency benchmark for `quickik`'s Rust API: single-
 //! frame latency, single-thread sequence throughput, and multi-thread
-//! sequence throughput -- all at the default config (early stopping via
+//! sequence throughput, all at the default config (early stopping via
 //! `position_tolerance`/`angle_tolerance` enabled, i.e. `n_iterations` acts as
 //! a ceiling rather than a fixed cost). The weak-scaling sweep lives in
 //! `../../quickik_scaling`, reusing this module's tiling/multi-thread-
@@ -37,7 +37,7 @@ const SINGLE_THREAD_N_FRAMES: usize = 1000;
 
 /// Bundles a `Solver`/`SequenceSolver` config so benchmark call sites don't
 /// have to spell out all five numeric constructor args every time. Not part
-/// of `quickik`'s own public API -- purely a benchmark-internal convenience.
+/// of `quickik`'s own public API: purely a benchmark-internal convenience.
 #[derive(Clone, Copy)]
 pub struct BenchConfig<M: Mapper3Dto2D> {
     pub mapper: M,
@@ -70,7 +70,7 @@ impl<M: Mapper3Dto2D> BenchConfig<M> {
 
     /// Same config, but with early stop disabled (`position_tolerance`/
     /// `angle_tolerance` set to 0), so every call runs the full
-    /// `n_iterations` -- the worst case if a frame never converges early.
+    /// `n_iterations`, the worst case if a frame never converges early.
     pub fn forced_max_iterations(self) -> Self {
         Self {
             position_tolerance: 0.0,
@@ -253,7 +253,7 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
-    // `n_iterations` -- the worst case if a frame never converges early.
+    // `n_iterations`, the worst case if a frame never converges early.
     let max_iterations_config = BenchConfig::default_3d().forced_max_iterations();
     println!(
         "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
@@ -367,7 +367,7 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
-    // `n_iterations` -- the worst case if a frame never converges early.
+    // `n_iterations`, the worst case if a frame never converges early.
     let max_iterations_config = BenchConfig::default_with_mapper(XYView).forced_max_iterations();
     println!(
         "\n-- single-frame time (latency), early stop disabled ({} iterations) --",

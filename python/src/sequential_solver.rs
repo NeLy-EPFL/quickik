@@ -102,8 +102,8 @@ impl SequenceSolver {
 
     /// Solves `positions`/`weights` in parallel by splitting them into
     /// exactly `n_workers` contiguous, non-overlapping segments, each
-    /// cold-started at the neutral pose and then warm-started within itself
-    /// -- see `quickik_core::sequential_solver::SequenceSolver::solve_segments_parallel`
+    /// cold-started at the neutral pose and then warm-started within itself.
+    /// See `quickik_core::sequential_solver::SequenceSolver::solve_segments_parallel`
     /// for the exact `n_workers` convention. Never reads or writes this
     /// object's own `solve` state.
     ///

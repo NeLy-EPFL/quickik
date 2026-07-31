@@ -1,6 +1,6 @@
 //! [`BatchedSolver`]: solving a batch of fully independent (never
 //! warm-started) sets of keypoint observations in parallel, for training/
-//! inference with an autodiff framework -- see [`BatchedSolver::solve`].
+//! inference with an autodiff framework. See [`BatchedSolver::solve`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,9 +22,9 @@ pub struct BatchedSolverResult {
     /// `KinematicTree`'s own (`State::dof_angles`'s order): unlike keypoints
     /// (whose observations typically come from an external, already-fixed-order
     /// source, e.g. a pretrained detector, that has no reason to match the
-    /// tree's own joint order), DOF order is already fully caller-controlled
-    /// -- it's exactly the order joints and their DOFs were listed in when
-    /// the [`KinematicTree`] was built -- so there's no equivalent
+    /// tree's own joint order), DOF order is already fully caller-controlled:
+    /// it's exactly the order joints and their DOFs were listed in when
+    /// the [`KinematicTree`] was built, so there's no equivalent
     /// DOF-ordering parameter to reorder this by.
     pub joint_angles: Vec<Vec<f32>>,
     /// `(batch_size)` free-floating root positions.

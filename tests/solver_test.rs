@@ -229,7 +229,7 @@ fn solver_fields_can_be_tuned_between_solve_calls() {
         DAMPING,
     );
     solver.solve(&mut state, &observations, false, false);
-    // Mutate the field directly in place -- no need to reconstruct the Solver
+    // Mutate the field directly in place: no need to reconstruct the Solver
     // (and its preallocated buffers) to change per-call numerics between
     // frames.
     solver.n_iterations = 3;
@@ -246,7 +246,7 @@ fn solve_respects_joint_limits() {
     // Pin root_rot via joint1 and dof1 via joint2, both at their neutral
     // (dof1 = 0) positions, then ask the `tip` keypoint (downstream of
     // joint2, which is limited to [-0.5, 0.5]) for a position that is only
-    // reachable with dof2 ~= 1.2 rad -- well past its upper limit. The target
+    // reachable with dof2 ~= 1.2 rad, well past its upper limit. The target
     // is placed off the arm's resting axis so the request isn't degenerate
     // for a first-order (Gauss-Newton) solver starting from a straight pose.
     let observations = vec![
@@ -489,7 +489,7 @@ fn solve_with_grad_jacobian_and_cholesky_reconstruct_normal_equations() {
     state.dof_angles[0] = 0.2;
     state.dof_angles[1] = -0.15;
     // A single iteration, with damping and the neutral-pose prior both
-    // disabled, makes `jtj` exactly `sum_k weight_k * J_k^T J_k` -- so it's
+    // disabled, makes `jtj` exactly `sum_k weight_k * J_k^T J_k`, so it's
     // reconstructible from the returned Jacobian alone, without needing
     // access to the solver's private accumulation logic.
     let mut solver: Solver = Solver::new(
@@ -545,7 +545,7 @@ fn solve_with_grad_tracks_only_the_final_iterations_linearization() {
     let start_angles = [0.2, -0.15];
     let n_iterations = 5;
     // Zero tolerances disable early termination by contract, so this is
-    // guaranteed to run all `n_iterations` steps -- letting this test pin
+    // guaranteed to run all `n_iterations` steps, letting this test pin
     // down exactly which pose the final iteration's linearization should be
     // at, to catch `solve_impl` snapshotting the wrong (e.g. first) iteration
     // instead of deferring correctly.
@@ -557,7 +557,7 @@ fn solve_with_grad_tracks_only_the_final_iterations_linearization() {
     assert!(result.cholesky_l.is_some());
 
     // The final iteration's Jacobian is linearized at the pose from just
-    // before its own update -- i.e. wherever `n_iterations - 1` steps alone
+    // before its own update, i.e. wherever `n_iterations - 1` steps alone
     // would have landed, starting from the same initial pose.
     let mut second_to_last_state = State::neutral_pose(tree.clone());
     second_to_last_state.dof_angles[0] = start_angles[0];

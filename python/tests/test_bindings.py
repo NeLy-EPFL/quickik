@@ -59,7 +59,7 @@ def fixed_base_tree():
 
 def two_link_positions(a1, a2):
     """Positions of [root, joint1, joint2, tip] when joint1/joint2 are at
-    angles (a1, a2) about the shared Z axis -- see tests/common/mod.rs's doc
+    angles (a1, a2) about the shared Z axis. See tests/common/mod.rs's doc
     comment for why joint1's own keypoint never moves with a1."""
     return [
         (0.0, 0.0, 0.0),
@@ -122,7 +122,7 @@ def test_result_state_matches_the_flat_dof_angles_root_pos_root_rot_properties(t
 
 
 def test_result_state_can_be_fed_into_another_solve_call(tree):
-    """`result.state` should be a real, independent `State` -- usable to
+    """`result.state` should be a real, independent `State`, usable to
     warm-start a follow-up `Solver.solve` call, same as any other `State`."""
     state = quickik.State.neutral_pose(tree)
     solver = quickik.Solver(tree, n_iterations=1, neutral_weight=0.0)
@@ -217,7 +217,7 @@ def test_xyview_latency_not_much_worse_than_3d(tree):
     """Sanity check, not a benchmark (see benchmark/ for real numbers):
     XYView's per-keypoint sparse-accumulation path (solver.rs's Position2D
     branch) shouldn't be dramatically slower than the Position3D path it
-    mirrors. A generous factor -- this only needs to catch a gross
+    mirrors. A generous factor: this only needs to catch a gross
     regression (e.g. an accidental per-call allocation creeping back in),
     not assert precise parity, since single-frame timing on this tiny
     fixture is dominated by Python/FFI call overhead common to both paths."""
@@ -384,7 +384,7 @@ def test_sequence_solver_treats_nan_weight_as_missing(tree):
     # Losing one keypoint's worth of evidence in this whole-body joint solve
     # shifts the converged fit slightly system-wide (not just for the DOFs
     # that keypoint constrains), so this uses a looser tolerance than the
-    # fully-observed tests above -- the point is to distinguish "converged
+    # fully-observed tests above. The point is to distinguish "converged
     # near the true trajectory" from "frozen at exactly zero" (what the NaN
     # bug caused), not to assert high precision.
     last, (a1, a2) = results[-1], true_angles[-1]

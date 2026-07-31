@@ -15,18 +15,18 @@ pub struct SolverResult {
     /// The converged pose (`dof_angles`, `root_pos`, `root_rot`).
     pub state: State,
     /// World-space keypoint positions, in `KinematicTree`'s joint order.
-    /// `Some` iff `solve` was called with `with_fk: true`.
+    /// `Some` if and only if `solve` was called with `with_fk: true`.
     pub keypoint_pos: Option<Vec<Vector3<f32>>>,
     /// The keypoint-position Jacobian at (approximately) the converged pose:
-    /// see [`solve`](Solver::solve)'s docs for exactly which pose. `Some` iff
-    /// `solve` was called with `with_grad: true`.
+    /// see [`solve`](Solver::solve)'s docs for exactly which pose. `Some` if
+    /// and only if `solve` was called with `with_grad: true`.
     pub jacobian: Option<DMatrix<f32>>,
     /// Cholesky factorization of the normal-equations matrix (`jtj`, i.e.
     /// `jacobian^T @ weights @ jacobian` plus damping and the neutral-pose
-    /// prior) at the same linearization as `jacobian`. `Some` iff `with_grad`
-    /// was `true` *and* that linearization's normal equations were
-    /// positive-definite -- gradients can't be computed from this solve
-    /// otherwise.
+    /// prior) at the same linearization as `jacobian`. `Some` if and only if
+    /// `with_grad` was `true` *and* that linearization's normal equations were
+    /// positive-definite (gradients can't be computed from this solve
+    /// otherwise).
     pub cholesky_l: Option<Cholesky<f32, Dyn>>,
 }
 
@@ -170,7 +170,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
     ///
     /// `with_grad`/`with_fk` gate [`SolverResult::jacobian`]/
     /// [`SolverResult::cholesky_l`] and [`SolverResult::keypoint_pos`]
-    /// respectively -- each costs a little extra work, so only request what
+    /// respectively; each costs a little extra work, so only request what
     /// you'll use. The Jacobian/Cholesky factor are linearized at the pose
     /// from just *before* the last iteration's own update step (since that
     /// update is small at convergence, a close approximation of the
@@ -258,8 +258,8 @@ impl<M: Mapper3Dto2D> Solver<M> {
             //   thousands), so a tiny fixed `damping` isn't swamped and left
             //   numerically meaningless.
             // - Floors damping when a DOF's diagonal entry is small or near
-            //   zero (weakly- or entirely-unconstrained DOFs -- routine, and
-            //   unrelated to coordinate units/scale: it happens whenever few
+            //   zero (weakly- or entirely-unconstrained DOFs, which is routine
+            //   and unrelated to coordinate units/scale: it happens whenever few
             //   keypoints constrain a DOF, and is exercised directly by any
             //   config with `neutral_weight: 0.0`), so damping doesn't vanish right
             //   when it's most needed to keep the Cholesky decomposition
@@ -297,7 +297,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         // `evaluate_fwdkin` above runs at the *start* of each iteration
         // (before that iteration's `state.apply_delta`), so after the loop,
         // `self.workspace.kpt_positions` reflects the pose *before* the last
-        // update was applied -- one step stale relative to the `state`
+        // update was applied, one step stale relative to the `state`
         // actually returned to the caller. Run it once more, unconditionally
         // (including when `n_iterations == 0`), so `keypoint_pos` matches the
         // returned `state` exactly. This doesn't touch `last_jacobian`/
@@ -350,15 +350,15 @@ impl<M: Mapper3Dto2D> Solver<M> {
     }
 
     fn has_converged(&self, delta: &DVector<f32>) -> bool {
-        // Positions: delta[0..n_root_position_dofs] is root position -- empty
-        // for a fixed-base tree (n_root_dofs == 0), since it has no root
-        // position state at all.
+        // Positions: delta[0..n_root_position_dofs] is root position (empty
+        // for a fixed-base tree, n_root_dofs == 0, since it has no root
+        // position state at all).
         let n_root_position_dofs = self.n_root_dofs.min(3);
         let max_abs_position_delta = delta
             .rows(0, n_root_position_dofs)
             .iter()
             .fold(0.0f32, |acc, &x| acc.max(x.abs()));
-        // Angles: the rest -- root rotation (if any) plus every DOF angle.
+        // Angles: the rest, root rotation (if any) plus every DOF angle.
         let max_abs_angle_delta = delta
             .rows(n_root_position_dofs, delta.len() - n_root_position_dofs)
             .iter()
@@ -407,7 +407,7 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
             // are accumulated via direct dot products rather than a full
             // matrix multiply. `mapper` (e.g. `NoMapper`) panics on its own
             // if this `Solver` wasn't actually constructed with a real
-            // mapper -- see `Mapper3Dto2D`'s docs.
+            // mapper; see `Mapper3Dto2D`'s docs.
             let jacobian_3d_view = jacobian_3d.columns(0, n_relevant_dofs);
             let mut jacobian_2d_view = jacobian_2d_buffer.columns_mut(0, n_relevant_dofs);
             let fwdkin_pos2d =

@@ -197,7 +197,7 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
         );
     }
     println!(
-        "(kpt rms/max: 3D distance between solved FK output and the *original 3D* target -- \
+        "(kpt rms/max: 3D distance between solved FK output and the *original 3D* target; \
          the solver itself never sees 3D, only its {label} projection. angle err: max abs \
          error over all {} DOFs, degrees, mod 2*pi. \"w=0\" = weight=0.)\n",
         tree.state_dim()

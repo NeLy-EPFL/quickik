@@ -13,7 +13,7 @@ use crate::state::State;
 /// Warm-started solving for a continuous sequence of frames.
 ///
 /// [`solve`](Self::solve) always continues from wherever the previous call
-/// (if any) left off, for this object's whole lifetime -- construct one per
+/// (if any) left off, for this object's whole lifetime; construct one per
 /// independent continuous stream (e.g. one per tracked subject, or one per
 /// recording), not one for your whole program. Frames can be fed in one at a
 /// time as they arrive, or as a whole pre-recorded sequence in one call: both
@@ -60,7 +60,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
 
     /// Solves every frame in `sequence` in order, continuing to warm-start
     /// from wherever this object's last `solve` call (on any previous
-    /// `sequence`) left off -- see the struct docs. Returns one
+    /// `sequence`) left off; see the struct docs. Returns one
     /// [`SolverResult`] per frame.
     pub fn solve(
         &mut self,
@@ -82,7 +82,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
     /// as evenly sized as possible): each segment cold-starts at the neutral
     /// pose on its own thread, then warm-starts frame-to-frame within itself,
     /// same as [`solve`](Self::solve). Segments don't overlap and aren't
-    /// cross-checked against each other -- better load distribution is worth
+    /// cross-checked against each other: better load distribution is worth
     /// more than that consistency check, since segments are independent
     /// either way. This never reads or writes this object's own running
     /// `solve` state (see the struct docs).
@@ -140,7 +140,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
 }
 
 /// Resolves a `solve_segments_parallel`-style `n_workers` value into an
-/// actual thread count -- see [`SequenceSolver::solve_segments_parallel`]'s
+/// actual thread count; see [`SequenceSolver::solve_segments_parallel`]'s
 /// docs for the exact convention.
 fn resolve_n_workers(n_workers: isize) -> usize {
     assert!(n_workers != 0, "n_workers must not be 0");

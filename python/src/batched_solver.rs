@@ -11,7 +11,7 @@ use crate::observation::{
 };
 
 /// Every `BatchedSolver.solve` item's converged pose and (optional)
-/// linearization, as a struct of batched NumPy arrays -- matching how a batch
+/// linearization, as a struct of batched NumPy arrays, matching how a batch
 /// is naturally represented on the PyTorch side. See
 /// `quickik_core::batched_solver::BatchedSolverResult`'s docs for each
 /// field's exact shape and ordering.
@@ -56,7 +56,7 @@ impl BatchedSolverResult {
         self.keypoint_pos.as_ref().map(|a| a.clone_ref(py))
     }
 
-    /// `(batch_size, 3 * n_joints, state_dim)` -- always the raw 3D Jacobian
+    /// `(batch_size, 3 * n_joints, state_dim)`, always the raw 3D Jacobian
     /// regardless of `mapper`, in `kinematic_tree`'s internal keypoint/state
     /// order (*not* `keypoints_order`). `None` unless `solve` was called with
     /// `with_grad=True`.
@@ -283,9 +283,9 @@ impl BatchedSolver {
     }
 
     /// `keypoint_to_joint_idx[i]` is `kinematic_tree`'s internal joint index
-    /// that `solve`'s keypoint axis position `i` corresponds to -- the
+    /// that `solve`'s keypoint axis position `i` corresponds to (the
     /// resolved inverse of the by-name `keypoints_order` this solver was
-    /// constructed with.
+    /// constructed with).
     #[getter]
     fn keypoint_to_joint_idx(&self) -> Vec<usize> {
         self.inner.keypoint_to_joint_idx().to_vec()

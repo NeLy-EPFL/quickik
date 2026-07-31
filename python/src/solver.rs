@@ -86,7 +86,7 @@ impl SolverResult {
     }
 
     /// The keypoint-position Jacobian (`(3 * n_joints, state_dim)` float32)
-    /// at (approximately) the converged pose -- see
+    /// at (approximately) the converged pose. See
     /// `quickik_core::solver::Solver::solve`'s docs for exactly which pose.
     /// `None` unless `solve` was called with `with_grad=True`.
     #[getter]
@@ -123,7 +123,7 @@ impl SolverResult {
 ///
 /// `mapper` is a `Camera`, an `XYView`, or `None` (the default, for 3D-only
 /// observations); it's fixed for this `Solver`'s lifetime, mirroring Rust's
-/// `Solver<M>` generic parameter -- there's no setter, only the read-only
+/// `Solver<M>` generic parameter, so there's no setter, only the read-only
 /// `mapper` property. The other tuning parameters (`n_iterations`,
 /// `neutral_weight`, `position_tolerance`, `angle_tolerance`, `damping`) are
 /// plain attributes, freely retunable between `solve` calls.
@@ -172,7 +172,7 @@ impl Solver {
     /// order; use `KeypointObservation.missing()` for keypoints not observed
     /// this frame), and returns the converged pose. `with_grad`/`with_fk`
     /// gate `SolverResult.jacobian`/`SolverResult.cholesky_l` and
-    /// `SolverResult.keypoint_pos` respectively -- each costs a little extra
+    /// `SolverResult.keypoint_pos` respectively; each costs a little extra
     /// work, so only request what you'll use. Raises `ValueError` if
     /// `len(observations) != kinematic_tree.n_joints`.
     #[pyo3(signature = (state, observations, with_grad=false, with_fk=false))]
