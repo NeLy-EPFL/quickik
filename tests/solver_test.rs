@@ -1,6 +1,6 @@
 mod common;
 
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{DMatrix, Matrix3, Vector3};
 use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
 use quickik::observation::{Camera, KeypointObservation, Mapper3Dto2D, XYView};
 use quickik::solver::{Solver, SolverConfig};
@@ -395,4 +395,230 @@ fn position2d_observation_on_mapperless_solver_panics() {
 
     let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
     solver.solve(&mut state, &observations);
+}
+
+#[test]
+fn solve_with_grad_jacobian_and_cholesky_reconstruct_normal_equations() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    // Started from a bent (not neutral) pose: at the exact neutral pose every
+    // keypoint of this chain is collinear along the x-axis, which leaves the
+    // free root's roll DOF with a zero Jacobian column (a genuine physical
+    // degeneracy, not a bug) and makes jtj singular rather than
+    // positive-definite.
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = 0.2;
+    state.dof_angles[1] = -0.15;
+    // A single iteration, with damping and the neutral-pose prior both
+    // disabled, makes `jtj` exactly `sum_k weight_k * J_k^T J_k` -- so it's
+    // reconstructible from `last_jacobian` alone, without needing access to
+    // the solver's private accumulation logic.
+    let mut solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            n_iterations: 1,
+            neutral_weight: 0.0,
+            damping: 0.0,
+            ..SolverConfig::default()
+        },
+    );
+    let ok = solver.solve_with_grad(&mut state, &observations);
+    assert!(
+        ok,
+        "a well-posed single GN step should be positive-definite"
+    );
+
+    let jacobian = solver.last_jacobian();
+    let state_dim = jacobian.ncols();
+    let n_joints = tree.n_joints();
+    assert_eq!(jacobian.nrows(), 3 * n_joints);
+
+    let mut expected_jtj = DMatrix::<f32>::zeros(state_dim, state_dim);
+    for k in 0..n_joints {
+        let block = jacobian.rows(3 * k, 3);
+        expected_jtj += block.transpose() * block;
+    }
+
+    let l = solver.last_cholesky().unwrap().l();
+    let reconstructed_jtj = &l * l.transpose();
+
+    let max_abs_diff = (reconstructed_jtj - expected_jtj)
+        .iter()
+        .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(
+        max_abs_diff < 1e-4,
+        "L * L^T should reconstruct jtj built from last_jacobian; max abs diff = {max_abs_diff}"
+    );
+}
+
+#[test]
+fn solve_with_grad_tracks_only_the_final_iterations_linearization() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let start_angles = [0.2, -0.15];
+    let n_iterations = 5;
+    // Zero tolerances disable early termination by contract, so this is
+    // guaranteed to run all `n_iterations` steps -- letting this test pin
+    // down exactly which pose the final iteration's linearization should be
+    // at, to catch `solve_impl` snapshotting the wrong (e.g. first) iteration
+    // instead of deferring correctly.
+    let config = SolverConfig {
+        n_iterations,
+        neutral_weight: 0.0,
+        damping: 0.0,
+        position_tolerance: 0.0,
+        angle_tolerance: 0.0,
+        ..SolverConfig::default()
+    };
+
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = start_angles[0];
+    state.dof_angles[1] = start_angles[1];
+    let mut solver: Solver = Solver::new(&tree, config);
+    let ok = solver.solve_with_grad(&mut state, &observations);
+    assert!(ok);
+
+    // The final iteration's Jacobian is linearized at the pose from just
+    // before its own update -- i.e. wherever `n_iterations - 1` steps alone
+    // would have landed, starting from the same initial pose.
+    let mut second_to_last_state = State::neutral_pose(tree.clone());
+    second_to_last_state.dof_angles[0] = start_angles[0];
+    second_to_last_state.dof_angles[1] = start_angles[1];
+    let mut warmup_solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            n_iterations: n_iterations - 1,
+            ..config
+        },
+    );
+    warmup_solver.solve(&mut second_to_last_state, &observations);
+
+    let mut expected_workspace = ForwardKinematicsWorkspace::new(&tree);
+    evaluate_fwdkin(&mut expected_workspace, &second_to_last_state);
+
+    let max_abs_diff = (solver.last_jacobian() - &expected_workspace.kpt_jacobian)
+        .iter()
+        .fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(
+        max_abs_diff < 1e-5,
+        "last_jacobian should be linearized at the pose from n_iterations-1 steps alone, \
+         max abs diff = {max_abs_diff}"
+    );
+}
+
+#[test]
+fn solve_with_grad_returns_false_and_clears_cholesky_when_unconstrained() {
+    let tree = common::two_joint_chain();
+    let observations = vec![KeypointObservation::Missing; tree.n_joints()];
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            neutral_weight: 0.0,
+            damping: 0.0,
+            ..SolverConfig::default()
+        },
+    );
+    let ok = solver.solve_with_grad(&mut state, &observations);
+
+    assert!(
+        !ok,
+        "an all-Missing, unregularized solve has no PD normal equations"
+    );
+    assert!(solver.last_cholesky().is_none());
+}
+
+/// Checks `solver.last_fk_positions()` against a fresh `evaluate_fwdkin` at
+/// `state` (rather than reusing `keypoints_at`, which assumes a neutral
+/// root): `last_fk_positions` must reflect the pose *actually returned*,
+/// including root_pos/root_rot, not just dof_angles.
+fn assert_last_fk_positions_matches_state(
+    solver: &Solver,
+    tree: &std::sync::Arc<quickik::body_plan::KinematicTree>,
+    state: &State,
+) {
+    let mut expected_workspace = ForwardKinematicsWorkspace::new(tree);
+    evaluate_fwdkin(&mut expected_workspace, state);
+
+    let actual = solver.last_fk_positions();
+    assert_eq!(actual.len(), expected_workspace.kpt_positions.len());
+    for (a, e) in actual.iter().zip(&expected_workspace.kpt_positions) {
+        assert!((a - e).norm() < 1e-5, "actual={a:?} expected={e:?}");
+    }
+}
+
+#[test]
+fn last_fk_positions_matches_the_returned_state() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
+    solver.solve(&mut state, &observations);
+
+    assert_last_fk_positions_matches_state(&solver, &tree, &state);
+}
+
+#[test]
+fn last_fk_positions_matches_the_returned_state_with_solve_with_grad() {
+    let tree = common::two_joint_chain();
+    let target_positions = keypoints_at(&tree, &[0.4, 0.3]);
+    let observations: Vec<KeypointObservation> = target_positions
+        .iter()
+        .map(|&obs_pos| KeypointObservation::Position3D {
+            obs_pos,
+            weight: 1.0,
+        })
+        .collect();
+
+    let mut state = State::neutral_pose(tree.clone());
+    let mut solver: Solver = Solver::new(&tree, SolverConfig::default());
+    solver.solve_with_grad(&mut state, &observations);
+
+    assert_last_fk_positions_matches_state(&solver, &tree, &state);
+}
+
+#[test]
+fn last_fk_positions_is_populated_even_with_zero_iterations() {
+    let tree = common::two_joint_chain();
+    let mut state = State::neutral_pose(tree.clone());
+    state.dof_angles[0] = 0.3;
+    state.dof_angles[1] = -0.2;
+    let observations = vec![KeypointObservation::Missing; tree.n_joints()];
+
+    let mut solver: Solver = Solver::new(
+        &tree,
+        SolverConfig {
+            n_iterations: 0,
+            ..SolverConfig::default()
+        },
+    );
+    solver.solve(&mut state, &observations);
+
+    // n_iterations: 0 means state is untouched, so this should match exactly.
+    assert_last_fk_positions_matches_state(&solver, &tree, &state);
 }

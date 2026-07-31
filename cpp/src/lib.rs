@@ -184,6 +184,11 @@ mod ffi {
         fn set_config(self: &mut Solver, config: SolverConfig);
         /// Fixed at construction; there is no setter.
         fn mapper(self: &Solver) -> Mapper;
+        /// World-space keypoint positions at the pose from the most recent
+        /// `solve` call, in `tree`'s joint order. Flattened (`n_joints * 3`
+        /// long, 3 floats per keypoint) like `observations`/`split_into_frames`
+        /// elsewhere in this bridge -- see this module's top-level docs.
+        fn last_fk_positions(self: &Solver) -> Vec<f32>;
 
         /// Solves a continuous sequence of frames for a single tracked body,
         /// warm starting each frame from the previous frame's converged pose.
@@ -219,6 +224,10 @@ mod ffi {
         fn set_config(self: &mut SequenceSolver, config: SolverConfig);
         /// Fixed at construction; there is no setter.
         fn mapper(self: &SequenceSolver) -> Mapper;
+        /// World-space keypoint positions at the most recently converged
+        /// pose, in `tree`'s joint order. Flattened, same convention as
+        /// `Solver::last_fk_positions`.
+        fn last_fk_positions(self: &SequenceSolver) -> Vec<f32>;
 
         /// Solves a single long sequence in parallel by splitting it into
         /// slightly overlapping segments, each solved on its own thread. See
@@ -557,6 +566,13 @@ fn new_solver(tree: &KinematicTree, config: ffi::SolverConfig, mapper: ffi::Mapp
     })
 }
 
+/// Flattens world-space keypoint positions into `n_joints * 3` floats (3 per
+/// keypoint), matching how sequences of observations are flattened
+/// elsewhere in this bridge (see this module's top-level docs).
+fn flatten_positions(positions: &[nalgebra::Vector3<f32>]) -> Vec<f32> {
+    positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect()
+}
+
 impl Solver {
     fn solve(
         &mut self,
@@ -576,6 +592,9 @@ impl Solver {
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
+    }
+    fn last_fk_positions(&self) -> Vec<f32> {
+        flatten_positions(self.inner.last_fk_positions())
     }
 }
 
@@ -634,6 +653,9 @@ impl SequenceSolver {
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
+    }
+    fn last_fk_positions(&self) -> Vec<f32> {
+        flatten_positions(self.inner.last_fk_positions())
     }
 }
 

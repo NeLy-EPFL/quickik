@@ -71,6 +71,30 @@ Assuming you already have the whole recording upfront, the example below solves 
     !!! note "Explicit `n_joints` in C++"
         `solve_sequence` needs `n_joints` explicitly in C++, since `flattened_recording` is one long slice rather than a list of per-frame slices – C++ has no nested-container binding across the FFI – so `n_joints` is the stride used to cut that one slice back into individual frames.
 
+### Checking fit quality
+
+Like a plain `Solver` (see ["Checking fit quality"](single-frame.md#checking-fit-quality)), `SequenceSolver` keeps the most recently converged frame's world-space keypoint positions around as `last_fk_positions`. To get every frame's fitted positions from a whole-sequence call, use `solve_sequence_with_fk` instead of `solve_sequence`: same inputs, but it additionally returns each frame's keypoint positions alongside its converged pose.
+
+=== "Rust"
+
+    ```rust
+    let results = seq_solver.solve_sequence_with_fk(&recording);
+    for (pose, fk_positions) in &results {
+        println!("{:?}", fk_positions);
+    }
+    ```
+
+=== "Python"
+
+    ```python
+    poses, fk_positions = seq_solver.solve_sequence_with_fk(positions, weights)
+    print(fk_positions.shape)  # (n_frames, n_joints, 3)
+    ```
+
+=== "C++"
+
+    C++ doesn't have a `solve_sequence_with_fk` (its `StateList` return type would need a matching flattened-positions companion type, which isn't worth the added surface for this getting-started guide) -- read `last_fk_positions()` after `solve_frame` instead, one frame at a time.
+
 ## Solving long sequences in parallel
 
 A plain `SequenceSolver` only ever uses one thread, and each frame has to finish before the next can start, since every frame warm-starts from the last. For a single long recording, `solve_sequence_segmented_parallel` gets around that: it splits the recording into segments with small overlaps, solves each on its own worker thread (cold-started at the segment's first frame, then warm-started within it), and stitches the results back into one continuous sequence. The overlap does double duty: it gives every segment after the first a running start, since its own copy of the shared frames gets to warm up before it reaches genuinely new ones, and it doubles as a consistency check, since two independent solves of the same frames should agree closely. When they don't, by more than `overlap_tolerance`, a warning is logged and the earlier segment's version is kept.

@@ -1,6 +1,7 @@
 //! This module implements a Gauss-Newton solver for inverse kinematics.
 
-use nalgebra::{DMatrix, DVector, Vector3};
+use nalgebra::linalg::Cholesky;
+use nalgebra::{DMatrix, DVector, Dyn, Vector3};
 
 use crate::body_plan::KinematicTree;
 use crate::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
@@ -89,6 +90,22 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     /// state_dim), same compact-column convention as `jacobian_buffer`. Only
     /// written/read for `Position2D` observations.
     jacobian_2d_buffer: DMatrix<f32>,
+    /// Snapshot of `workspace.kpt_jacobian` from the last iteration run by
+    /// [`solve_with_grad`](Self::solve_with_grad); unused (and left stale) by
+    /// plain [`solve`](Self::solve). See that method's docs for exactly which
+    /// pose this is linearized at.
+    last_jacobian: DMatrix<f32>,
+    /// Raw Cholesky factor L (lower-triangular, `jtj = L L^T`) from the last
+    /// iteration run by [`solve_with_grad`](Self::solve_with_grad), updated in
+    /// place via `copy_from` each time (no allocation). Stored as a plain
+    /// matrix rather than a [`Cholesky`] because `Cholesky` has no in-place
+    /// update API of its own; [`last_cholesky`](Self::last_cholesky) wraps it
+    /// into one on demand. Only meaningful when `last_cholesky_valid` is
+    /// `true`; unused (and left stale) by plain [`solve`](Self::solve).
+    last_cholesky_l: DMatrix<f32>,
+    /// Whether `last_cholesky_l` is from a positive-definite iteration. See
+    /// [`last_cholesky`](Self::last_cholesky)'s docs.
+    last_cholesky_valid: bool,
     pub config: SolverConfig<M>,
 }
 
@@ -120,6 +137,9 @@ impl<M: Mapper3Dto2D> Solver<M> {
             delta: DVector::zeros(state_dim),
             jacobian_buffer: DMatrix::zeros(3, state_dim),
             jacobian_2d_buffer: DMatrix::zeros(2, state_dim),
+            last_jacobian: DMatrix::zeros(3 * kinematic_tree.n_joints(), state_dim),
+            last_cholesky_l: DMatrix::zeros(state_dim, state_dim),
+            last_cholesky_valid: false,
             config,
         }
     }
@@ -130,6 +150,66 @@ impl<M: Mapper3Dto2D> Solver<M> {
     ///
     /// [`Missing`]: crate::observation::KeypointObservation::Missing
     pub fn solve(&mut self, state: &mut State, observations: &[KeypointObservation]) {
+        self.solve_impl(state, observations, false);
+    }
+
+    /// Same as [`solve`](Self::solve), but additionally snapshots the
+    /// linearization of the last Gauss-Newton iteration actually run (whether
+    /// that's because `n_iterations` was reached or because the step
+    /// converged early), for use in implicit differentiation of the solve:
+    /// - [`last_jacobian`](Self::last_jacobian): the keypoint-position
+    ///   Jacobian at that iteration's pose (i.e. *before* that iteration's own
+    ///   update step -- since the update is small at convergence, this is a
+    ///   close approximation of the Jacobian at the returned, converged pose).
+    /// - [`last_cholesky`](Self::last_cholesky): the Cholesky factorization of
+    ///   that iteration's `jtj` (the Gauss-Newton normal-equations matrix,
+    ///   including damping and the neutral-pose prior, exactly as solved).
+    ///
+    /// Returns whether that last iteration's normal equations were
+    /// positive-definite; if `false`, [`last_cholesky`](Self::last_cholesky)
+    /// is `None` and gradients can't be computed from this solve.
+    pub fn solve_with_grad(
+        &mut self,
+        state: &mut State,
+        observations: &[KeypointObservation],
+    ) -> bool {
+        self.solve_impl(state, observations, true);
+        self.last_cholesky_valid
+    }
+
+    /// See [`last_jacobian`](Self::solve_with_grad)'s docs. Only meaningful
+    /// after a call to [`solve_with_grad`](Self::solve_with_grad).
+    pub fn last_jacobian(&self) -> &DMatrix<f32> {
+        &self.last_jacobian
+    }
+
+    /// See [`solve_with_grad`](Self::solve_with_grad)'s docs. Wraps the
+    /// internally-tracked factor into a [`Cholesky`] on demand, which costs
+    /// one allocation -- call it once per solve rather than repeatedly. Only
+    /// meaningful after a call to [`solve_with_grad`](Self::solve_with_grad);
+    /// returns `None` if that solve's last iteration wasn't
+    /// positive-definite.
+    pub fn last_cholesky(&self) -> Option<Cholesky<f32, Dyn>> {
+        self.last_cholesky_valid
+            .then(|| Cholesky::pack_dirty(self.last_cholesky_l.clone()))
+    }
+
+    /// World-space keypoint positions at the pose from the most recent
+    /// [`solve`](Self::solve)/[`solve_with_grad`](Self::solve_with_grad) call,
+    /// indexed by joint/keypoint index (matching `KinematicTree`'s own joint
+    /// order, same convention as [`last_jacobian`](Self::last_jacobian)).
+    /// Always up to date with the returned `state`, unlike `last_jacobian`/
+    /// `last_cholesky` which are linearized slightly before convergence.
+    pub fn last_fk_positions(&self) -> &[Vector3<f32>] {
+        &self.workspace.kpt_positions
+    }
+
+    fn solve_impl(
+        &mut self,
+        state: &mut State,
+        observations: &[KeypointObservation],
+        track_grad: bool,
+    ) {
         assert_eq!(
             observations.len(),
             state.kinematic_tree.n_joints(),
@@ -137,7 +217,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         );
 
         let state_dim = state.state_dim();
-        for _ in 0..self.config.n_iterations {
+        for iteration_idx in 0..self.config.n_iterations {
             evaluate_fwdkin(&mut self.workspace, state);
 
             // See the matching comment in forward.rs: `Matrix::fill` is ~60x
@@ -196,36 +276,79 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 self.jtj[(i, i)] += self.config.damping * self.jtj[(i, i)].max(1.0);
             }
 
-            // The Cholesky decomposer requires owning the matrix by value
-            // (because it runs memory-optimized in-place operations). However,
-            // self.jtj is passed via self which is given by mutable reference,
-            // so Rust doesn't allow us to move it out of self.
-            // Solution: Replace self.jtj with an empty placeholder matrix, move
-            // the real jtj matrix into the Cholesky decomposer, and then move
-            // the result back to self.jtj.
-            // Because Cholesky does in-place math, the owned "jtj" matrix
-            // contains garbage value after decomposition. But this is fine
-            // because jtj is zeroed at the start of each solver iteration.
-            let jtj_owned = std::mem::replace(&mut self.jtj, DMatrix::zeros(0, 0));
-            match nalgebra::linalg::Cholesky::new(jtj_owned) {
-                Some(chol) => {
-                    self.delta.copy_from(&self.jtr);
-                    chol.solve_mut(&mut self.delta);
-                    self.jtj = chol.unpack();
-                }
-                None => {
-                    // Not positive-definite (numerically unstable): no
-                    // update this iteration. This can happen when no keypoint
-                    // is observed (even if some are observed, the root might
-                    // be underconstrained and matches the targets exactly).
-                    self.jtj = DMatrix::zeros(state_dim, state_dim);
-                    self.delta.as_mut_slice().fill(0.0);
-                }
-            };
-            state.apply_delta(&self.delta);
+            let chol_valid = self.solve_normal_equations(state_dim);
 
-            if self.has_converged(&self.delta) {
+            // Whether this is the last iteration `solve_impl` will run: either
+            // it's the last one `n_iterations` allows, or `is_converged` is
+            // about to `break` the loop below anyway. Deferring the J/L
+            // snapshot until this is known (rather than re-snapshotting on
+            // every iteration and letting all but the last get overwritten)
+            // means it only runs once per call, regardless of how many
+            // iterations that call takes.
+            let is_converged = self.has_converged(&self.delta);
+            let is_last_iteration = is_converged || iteration_idx == self.config.n_iterations - 1;
+            if track_grad && is_last_iteration {
+                self.last_jacobian.copy_from(&self.workspace.kpt_jacobian);
+                self.last_cholesky_valid = chol_valid;
+                if chol_valid {
+                    self.last_cholesky_l.copy_from(&self.jtj);
+                }
+            }
+
+            // Apply state update
+            state.apply_delta(&self.delta);
+            if is_converged {
                 break;
+            }
+        }
+
+        // `evaluate_fwdkin` above runs at the *start* of each iteration
+        // (before that iteration's `state.apply_delta`), so after the loop,
+        // `self.workspace.kpt_positions` reflects the pose *before* the last
+        // update was applied -- one step stale relative to the `state`
+        // actually returned to the caller. Run it once more, unconditionally
+        // (including when `n_iterations == 0`), so `last_fk_positions`
+        // matches the returned `state` exactly. This doesn't touch
+        // `last_jacobian`/`last_cholesky`, which are already snapshotted
+        // above, before this extra call.
+        evaluate_fwdkin(&mut self.workspace, state);
+    }
+
+    /// Solves the current `jtj`/`jtr` normal equations into `self.delta` via
+    /// Cholesky decomposition. Returns whether `jtj` was positive-definite;
+    /// if not, `self.delta` is set to all zeros (no update this iteration --
+    /// this can happen when no keypoint is observed, or when the root is
+    /// underconstrained and already matches the targets exactly).
+    fn solve_normal_equations(&mut self, state_dim: usize) -> bool {
+        // The Cholesky decomposer requires owning the matrix by value
+        // (because it runs memory-optimized in-place operations). However,
+        // self.jtj is passed via self which is given by mutable reference,
+        // so Rust doesn't allow us to move it out of self.
+        // Solution: Replace self.jtj with an empty placeholder matrix, move
+        // the real jtj matrix into the Cholesky decomposer, and then move
+        // the result back to self.jtj.
+        // Because Cholesky does in-place math, the owned "jtj" matrix
+        // contains garbage value after decomposition. But this is fine
+        // because jtj is zeroed at the start of each solver iteration.
+        let jtj_owned = std::mem::replace(&mut self.jtj, DMatrix::zeros(0, 0));
+        match Cholesky::new(jtj_owned) {
+            Some(chol) => {
+                self.delta.copy_from(&self.jtr);
+                chol.solve_mut(&mut self.delta);
+                // `unpack` doesn't allocate: it just hands back the same
+                // owned matrix (moved into `Cholesky::new` above) with its
+                // upper triangle zeroed.
+                self.jtj = chol.unpack();
+                true
+            }
+            None => {
+                // Not positive-definite (numerically unstable): no update
+                // this iteration. This can happen when no keypoint is
+                // observed (even if some are observed, the root might be
+                // underconstrained and matches the targets exactly).
+                self.jtj = DMatrix::zeros(state_dim, state_dim);
+                self.delta.as_mut_slice().fill(0.0);
+                false
             }
         }
     }

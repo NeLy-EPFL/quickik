@@ -79,6 +79,22 @@ def test_recovers_pose_from_3d_observations(tree):
     assert state.dof_angles[1] == pytest.approx(0.3, abs=1e-3)
 
 
+def test_solver_last_fk_positions_matches_recovered_pose(tree):
+    """last_fk_positions should reflect the exact same pose reported in
+    dof_angles (see this feature's design discussion: forward kinematics
+    isn't otherwise exposed to Python, so this is the only way to sanity
+    check fit quality without recomputing it by hand)."""
+    state = quickik.State.neutral_pose(tree)
+    solver = quickik.Solver(tree, no_prior_config())
+    solver.solve(state, observations_for(0.4, 0.3))
+
+    expected = two_link_positions(0.4, 0.3)
+    actual = solver.last_fk_positions
+    assert actual.shape == (tree.n_joints, 3)
+    for a, e in zip(actual, expected, strict=True):
+        assert a == pytest.approx(e, abs=1e-2)
+
+
 def test_position2d_observation_on_mapperless_solver_raises(tree):
     state = quickik.State.neutral_pose(tree)
     observations = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints)]
@@ -257,6 +273,34 @@ def test_solve_sequence_returns_one_state_per_frame(tree):
     last = states[2]
     assert last.dof_angles[0] == pytest.approx(0.3, abs=1e-2)
     assert last.dof_angles[1] == pytest.approx(0.15, abs=1e-2)
+
+
+def test_sequence_solver_last_fk_positions_matches_state(tree):
+    solver = quickik.SequenceSolver(tree, no_prior_config())
+    solver.solve_frame(observations_for(0.4, 0.3))
+
+    expected = two_link_positions(0.4, 0.3)
+    actual = solver.last_fk_positions
+    assert actual.shape == (tree.n_joints, 3)
+    for a, e in zip(actual, expected, strict=True):
+        assert a == pytest.approx(e, abs=1e-2)
+
+
+def test_solve_sequence_with_fk_matches_solve_sequence(tree):
+    angles = [(0.1, 0.05), (0.2, 0.1), (0.3, 0.15)]
+    positions = np.array([two_link_positions(a1, a2) for a1, a2 in angles], dtype=np.float32)
+    weights = np.ones((len(angles), tree.n_joints), dtype=np.float32)
+
+    plain_solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    plain_states = plain_solver.solve_sequence(positions, weights)
+
+    fk_solver = quickik.SequenceSolver(tree, quickik.SolverConfig())
+    states, fk_positions = fk_solver.solve_sequence_with_fk(positions, weights)
+
+    assert len(states) == len(plain_states)
+    assert fk_positions.shape == (len(angles), tree.n_joints, 3)
+    for state, plain_state in zip(states, plain_states, strict=True):
+        assert state.dof_angles == pytest.approx(plain_state.dof_angles)
 
 
 def test_solve_sequence_casts_float64_arrays_to_float32(tree):

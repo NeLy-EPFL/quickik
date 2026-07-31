@@ -125,3 +125,30 @@ Continuing the example above with three observed keypoint positions:
 The `solve` method updates the `State` object in place, so the fitted joint angles and root pose are read back off the same state object afterward.
 
 `Missing` keypoints don't just drop out of the fit: with nothing pulling them away, the solve falls back on the solver configuration's neutral-pose prior for any DOF only those keypoints could otherwise constrain. A body with everything missing settles at its neutral pose rather than an arbitrary one.
+
+## Checking fit quality
+
+Forward kinematics itself isn't exposed as a standalone call, but every solver keeps the world-space keypoint positions from its most recent `solve` call around, in the same joint order as the observations you passed in. This is the easiest way to check fit quality (e.g. residual error against your original observations) without recomputing forward kinematics yourself.
+
+=== "Rust"
+
+    ```rust
+    for pos in solver.last_fk_positions() {
+        println!("{:?}", pos);
+    }
+    ```
+
+=== "Python"
+
+    ```python
+    print(solver.last_fk_positions)  # (n_joints, 3) NumPy array
+    ```
+
+=== "C++"
+
+    ```cpp
+    auto fk_positions = solver->last_fk_positions();  // flat, n_joints * 3 long
+    for (size_t k = 0; k < tree->n_joints(); k++) {
+        std::cout << fk_positions[k * 3] << " " << fk_positions[k * 3 + 1] << " " << fk_positions[k * 3 + 2] << std::endl;
+    }
+    ```

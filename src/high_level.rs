@@ -1,11 +1,18 @@
 //! High-level APIs for a single tracked body over consecutive frames
-//! ([`SequenceSolver`]), and for one long sequence solved in parallel via
-//! overlapping segments ([`solve_sequence_segmented_parallel`]). For
-//! single-frame or other specialized use cases, use [`Solver`] directly.
+//! ([`SequenceSolver`]), for one long sequence solved in parallel via
+//! overlapping segments ([`solve_sequence_segmented_parallel`]), and for a
+//! batch of independent frames solved in parallel with their solve-time
+//! linearization retained for gradient tracking
+//! ([`solve_batch_with_grad`]). For single-frame or other specialized use
+//! cases, use [`Solver`] directly.
 //!
 //! [`Solver`]: crate::solver::Solver
 
 use std::sync::Arc;
+
+use nalgebra::linalg::Cholesky;
+use nalgebra::{DMatrix, UnitQuaternion, Vector3};
+use rayon::prelude::*;
 
 use crate::body_plan::KinematicTree;
 use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
@@ -40,6 +47,30 @@ impl<M: Mapper3Dto2D> SequenceSolver<M> {
         sequence
             .iter()
             .map(|observations| self.solve_frame(observations).clone())
+            .collect()
+    }
+
+    /// World-space keypoint positions at the most recently converged pose
+    /// (see [`Solver::last_fk_positions`]), indexed by joint/keypoint index
+    /// in `KinematicTree` joint order.
+    pub fn last_fk_positions(&self) -> &[Vector3<f32>] {
+        self.solver.last_fk_positions()
+    }
+
+    /// Same as [`solve_sequence`](Self::solve_sequence), but additionally
+    /// returns each frame's forward-kinematics keypoint positions (world
+    /// space, in `KinematicTree` joint order) alongside its converged state.
+    pub fn solve_sequence_with_fk(
+        &mut self,
+        sequence: &[Vec<KeypointObservation>],
+    ) -> Vec<(State, Vec<Vector3<f32>>)> {
+        sequence
+            .iter()
+            .map(|observations| {
+                let state = self.solve_frame(observations).clone();
+                let fk = self.solver.last_fk_positions().to_vec();
+                (state, fk)
+            })
             .collect()
     }
 }
@@ -233,6 +264,164 @@ fn stitch_overlapping_segments(
             }
         }
         result.extend(segment.into_iter().skip(overlap_len));
+    }
+    result
+}
+
+/// Every [`solve_batch_with_grad`] item's converged pose and linearization,
+/// as a struct of batched arrays (rather than a `Vec` of per-item structs) to
+/// match how a batch is naturally represented on the PyTorch side.
+pub struct BatchedResultWithGrad {
+    /// `(batch_size)`, each of length `n_dofs`. DOF order matches the
+    /// `KinematicTree`'s own (`State::dof_angles`'s order): unlike keypoints
+    /// (whose observations typically come from an external, already-fixed-order
+    /// source, e.g. a pretrained detector, that has no reason to match the
+    /// tree's own joint order), DOF order is already fully caller-controlled
+    /// -- it's exactly the order joints and their DOFs were listed in when
+    /// the [`KinematicTree`] was built -- so there's no equivalent
+    /// DOF-ordering parameter to reorder this by.
+    pub joint_angles: Vec<Vec<f32>>,
+    /// `(batch_size)` free-floating root positions.
+    pub base_pos: Vec<Vector3<f32>>,
+    /// `(batch_size)` free-floating root orientations.
+    pub base_quat: Vec<UnitQuaternion<f32>>,
+    /// `(batch_size)`, each item's keypoint-position Jacobian (see
+    /// [`Solver::last_jacobian`]). Rows/columns are in the `KinematicTree`'s
+    /// internal keypoint/state order, *not* `keypoints_order`: nothing
+    /// outside this crate reads these entries directly, so only
+    /// `observations_array` (in) and `joint_angles` (out) need reordering;
+    /// see [`solve_batch_with_grad`]'s docs.
+    pub jacobian: Vec<DMatrix<f32>>,
+    /// `(batch_size)`, each item's Cholesky factor L (see
+    /// [`Solver::last_cholesky`]). `None` if that item's last iteration
+    /// wasn't positive-definite (gradients can't be computed for it).
+    pub cholesky_l: Vec<Option<Cholesky<f32, nalgebra::Dyn>>>,
+}
+
+/// Resolves `keypoints_order` (external keypoint axis order, given by joint
+/// name) into `keypoint_to_joint_idx[i]` = the internal joint/keypoint index
+/// that `observations_array`'s keypoint axis position `i` corresponds to.
+/// Panics unless `keypoints_order` names every joint in `kinematic_tree`
+/// exactly once.
+fn resolve_keypoint_order(
+    kinematic_tree: &KinematicTree,
+    keypoints_order: &[String],
+) -> Vec<usize> {
+    let n_joints = kinematic_tree.n_joints();
+    assert_eq!(
+        keypoints_order.len(),
+        n_joints,
+        "keypoints_order.len() must equal kinematic_tree.n_joints()"
+    );
+
+    let name_to_idx: std::collections::HashMap<&str, usize> = kinematic_tree
+        .joints
+        .iter()
+        .enumerate()
+        .map(|(idx, joint)| (joint.name.as_str(), idx))
+        .collect();
+    assert_eq!(
+        name_to_idx.len(),
+        n_joints,
+        "kinematic_tree has duplicate joint names, so keypoints_order can't \
+         unambiguously refer to them by name"
+    );
+
+    let mut joint_seen = vec![false; n_joints];
+    keypoints_order
+        .iter()
+        .map(|name| {
+            let joint_idx = *name_to_idx
+                .get(name.as_str())
+                .unwrap_or_else(|| panic!("keypoints_order: unknown joint name '{name}'"));
+            assert!(
+                !joint_seen[joint_idx],
+                "keypoints_order: joint '{name}' listed more than once"
+            );
+            joint_seen[joint_idx] = true;
+            joint_idx
+        })
+        .collect()
+}
+
+/// Solves a batch of fully independent sets of keypoint observations in
+/// parallel via rayon, each starting from `kinematic_tree`'s neutral pose
+/// with its own freshly constructed [`Solver`] (so batch items never contend
+/// over solver-internal buffers), and returns every item's converged pose and
+/// linearization for later implicit differentiation of the solve. Unlike
+/// [`solve_sequence_segmented_parallel`], batch items don't warm-start or
+/// stitch against each other; use [`SequenceSolver`] instead if consecutive
+/// frames should share a running pose.
+///
+/// `kinematic_tree` must be free-floating (not
+/// [`fixed_base`](KinematicTree::fixed_base)), since [`BatchedResultWithGrad`]
+/// always reports `base_pos`/`base_quat`.
+///
+/// `keypoints_order[i]` is the joint name (matching [`Joint::name`]) that
+/// `observations_array`'s keypoint axis position `i` corresponds to; every
+/// joint in `kinematic_tree` must appear in it exactly once.
+/// `observations_array` is `(batch_size)`, each a `Vec<KeypointObservation>`
+/// of length `n_joints` given in that same order (*not* the `KinematicTree`'s
+/// internal joint order).
+///
+/// [`Joint::name`]: crate::body_plan::Joint::name
+pub fn solve_batch_with_grad<M: Mapper3Dto2D + Sync>(
+    kinematic_tree: &Arc<KinematicTree>,
+    solver_config: SolverConfig<M>,
+    keypoints_order: &[String],
+    observations_array: &[Vec<KeypointObservation>],
+) -> BatchedResultWithGrad {
+    assert!(
+        !kinematic_tree.fixed_base,
+        "solve_batch_with_grad requires a free-floating-base tree: base_pos/base_quat \
+         have no meaning for a fixed-base tree"
+    );
+    let n_joints = kinematic_tree.n_joints();
+    let keypoint_to_joint_idx = resolve_keypoint_order(kinematic_tree, keypoints_order);
+
+    type PerItemResult = (State, DMatrix<f32>, Option<Cholesky<f32, nalgebra::Dyn>>);
+    let per_item_results: Vec<PerItemResult> = observations_array
+        .par_iter()
+        .map(|external_order_observations| {
+            assert_eq!(
+                external_order_observations.len(),
+                n_joints,
+                "every observations_array item must have length kinematic_tree.n_joints()"
+            );
+            // Remap from the external keypoints_order into the tree's
+            // internal joint order: cheap (O(n_joints)) since it's just this
+            // one item's small observation list, not the Jacobian/Cholesky
+            // matrices below.
+            let mut internal_order_observations = vec![KeypointObservation::Missing; n_joints];
+            for (external_idx, &joint_idx) in keypoint_to_joint_idx.iter().enumerate() {
+                internal_order_observations[joint_idx] = external_order_observations[external_idx];
+            }
+
+            let mut solver = Solver::new(kinematic_tree, solver_config);
+            let mut state = State::neutral_pose(Arc::clone(kinematic_tree));
+            solver.solve_with_grad(&mut state, &internal_order_observations);
+            (
+                state,
+                solver.last_jacobian().clone(),
+                solver.last_cholesky(),
+            )
+        })
+        .collect();
+
+    let batch_size = per_item_results.len();
+    let mut result = BatchedResultWithGrad {
+        joint_angles: Vec::with_capacity(batch_size),
+        base_pos: Vec::with_capacity(batch_size),
+        base_quat: Vec::with_capacity(batch_size),
+        jacobian: Vec::with_capacity(batch_size),
+        cholesky_l: Vec::with_capacity(batch_size),
+    };
+    for (state, jacobian, cholesky_l) in per_item_results {
+        result.joint_angles.push(state.dof_angles);
+        result.base_pos.push(state.root_pos);
+        result.base_quat.push(state.root_rot);
+        result.jacobian.push(jacobian);
+        result.cholesky_l.push(cholesky_l);
     }
     result
 }
