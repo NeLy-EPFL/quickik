@@ -73,9 +73,9 @@ BODIES = {
         "padding": 1.02,
         "up_reference": None,
         "missing_keypoints": [],
-        # 10x SolverConfig's own default (1e-3), matching G1's own weight
-        # below and render_video_2d.WEIGHT_2D_XYVIEW -- same magnitude for
-        # consistency across all three fits in this file/its companion.
+        # 10x Solver's own default neutral_weight (1e-3), matching G1's own
+        # weight below and render_video_2d.WEIGHT_2D_XYVIEW: same magnitude
+        # for consistency across all three fits in this file/its companion.
         "weight": 0.01,
         # The root ("thorax") only fans out to each leg's first joint; drawing
         # those 6 bones makes the thorax look like it has long spokes running
@@ -133,8 +133,8 @@ BODIES = {
         # With the wrist DOFs unobserved, they're still indirectly driven by
         # the hand's own position residual (they're its ancestors in the
         # chain), and the whole shoulder+elbow+wrist assembly is a redundant
-        # manipulator for that single 3D target -- with only
-        # SolverConfig::default()'s weak 1e-3 weight pulling toward neutral,
+        # manipulator for that single 3D target: with only
+        # Solver's default weak 1e-3 neutral_weight pulling toward neutral,
         # the solver was consistently using the wrist as free self-motion to
         # (partly) compensate for the arm's coarse rescale mismatch, landing
         # on a stable but visually wrong ~50-degree wrist bend every frame.
@@ -210,38 +210,31 @@ def forward_kinematics_full(joints, dof_offsets, dof_angles, root_pos, root_rot_
     return world_pos
 
 
-def build_observations(target_ego, missing_indices=frozenset()):
-    obs = [quickik.KeypointObservation.missing()]
-    for i, p in enumerate(target_ego):
-        obs.append(
-            quickik.KeypointObservation.missing()
-            if i in missing_indices
-            else quickik.KeypointObservation.position_3d(list(p), 1.0)
-        )
-    return obs
-
-
 def solve_sequence(tree, fixtures, missing_keypoints=(), weight=None):
     """Warm-started solve over `native_rate_frames`, exactly like the
     throughput benchmark (see `../quickik_python/bench.py`'s
-    `bench_solve_sequence`) -- returns one solved `State` per frame.
-    `missing_keypoints` (body-plan joint names) are given a `Missing`
-    observation instead of their fixture target every frame; see `BODIES`'
+    `bench_solve_sequence`); returns one `SolverResult` per frame.
+    `missing_keypoints` (body-plan joint names) get weight 0 (treated as
+    missing) instead of their fixture target every frame; see `BODIES`'
     own `missing_keypoints` comment for why G1 needs this. `weight`
-    overrides `SolverConfig`'s own default when given; see `BODIES`' own
-    comment for why G1 needs a stronger one."""
+    overrides the solver's default `neutral_weight` when given; see `BODIES`'
+    own comment for why G1 needs a stronger one."""
     leg_joint_names = fixtures["leg_joint_names"]
     missing_indices = {leg_joint_names.index(name) for name in missing_keypoints}
-    config = (
-        quickik.SolverConfig()
-        if weight is None
-        else quickik.SolverConfig(neutral_weight=weight)
-    )
-    seq = quickik.SequenceSolver(tree, config)
-    return [
-        seq.solve_frame(build_observations(f["target_ego"], missing_indices))
-        for f in fixtures["native_rate_frames"]
-    ]
+    kwargs = {} if weight is None else {"neutral_weight": weight}
+    seq = quickik.SequenceSolver(tree, **kwargs)
+
+    frames = fixtures["native_rate_frames"]
+    n_joints = tree.n_joints
+    positions = np.zeros((len(frames), n_joints, 3), dtype=np.float32)
+    weights = np.ones((len(frames), n_joints), dtype=np.float32)
+    weights[:, 0] = 0.0  # root has no keypoint of its own
+    for t, f in enumerate(frames):
+        for i, p in enumerate(f["target_ego"]):
+            positions[t, i + 1] = p
+            if i in missing_indices:
+                weights[t, i + 1] = 0.0
+    return seq.solve(positions, weights)
 
 
 def up_alignment_rotation(fitted_frames, full_name_idx, up_reference):

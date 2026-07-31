@@ -1,13 +1,13 @@
-//! Weak-scaling sweep for `solve_sequence_segmented_parallel`: fixes
+//! Weak-scaling sweep for `SequenceSolver::solve_segments_parallel`: fixes
 //! frames-per-worker at `quickik_benchmark::perf::SEGMENT_LEN` (one segment
 //! per worker) and scales total frames with `n_workers`, so the amount of
 //! work per worker stays constant as `n_workers` grows. Ideal weak scaling
 //! keeps `elapsed` constant across the sweep.
 //!
-//! `n_workers` is passed explicitly via `ParallelSolveConfig::n_workers` (see
-//! `../README.md`), so -- unlike before that field existed -- this no longer
-//! needs `taskset` to vary the thread count; one run of this binary sweeps
-//! 1/2/4/8/16 workers itself. Writes `../plot/results/quickik-scaling.json`
+//! `n_workers` is passed explicitly to `solve_segments_parallel` (see
+//! `../README.md`), so this doesn't need `taskset` to vary the thread count;
+//! one run of this binary sweeps 1/2/4/8/16 workers itself. Writes
+//! `../plot/results/quickik-scaling.json`
 //! (a JSON array, not the single-object shape `write_results_json` in
 //! `../quickik_rust/src/perf.rs` builds for the other benchmarks, since this
 //! is a sweep over several data points rather than one result) for

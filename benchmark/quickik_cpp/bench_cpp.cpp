@@ -22,6 +22,13 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+// Defaults matching the old `SolverConfig::default()`.
+constexpr size_t kNIterations = 10;
+constexpr float kNeutralWeight = 1e-3f;
+constexpr float kPositionTolerance = 1e-3f;
+constexpr float kAngleTolerance = 1e-3f;
+constexpr float kDamping = 1e-6f;
+
 // One body to benchmark: a name (used for the results filename and printed
 // headers) plus the paths to its body plan and fixtures.
 struct BodySpec {
@@ -56,10 +63,10 @@ rust::Slice<const quickik::KeypointObservation> slice_of(const std::vector<quick
 
 std::vector<float> to_std_vec(const rust::Vec<float> &v) { return std::vector<float>(v.begin(), v.end()); }
 
-std::vector<Vec3> solved_keypoints(const BodyPlan &plan, const quickik::State &state) {
-  auto p = state.root_pos();
-  auto q = state.root_rot();
-  return forward_kinematics(plan, to_std_vec(state.dof_angles()), Vec3{p[0], p[1], p[2]}, Quat{q[0], q[1], q[2], q[3]});
+std::vector<Vec3> solved_keypoints(const BodyPlan &plan, const quickik::SolverResult &result) {
+  auto &p = result.root_pos;
+  auto &q = result.root_rot;
+  return forward_kinematics(plan, to_std_vec(result.dof_angles), Vec3{p[0], p[1], p[2]}, Quat{q[0], q[1], q[2], q[3]});
 }
 
 // a has one entry per joint (root included); b covers only leg joints (root
@@ -95,11 +102,10 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
   std::printf("== Synthetic exact-fit frames (bug hunt) ==\n");
   std::printf("%6s %16s %16s %18s %20s\n", "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)");
 
-  quickik::SolverConfig default_config = quickik::default_solver_config();
-  quickik::SolverConfig zero_reg_config = default_config;
-  zero_reg_config.neutral_weight = 0.0f;
-  auto default_solver = quickik::new_solver(*tree, default_config, quickik::no_mapper());
-  auto zero_reg_solver = quickik::new_solver(*tree, zero_reg_config, quickik::no_mapper());
+  auto default_solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+                                             kPositionTolerance, kAngleTolerance, kDamping);
+  auto zero_reg_solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+                                              kAngleTolerance, kDamping);
 
   size_t i = 0;
   for (auto &frame : fixtures["synthetic_frames"].as_array()) {
@@ -111,14 +117,14 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
     auto obs = build_observations(target);
 
     auto state = quickik::state_neutral_pose(*tree);
-    default_solver->solve(*state, slice_of(obs));
-    auto solved_pts = solved_keypoints(plan, *state);
+    auto result = default_solver->solve(*state, slice_of(obs), false, false);
+    auto solved_pts = solved_keypoints(plan, result);
     auto [rms, max] = residual_stats(solved_pts, target);
-    float angle_err = angle_error_deg(to_std_vec(state->dof_angles()), ground_truth);
+    float angle_err = angle_error_deg(to_std_vec(result.dof_angles), ground_truth);
 
     auto state0 = quickik::state_neutral_pose(*tree);
-    zero_reg_solver->solve(*state0, slice_of(obs));
-    float angle_err0 = angle_error_deg(to_std_vec(state0->dof_angles()), ground_truth);
+    auto result0 = zero_reg_solver->solve(*state0, slice_of(obs), false, false);
+    float angle_err0 = angle_error_deg(to_std_vec(result0.dof_angles), ground_truth);
 
     std::printf("%6zu %16.6f %16.6f %18.4f %20.6f\n", i, rms, max, angle_err, angle_err0);
     i++;
@@ -130,14 +136,24 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
       tree->n_dofs());
 
   std::printf("== Real mocap frames (cross-solver vs. flygym.ik) ==\n");
-  auto seq = quickik::new_sequence_solver(*tree, quickik::default_solver_config(), quickik::no_mapper());
-  std::vector<float> quickik_rms, quickik_max, cross_rms, cross_max;
   auto &real_frames = fixtures["real_frames"].as_array();
+  size_t n_joints = tree->n_joints();
+  std::vector<quickik::KeypointObservation> flat;
+  flat.reserve(real_frames.size() * n_joints);
   for (auto &frame : real_frames) {
+    auto obs = build_observations(to_vec3s(frame["target_ego"]));
+    flat.insert(flat.end(), obs.begin(), obs.end());
+  }
+  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+                                           kPositionTolerance, kAngleTolerance, kDamping);
+  auto results = seq->solve(slice_of(flat), n_joints, false, false);
+
+  std::vector<float> quickik_rms, quickik_max, cross_rms, cross_max;
+  for (size_t idx = 0; idx < real_frames.size(); idx++) {
+    auto &frame = real_frames[idx];
     auto target = to_vec3s(frame["target_ego"]);
-    auto obs = build_observations(target);
-    auto state = seq->solve_frame(slice_of(obs));
-    auto solved_pts = solved_keypoints(plan, *state);
+    auto result = results->at(idx);
+    auto solved_pts = solved_keypoints(plan, result);
 
     auto [rms, max] = residual_stats(solved_pts, target);
     quickik_rms.push_back(rms);
@@ -197,35 +213,45 @@ double elapsed_us(Clock::time_point t0) {
 // real target every call (no warm start).
 std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree> &tree,
                                                 const std::vector<quickik::KeypointObservation> &obs, int n_calls,
-                                                quickik::SolverConfig config) {
-  auto solver = quickik::new_solver(*tree, config, quickik::no_mapper());
+                                                float neutral_weight, float position_tolerance,
+                                                float angle_tolerance) {
+  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, neutral_weight, position_tolerance,
+                                     angle_tolerance, kDamping);
   for (int i = 0; i < 500; i++) {
     auto state = quickik::state_neutral_pose(*tree);
-    solver->solve(*state, slice_of(obs));
+    solver->solve(*state, slice_of(obs), false, false);
   }
   std::vector<double> samples;
   samples.reserve(n_calls);
   for (int i = 0; i < n_calls; i++) {
     auto state = quickik::state_neutral_pose(*tree);
     auto t0 = Clock::now();
-    solver->solve(*state, slice_of(obs));
+    solver->solve(*state, slice_of(obs), false, false);
     samples.push_back(elapsed_us(t0));
   }
   return samples;
 }
 
+// Single-thread sequence throughput: `SequenceSolver::solve` warm started
+// across a tiled native-rate sequence, one frame per call (the same
+// frame-by-frame interface a continuous tracking pipeline would use). A
+// second, fresh `SequenceSolver` is used for the timed pass after warming up
+// once, so the sequence's own frame-to-frame warm-starting is what's
+// measured.
 std::vector<double> bench_solve_sequence(rust::Box<quickik::KinematicTree> &tree,
-                                          const std::vector<std::vector<quickik::KeypointObservation>> &all_obs,
-                                          quickik::SolverConfig config) {
-  auto seq = quickik::new_sequence_solver(*tree, config, quickik::no_mapper());
-  for (auto &obs : all_obs) seq->solve_frame(slice_of(obs));
+                                          const std::vector<std::vector<quickik::KeypointObservation>> &all_obs) {
+  size_t n_joints = all_obs.front().size();
+  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+                                           kPositionTolerance, kAngleTolerance, kDamping);
+  for (auto &obs : all_obs) seq->solve(slice_of(obs), n_joints, false, false);
 
-  auto timed_seq = quickik::new_sequence_solver(*tree, config, quickik::no_mapper());
+  auto timed_seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+                                                 kPositionTolerance, kAngleTolerance, kDamping);
   std::vector<double> samples;
   samples.reserve(all_obs.size());
   for (auto &obs : all_obs) {
     auto t0 = Clock::now();
-    timed_seq->solve_frame(slice_of(obs));
+    timed_seq->solve(slice_of(obs), n_joints, false, false);
     samples.push_back(elapsed_us(t0));
   }
   return samples;
@@ -234,21 +260,19 @@ std::vector<double> bench_solve_sequence(rust::Box<quickik::KinematicTree> &tree
 // Frames per segment/worker, matching perf.rs exactly (same stride, so a
 // `n_segments`-worker run gets exactly one segment per worker).
 constexpr size_t kSegmentLen = 200;
-constexpr size_t kOverlapLen = 20;
 // Worker count for the main "multi-thread sequence throughput" metric,
-// passed explicitly via ParallelSolveConfig::n_workers -- fixed rather than
-// detected, matching perf.rs (see its comment).
+// passed explicitly to `solve_segments_parallel`'s `n_workers`, fixed rather
+// than detected, matching perf.rs (see its comment).
 constexpr size_t kMultithreadNThreads = 8;
 // Frame count for the single-thread sequence-throughput metric, tiled from
-// the 300-frame native-rate fixture -- larger than the multi-thread metric's
+// the 300-frame native-rate fixture: larger than the multi-thread metric's
 // per-worker segment since this one has no worker count to divide by.
 constexpr size_t kSingleThreadNFrames = 1000;
 
-size_t frames_for_n_segments(size_t n_segments) {
-  return kSegmentLen + (n_segments > 0 ? n_segments - 1 : 0) * (kSegmentLen - kOverlapLen);
-}
+size_t frames_for_n_segments(size_t n_segments) { return kSegmentLen * n_segments; }
 
-std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequence(const Json &fixtures, size_t length) {
+std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequence(const Json &fixtures,
+                                                                                   size_t length) {
   std::vector<std::vector<quickik::KeypointObservation>> base;
   for (auto &f : fixtures["native_rate_frames"].as_array()) base.push_back(build_observations(to_vec3s(f["target_ego"])));
   std::vector<std::vector<quickik::KeypointObservation>> out;
@@ -257,28 +281,25 @@ std::vector<std::vector<quickik::KeypointObservation>> tiled_native_rate_sequenc
   return out;
 }
 
+// `solve_segments_parallel` never reads or writes its `SequenceSolver`'s own
+// running state, so (unlike `bench_solve_sequence`) the same instance is
+// reused for both the warm-up and timed calls without biasing the result.
 double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &tree,
                                               const std::vector<std::vector<quickik::KeypointObservation>> &sequence,
                                               rust::isize n_workers) {
-  quickik::SolverConfig config = quickik::default_solver_config();
-  quickik::ParallelSolveConfig parallel_config{kSegmentLen, kOverlapLen, 0.05f, n_workers};
-
-  // solve_sequence_segmented_parallel takes one flat slice (see cpp/src/lib.rs's
-  // module docs); flatten once, outside the timed section.
   size_t n_joints = sequence.front().size();
   std::vector<quickik::KeypointObservation> flat;
   flat.reserve(sequence.size() * n_joints);
   for (auto &obs : sequence) flat.insert(flat.end(), obs.begin(), obs.end());
 
-  auto run_once = [&] {
-    return quickik::solve_sequence_segmented_parallel(*tree, config, slice_of(flat), n_joints, parallel_config,
-                                                       quickik::no_mapper());
-  };
+  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+                                           kPositionTolerance, kAngleTolerance, kDamping);
+  auto run_once = [&] { return seq->solve_segments_parallel(slice_of(flat), n_joints, n_workers, false, false); };
   run_once();  // warm up
   auto t0 = Clock::now();
-  auto states = run_once();
+  auto results = run_once();
   double elapsed_ms = elapsed_us(t0) / 1e3;
-  (void)states;
+  (void)results;
   return elapsed_ms;
 }
 
@@ -305,37 +326,35 @@ void write_results_json(const std::string &body, double single_frame_latency_us,
 }
 
 void run_performance(const std::string &body, rust::Box<quickik::KinematicTree> &tree, const Json &fixtures) {
-  std::printf("quickik C++-bindings benchmark (state_dim=%zu)\n\n", tree->n_dofs() + 6);
+  std::printf("quickik C++-bindings benchmark (state_dim=%zu)\n\n", tree->state_dim());
 
   // Same fixture-derived target used by the Rust and Python benchmarks, so
   // this number is directly comparable across all three.
   auto target = to_vec3s(fixtures["synthetic_frames"][0]["target_ego"]);
   auto obs = build_observations(target);
   std::printf("-- single-frame time (latency), default config (adaptive early stop) --\n");
-  double single_frame_latency_us =
-      summarize("solve()", bench_single_frame_latency(tree, obs, 10000, quickik::default_solver_config()));
+  double single_frame_latency_us = summarize(
+      "solve()",
+      bench_single_frame_latency(tree, obs, 10000, kNeutralWeight, kPositionTolerance, kAngleTolerance));
 
   // Early stop disabled (tolerances = 0), so every call runs the full
-  // n_iterations -- the worst case if a frame never converges early.
-  quickik::SolverConfig max_iterations_config = quickik::default_solver_config();
-  max_iterations_config.position_tolerance = 0.0f;
-  max_iterations_config.angle_tolerance = 0.0f;
-  std::printf("\n-- single-frame time (latency), early stop disabled (%zu iterations) --\n",
-              max_iterations_config.n_iterations);
+  // n_iterations, the worst case if a frame never converges early.
+  std::printf("\n-- single-frame time (latency), early stop disabled (%zu iterations) --\n", kNIterations);
   double single_frame_latency_max_us =
-      summarize("solve() (forced max iterations)", bench_single_frame_latency(tree, obs, 10000, max_iterations_config));
+      summarize("solve() (forced max iterations)",
+                bench_single_frame_latency(tree, obs, 10000, kNeutralWeight, 0.0f, 0.0f));
 
   std::printf("\n-- single-thread sequence throughput (native-rate frames, adaptive early stop) --\n");
   auto single_thread_sequence = tiled_native_rate_sequence(fixtures, kSingleThreadNFrames);
-  double single_thread_mean_us = summarize(
-      "SequenceSolver.solve_frame", bench_solve_sequence(tree, single_thread_sequence, quickik::default_solver_config()));
+  double single_thread_mean_us = summarize("SequenceSolver.solve", bench_solve_sequence(tree, single_thread_sequence));
 
   std::printf("\n-- multi-thread sequence throughput (segmented parallel, adaptive early stop, %zu threads) --\n",
               kMultithreadNThreads);
   auto sequence = tiled_native_rate_sequence(fixtures, frames_for_n_segments(kMultithreadNThreads));
-  double elapsed_ms = bench_multithread_sequence_throughput(tree, sequence, static_cast<rust::isize>(kMultithreadNThreads));
+  double elapsed_ms =
+      bench_multithread_sequence_throughput(tree, sequence, static_cast<rust::isize>(kMultithreadNThreads));
   double multithread_fps = sequence.size() / (elapsed_ms / 1e3);
-  std::printf("solve_sequence_segmented_parallel   n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n",
+  std::printf("solve_segments_parallel             n_frames=%-6zu elapsed=%9.3fms  throughput=%10.1f frames/s\n",
               sequence.size(), elapsed_ms, multithread_fps);
 
   write_results_json(body, single_frame_latency_us, single_frame_latency_max_us, 1e6 / single_thread_mean_us,
@@ -365,7 +384,7 @@ int main() {
     Json fixtures = parse_json_file(body.fixtures_path);
 
     std::printf("Loaded body plan: %zu joints, %zu dofs, state_dim=%zu\n\n", tree->n_joints(), tree->n_dofs(),
-                tree->n_dofs() + 6);
+                tree->state_dim());
 
     run_correctness(plan, fixtures, tree);
     run_performance(body.name, tree, fixtures);

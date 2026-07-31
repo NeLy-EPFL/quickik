@@ -66,7 +66,7 @@ FIT_2D_COLOR = G1_COLOR
 # less slack still holds every frame comfortably.
 PADDING = 1.01
 
-# 10x SolverConfig's own default (1e-3) -- same fix, and same magnitude, as
+# 10x Solver's own default neutral_weight (1e-3), same fix and magnitude as
 # render_video.BODIES["g1"]["weight"]'s: XYView leaves every keypoint's depth
 # only weakly constrained (through the kinematic chain, not observed
 # directly), so like G1's redundant wrist sub-chain, without a stronger pull
@@ -80,27 +80,22 @@ WEIGHT_2D_XYVIEW = 0.01
 FLAT_ALPHA = 0.35
 
 
-def build_observations_2d_xyview(target_ego):
-    """Same convention as `render_video.build_observations`, but reprojecting
-    each target via XYView (x/y unchanged, z dropped) into `Position2D`
-    observations -- the Python mirror of `twod.rs`'s
-    `observations_2d_xyview`."""
-    obs = [quickik.KeypointObservation.missing()]
-    for x, y, _z in target_ego:
-        obs.append(quickik.KeypointObservation.position_2d([x, y], 1.0))
-    return obs
-
-
 def solve_sequence_xyview(tree, fixtures):
     """Warm-started XYView solve, mirroring `render_video.solve_sequence` but
     with a `quickik.XYView()` mapper, 2D observations, and a stronger
-    neutral-pose prior -- see `WEIGHT_2D_XYVIEW`."""
-    config = quickik.SolverConfig(neutral_weight=WEIGHT_2D_XYVIEW)
-    seq = quickik.SequenceSolver(tree, config, mapper=quickik.XYView())
-    return [
-        seq.solve_frame(build_observations_2d_xyview(f["target_ego"]))
-        for f in fixtures["native_rate_frames"]
-    ]
+    neutral-pose prior; see `WEIGHT_2D_XYVIEW`."""
+    n_joints = tree.n_joints
+    frames = fixtures["native_rate_frames"]
+    positions = np.zeros((len(frames), n_joints, 2), dtype=np.float32)
+    weights = np.ones((len(frames), n_joints), dtype=np.float32)
+    weights[:, 0] = 0.0  # root has no keypoint of its own
+    for t, f in enumerate(frames):
+        for i, (x, y, _z) in enumerate(f["target_ego"]):
+            positions[t, i + 1] = [x, y]
+    seq = quickik.SequenceSolver(
+        tree, mapper=quickik.XYView(), neutral_weight=WEIGHT_2D_XYVIEW
+    )
+    return seq.solve(positions, weights)
 
 
 def add_floor_label(ax, x, y, z, s, size, color):
