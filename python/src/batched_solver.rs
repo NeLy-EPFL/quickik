@@ -194,13 +194,22 @@ impl BatchedSolver {
     /// `keypoints_order[i]` is the joint name (see `KinematicTree.joint_names`)
     /// that `solve`'s `positions`/`weights` keypoint axis position `i`
     /// corresponds to; every joint in `kinematic_tree` must appear in it
-    /// exactly once. Raises `ValueError` if `kinematic_tree` is fixed-base,
-    /// `keypoints_order` is malformed, or `mapper` is not a `Camera`, an
-    /// `XYView`, or `None`.
+    /// exactly once.
+    ///
+    /// `n_workers`: number of threads in `solve`'s dedicated thread pool.
+    /// A positive value is used directly, unless it exceeds the number of
+    /// available cores: it's then clipped to that count and a warning is
+    /// logged. A negative value counts backward from all available cores:
+    /// `-1` (the default) uses all, `-2` uses all but one, etc. `0` is
+    /// invalid.
+    ///
+    /// Raises `ValueError` if `kinematic_tree` is fixed-base,
+    /// `keypoints_order` is malformed, `n_workers` is `0`, or `mapper` is not
+    /// a `Camera`, an `XYView`, or `None`.
     #[new]
     #[pyo3(signature = (
         kinematic_tree, keypoints_order, mapper=None, n_iterations=10, neutral_weight=1e-3,
-        position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
+        position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6, n_workers=-1,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -212,6 +221,7 @@ impl BatchedSolver {
         position_tolerance: f32,
         angle_tolerance: f32,
         damping: f32,
+        n_workers: isize,
     ) -> PyResult<Self> {
         let mapper = extract_mapper(mapper.as_ref())?;
         let tree = &kinematic_tree.inner;
@@ -225,6 +235,7 @@ impl BatchedSolver {
                 angle_tolerance,
                 damping,
                 keypoints_order,
+                n_workers,
             )
         })?;
         Ok(BatchedSolver {

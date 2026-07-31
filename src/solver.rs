@@ -43,7 +43,7 @@ pub struct SolverResult {
 ///
 /// [`Position2D`]: crate::observation::KeypointObservation::Position2D
 pub struct Solver<M: Mapper3Dto2D = NoMapper> {
-    workspace: ForwardKinematicsWorkspace,
+    fk_workspace: ForwardKinematicsWorkspace,
     /// Cached from the kinematic tree at construction time: `0` for a
     /// fixed-base tree, [`N_ROOT_DOFS`](crate::body_plan::N_ROOT_DOFS)
     /// otherwise.
@@ -62,12 +62,12 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     delta: DVector<f32>,
     /// Per-keypoint Jacobian buffer in compact form: shape is 3 x state_dim,
     /// but nonzero columns are moved to the left, and the rest is ignored.
-    jacobian_buffer: DMatrix<f32>,
+    jacobian3d_buf: DMatrix<f32>,
     /// Per-keypoint projected-2D-Jacobian scratch buffer (shape 2 x
-    /// state_dim), same compact-column convention as `jacobian_buffer`. Only
+    /// state_dim), same compact-column convention as `jacobian3d_buf`. Only
     /// written/read for `Position2D` observations.
-    jacobian_2d_buffer: DMatrix<f32>,
-    /// Snapshot of `workspace.kpt_jacobian` from the last iteration run with
+    jacobian2d_buf: DMatrix<f32>,
+    /// Snapshot of `fk_workspace.kpt_jacobian` from the last iteration run with
     /// `with_grad: true`, reused (via `copy_from`) across calls to avoid a
     /// per-call allocation; only meaningful right after such a call, and only
     /// actually read when building that call's [`SolverResult::jacobian`].
@@ -136,7 +136,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         // Create workspace and preallocate buffers for normal equations
         let state_dim = kinematic_tree.state_dim();
         Self {
-            workspace: ForwardKinematicsWorkspace::new(kinematic_tree),
+            fk_workspace: ForwardKinematicsWorkspace::new(kinematic_tree),
             n_root_dofs: kinematic_tree.n_root_dofs(),
             neutral_joint_angles,
             dof_weight_scalers,
@@ -144,8 +144,8 @@ impl<M: Mapper3Dto2D> Solver<M> {
             jtj: DMatrix::zeros(state_dim, state_dim),
             jtr: DVector::zeros(state_dim),
             delta: DVector::zeros(state_dim),
-            jacobian_buffer: DMatrix::zeros(3, state_dim),
-            jacobian_2d_buffer: DMatrix::zeros(2, state_dim),
+            jacobian3d_buf: DMatrix::zeros(3, state_dim),
+            jacobian2d_buf: DMatrix::zeros(2, state_dim),
             last_jacobian: DMatrix::zeros(3 * kinematic_tree.n_joints(), state_dim),
             last_cholesky_l: DMatrix::zeros(state_dim, state_dim),
             last_cholesky_valid: false,
@@ -188,7 +188,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         self.solve_impl(state, observations, with_grad, with_fk);
         SolverResult {
             state: state.clone(),
-            keypoint_pos: with_fk.then(|| self.workspace.kpt_positions.clone()),
+            keypoint_pos: with_fk.then(|| self.fk_workspace.kpt_positions.clone()),
             jacobian: with_grad.then(|| self.last_jacobian.clone()),
             cholesky_l: (with_grad && self.last_cholesky_valid)
                 .then(|| Cholesky::pack_dirty(self.last_cholesky_l.clone())),
@@ -210,7 +210,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
 
         let state_dim = state.state_dim();
         for iteration_idx in 0..self.n_iterations {
-            evaluate_fwdkin(&mut self.workspace, state);
+            evaluate_fwdkin(&mut self.fk_workspace, state);
 
             // See the matching comment in forward.rs: `Matrix::fill` is ~60x
             // slower than filling the underlying contiguous storage directly.
@@ -220,21 +220,21 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 if matches!(obs, KeypointObservation::Missing) {
                     continue;
                 }
-                let relevant_idxs = &self.workspace.relevant_dof_idxs_by_joint[k];
+                let relevant_idxs = &self.fk_workspace.relevant_dof_idxs_by_joint[k];
                 // Gather this keypoint's nonzero Jacobian columns (root's
                 // N_ROOT_DOFS plus its own ancestor DOFs). Everywhere else is 0.
                 for (col, &state_idx) in relevant_idxs.iter().enumerate() {
                     for row in 0..3 {
-                        self.jacobian_buffer[(row, col)] =
-                            self.workspace.kpt_jacobian[(3 * k + row, state_idx)];
+                        self.jacobian3d_buf[(row, col)] =
+                            self.fk_workspace.kpt_jacobian[(3 * k + row, state_idx)];
                     }
                 }
                 accumulate_keypoint_residual(
                     obs,
                     &self.mapper,
-                    &self.workspace.kpt_positions[k],
-                    &self.jacobian_buffer,
-                    &mut self.jacobian_2d_buffer,
+                    &self.fk_workspace.kpt_positions[k],
+                    &self.jacobian3d_buf,
+                    &mut self.jacobian2d_buf,
                     self.joint_weight_scalers[k],
                     relevant_idxs,
                     &mut self.jtj,
@@ -280,9 +280,12 @@ impl<M: Mapper3Dto2D> Solver<M> {
             let is_converged = self.has_converged(&self.delta);
             let is_last_iteration = is_converged || iteration_idx == self.n_iterations - 1;
             if with_grad && is_last_iteration {
-                self.last_jacobian.copy_from(&self.workspace.kpt_jacobian);
+                self.last_jacobian
+                    .copy_from(&self.fk_workspace.kpt_jacobian);
                 self.last_cholesky_valid = chol_valid;
                 if chol_valid {
+                    // `self.jtj` is already the L L^T factorization because
+                    // `Cholesky::solve_mut` works in place
                     self.last_cholesky_l.copy_from(&self.jtj);
                 }
             }
@@ -306,7 +309,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
         // otherwise pure waste (see this crate's own measurements: ~3.5-10%
         // of a solve() call, depending on how many iterations actually run).
         if with_fk {
-            evaluate_fwdkin(&mut self.workspace, state);
+            evaluate_fwdkin(&mut self.fk_workspace, state);
         }
     }
 

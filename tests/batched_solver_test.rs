@@ -98,6 +98,7 @@ fn solve_matches_sequential_solve_with_grad() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
     );
     let result = batched_solver.solve(&observations_array, true, false);
 
@@ -143,6 +144,7 @@ fn with_grad_false_and_with_fk_false_leaves_optional_fields_none() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
     );
 
     let observations_array = vec![
@@ -172,6 +174,7 @@ fn with_fk_true_reports_keypoint_positions() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
     );
 
     let target_angles = [0.4, 0.3];
@@ -200,6 +203,7 @@ fn new_rejects_unknown_joint_name() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
     );
 }
 
@@ -217,6 +221,7 @@ fn new_rejects_duplicate_joint_name() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
     );
 }
 
@@ -234,5 +239,65 @@ fn new_rejects_fixed_base_tree() {
         ANGLE_TOLERANCE,
         DAMPING,
         keypoints_order,
+        -1,
+    );
+}
+
+#[test]
+fn solve_with_single_worker_matches_solve_with_all_workers() {
+    let tree = common::two_joint_chain();
+    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
+    let targets: Vec<[f32; 2]> = vec![[0.4, 0.3], [-0.2, 0.1], [0.3, -0.4], [0.15, 0.25]];
+    let observations_array: Vec<Vec<KeypointObservation>> = targets
+        .iter()
+        .map(|angles| observations_for(&tree, angles))
+        .collect();
+
+    let single_worker = BatchedSolver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+        keypoints_order.clone(),
+        1,
+    );
+    let all_workers = BatchedSolver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        0.0,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+        keypoints_order,
+        -1,
+    );
+
+    let single_result = single_worker.solve(&observations_array, false, false);
+    let all_result = all_workers.solve(&observations_array, false, false);
+
+    assert_eq!(single_result.joint_angles, all_result.joint_angles);
+    assert_eq!(single_result.base_pos, all_result.base_pos);
+    assert_eq!(single_result.base_quat, all_result.base_quat);
+}
+
+#[test]
+#[should_panic(expected = "n_workers must not be 0")]
+fn new_rejects_zero_workers() {
+    let tree = common::two_joint_chain();
+    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
+    BatchedSolver::new(
+        &tree,
+        NoMapper,
+        N_ITERATIONS,
+        1e-3,
+        POSITION_TOLERANCE,
+        ANGLE_TOLERANCE,
+        DAMPING,
+        keypoints_order,
+        0,
     );
 }

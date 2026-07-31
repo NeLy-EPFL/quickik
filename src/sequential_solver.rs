@@ -139,10 +139,11 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
     }
 }
 
-/// Resolves a `solve_segments_parallel`-style `n_workers` value into an
-/// actual thread count; see [`SequenceSolver::solve_segments_parallel`]'s
-/// docs for the exact convention.
-fn resolve_n_workers(n_workers: isize) -> usize {
+/// Resolves an `n_workers`-style value into an actual thread count; see
+/// [`SequenceSolver::solve_segments_parallel`]'s docs for the exact
+/// convention. Shared with [`BatchedSolver`](crate::batched_solver::BatchedSolver),
+/// which uses the same convention for its own thread pool size.
+pub(crate) fn resolve_n_workers(n_workers: isize) -> usize {
     assert!(n_workers != 0, "n_workers must not be 0");
     let available = std::thread::available_parallelism().map_or(1, |n| n.get());
     if n_workers > 0 {

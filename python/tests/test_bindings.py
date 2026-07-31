@@ -610,3 +610,28 @@ def test_batched_solver_rejects_fixed_base_tree(fixed_base_tree):
         quickik.BatchedSolver(
             fixed_base_tree, joint_names(["root", "joint1", "joint2", "tip"])
         )
+
+
+def test_batched_solver_n_workers_one_matches_default(tree):
+    keypoints_order = joint_names(["root", "joint1", "joint2", "tip"])
+    targets = [(0.4, 0.3), (-0.2, 0.1), (0.3, -0.4), (0.15, 0.25)]
+    positions = np.array([two_link_positions(*a) for a in targets], dtype=np.float32)
+    weights = np.ones((len(targets), tree.n_joints), dtype=np.float32)
+
+    single_worker = quickik.BatchedSolver(
+        tree, keypoints_order, neutral_weight=0.0, n_workers=1
+    )
+    default_workers = quickik.BatchedSolver(tree, keypoints_order, neutral_weight=0.0)
+
+    single_result = single_worker.solve(positions, weights)
+    default_result = default_workers.solve(positions, weights)
+
+    assert single_result.joint_angles == pytest.approx(default_result.joint_angles)
+    assert single_result.base_pos == pytest.approx(default_result.base_pos)
+    assert single_result.base_quat == pytest.approx(default_result.base_quat)
+
+
+def test_batched_solver_rejects_zero_workers(tree):
+    keypoints_order = joint_names(["root", "joint1", "joint2", "tip"])
+    with pytest.raises(ValueError):
+        quickik.BatchedSolver(tree, keypoints_order, n_workers=0)

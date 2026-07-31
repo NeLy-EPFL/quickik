@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use nalgebra::linalg::Cholesky;
 use nalgebra::{DMatrix, Dyn, UnitQuaternion, Vector3};
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::body_plan::KinematicTree;
 use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
+use crate::sequential_solver::resolve_n_workers;
 use crate::solver::Solver;
 use crate::state::State;
 
@@ -73,6 +75,10 @@ pub struct BatchedSolver<M: Mapper3Dto2D = NoMapper> {
     /// `solve`'s `observations_array` keypoint axis position `i` corresponds
     /// to, resolved once here from the external, by-name `keypoints_order`.
     keypoint_to_joint_idx: Vec<usize>,
+    /// Dedicated pool `solve` runs its batch on, sized from the `n_workers`
+    /// this `BatchedSolver` was constructed with, so it doesn't contend with
+    /// (or get starved by) rayon's global pool or other `BatchedSolver`s.
+    thread_pool: ThreadPool,
 }
 
 impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
@@ -83,6 +89,12 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
     /// `keypoints_order[i]` is the joint name (matching [`Joint::name`]) that
     /// `solve`'s `observations_array` keypoint axis position `i` corresponds
     /// to; every joint in `kinematic_tree` must appear in it exactly once.
+    ///
+    /// `n_workers`: number of threads in `solve`'s dedicated thread pool.
+    /// A positive value is used directly, unless it exceeds the number of
+    /// available cores: it's then clipped to that count and a warning is
+    /// logged. A negative value counts backward from all available cores:
+    /// `-1` uses all, `-2` uses all but one, etc. `0` is invalid.
     ///
     /// [`Joint::name`]: crate::body_plan::Joint::name
     #[allow(clippy::too_many_arguments)]
@@ -95,6 +107,7 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
         angle_tolerance: f32,
         damping: f32,
         keypoints_order: Vec<String>,
+        n_workers: isize,
     ) -> Self {
         assert!(
             !kinematic_tree.fixed_base,
@@ -102,6 +115,10 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
              meaning for a fixed-base tree"
         );
         let keypoint_to_joint_idx = resolve_keypoint_order(kinematic_tree, &keypoints_order);
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(resolve_n_workers(n_workers))
+            .build()
+            .expect("failed to build BatchedSolver's thread pool");
         Self {
             kinematic_tree: Arc::clone(kinematic_tree),
             mapper,
@@ -111,6 +128,7 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
             angle_tolerance,
             damping,
             keypoint_to_joint_idx,
+            thread_pool,
         }
     }
 
@@ -122,13 +140,14 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
         &self.keypoint_to_joint_idx
     }
 
-    /// Solves every item in `observations_array` in parallel via rayon, each
-    /// starting from `kinematic_tree`'s neutral pose with its own freshly
-    /// constructed [`Solver`] (so items never contend over solver-internal
-    /// buffers). `observations_array` is `(batch_size)`, each a
-    /// `Vec<KeypointObservation>` of length `n_joints`, in the order given by
-    /// this `BatchedSolver`'s `keypoints_order` (*not* the `KinematicTree`'s
-    /// internal joint order).
+    /// Solves every item in `observations_array` in parallel on this
+    /// `BatchedSolver`'s own thread pool (sized from the `n_workers` it was
+    /// constructed with), each starting from `kinematic_tree`'s neutral pose
+    /// with its own freshly constructed [`Solver`] (so items never contend
+    /// over solver-internal buffers). `observations_array` is `(batch_size)`,
+    /// each a `Vec<KeypointObservation>` of length `n_joints`, in the order
+    /// given by this `BatchedSolver`'s `keypoints_order` (*not* the
+    /// `KinematicTree`'s internal joint order).
     pub fn solve(
         &self,
         observations_array: &[Vec<KeypointObservation>],
@@ -137,37 +156,41 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
     ) -> BatchedSolverResult {
         let n_joints = self.kinematic_tree.n_joints();
 
-        let per_item_results: Vec<crate::solver::SolverResult> = observations_array
-            .par_iter()
-            .map(|external_order_observations| {
-                assert_eq!(
-                    external_order_observations.len(),
-                    n_joints,
-                    "every observations_array item must have length kinematic_tree.n_joints()"
-                );
-                // Remap from the external keypoints_order into the tree's
-                // internal joint order: cheap (O(n_joints)) since it's just
-                // this one item's small observation list, not the
-                // Jacobian/Cholesky matrices below.
-                let mut internal_order_observations = vec![KeypointObservation::Missing; n_joints];
-                for (external_idx, &joint_idx) in self.keypoint_to_joint_idx.iter().enumerate() {
-                    internal_order_observations[joint_idx] =
-                        external_order_observations[external_idx];
-                }
+        let per_item_results: Vec<crate::solver::SolverResult> = self.thread_pool.install(|| {
+            observations_array
+                .par_iter()
+                .map(|external_order_observations| {
+                    assert_eq!(
+                        external_order_observations.len(),
+                        n_joints,
+                        "every observations_array item must have length kinematic_tree.n_joints()"
+                    );
+                    // Remap from the external keypoints_order into the
+                    // tree's internal joint order: cheap (O(n_joints)) since
+                    // it's just this one item's small observation list, not
+                    // the Jacobian/Cholesky matrices below.
+                    let mut internal_order_observations =
+                        vec![KeypointObservation::Missing; n_joints];
+                    for (external_idx, &joint_idx) in self.keypoint_to_joint_idx.iter().enumerate()
+                    {
+                        internal_order_observations[joint_idx] =
+                            external_order_observations[external_idx];
+                    }
 
-                let mut solver = Solver::new(
-                    &self.kinematic_tree,
-                    self.mapper,
-                    self.n_iterations,
-                    self.neutral_weight,
-                    self.position_tolerance,
-                    self.angle_tolerance,
-                    self.damping,
-                );
-                let mut state = State::neutral_pose(Arc::clone(&self.kinematic_tree));
-                solver.solve(&mut state, &internal_order_observations, with_grad, with_fk)
-            })
-            .collect();
+                    let mut solver = Solver::new(
+                        &self.kinematic_tree,
+                        self.mapper,
+                        self.n_iterations,
+                        self.neutral_weight,
+                        self.position_tolerance,
+                        self.angle_tolerance,
+                        self.damping,
+                    );
+                    let mut state = State::neutral_pose(Arc::clone(&self.kinematic_tree));
+                    solver.solve(&mut state, &internal_order_observations, with_grad, with_fk)
+                })
+                .collect()
+        });
 
         let batch_size = per_item_results.len();
         let mut joint_angles = Vec::with_capacity(batch_size);
