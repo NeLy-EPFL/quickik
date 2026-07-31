@@ -1,24 +1,33 @@
 //! cxx bridge for the QuickIK C++ bindings. Mirrors the Rust API where
 //! reasonable; the main departure (as in `python/src/lib.rs`) is the mapper:
-//! Rust's `Solver<M>` is generic over the mapper type at compile time, but
-//! there's no C++ equivalent without templating the whole binding, so every
-//! `Solver`/`SequenceSolver` here is backed by a single runtime `Mapper`
-//! value (`NoMapper`, `Camera`, or `XYView`) fixed at construction.
+//! Rust's `Solver<M>`/`SequenceSolver<M>`/`BatchedSolver<M>` are generic over
+//! the mapper type at compile time, but there's no C++ equivalent without
+//! templating the whole binding, so every solver here is backed by a single
+//! runtime `Mapper` value (`NoMapper`, `Camera`, or `XYView`) fixed at
+//! construction.
 //!
-//! A second departure: sequences of per-frame keypoint observations are
-//! passed as one flat `observations` slice of length `n_joints * n_frames`
-//! (frame `i` spanning `[i * n_joints, (i + 1) * n_joints)`) rather than a
-//! nested container, and `solve_sequence`/`solve_sequence_segmented_parallel`
-//! return a `StateList` (an indexable handle, `len()`/`at(i)`) rather than a
-//! `Vec<State>` -- cxx doesn't support nested `Vec<Vec<T>>` or `Vec` of an
-//! opaque Rust type across the bridge.
+//! A second departure: sequences of per-frame (or per-batch-item) keypoint
+//! observations are passed as one flat `observations` slice of length
+//! `n_joints * n_frames` (frame `i` spanning `[i * n_joints, (i + 1) *
+//! n_joints)`) rather than a nested container, and `SequenceSolver::solve`/
+//! `solve_segments_parallel` return a `SolverResultList` (an indexable
+//! handle, `len()`/`at(i)`) rather than a `Vec<SolverResult>`; cxx doesn't
+//! support nested `Vec<Vec<T>>` or `Vec` of a non-trivial shared struct
+//! across the bridge. For the same reason, `SolverResult`/
+//! `BatchedSolverResult`'s `keypoint_pos`/`jacobian`/`cholesky_l` fields are
+//! flattened `Vec<f32>` (row-major for the matrices) rather than nested
+//! arrays; `has_keypoint_pos`/`has_jacobian`/`has_cholesky_l` flags stand in
+//! for Rust's `Option` (empty/`false` when that piece wasn't requested, or,
+//! for `cholesky_l`, when the linearization wasn't positive-definite).
 //!
 //! See `README.md` (top level) for build instructions and a usage example.
 
 use std::sync::Arc;
 
+use nalgebra::DMatrix;
 use quickik_core::observation::Mapper3Dto2D;
 
+#[allow(clippy::too_many_arguments)]
 #[cxx::bridge(namespace = "quickik")]
 mod ffi {
     /// Which kind of observation a `KeypointObservation` carries. cxx has no
@@ -73,31 +82,74 @@ mod ffi {
         camera: Camera,
     }
 
-    /// Configuration for the inverse kinematics solver. See Rust's
-    /// `quickik::solver::SolverConfig` for field docs. Unlike the Rust/Python
-    /// APIs, this is a plain value type here (no shared live handle):
-    /// retune a solver by calling `set_config` again.
-    #[derive(Clone, Copy, Debug)]
-    struct SolverConfig {
-        n_iterations: usize,
-        neutral_weight: f32,
-        position_tolerance: f32,
-        angle_tolerance: f32,
-        damping: f32,
+    /// The converged pose (and, optionally, linearization) from one
+    /// `Solver::solve` call, or one item of a `SolverResultList`.
+    struct SolverResult {
+        /// Angles of all joint DOFs, in the `KinematicTree`'s own order.
+        dof_angles: Vec<f32>,
+        /// Position of the root joint in world coordinates.
+        root_pos: [f32; 3],
+        /// Rotation of the root joint in world coordinates, as
+        /// `(w, x, y, z)`.
+        root_rot: [f32; 4],
+        /// World-space keypoint positions, flattened (`n_joints * 3` long, 3
+        /// floats per keypoint), in the `KinematicTree`'s joint order. Empty
+        /// unless `has_keypoint_pos`.
+        keypoint_pos: Vec<f32>,
+        /// Whether `solve` was called with `with_fk = true`.
+        has_keypoint_pos: bool,
+        /// The keypoint-position Jacobian at (approximately) the converged
+        /// pose, flattened row-major (`(3 * n_joints) * state_dim` long; see
+        /// `KinematicTree::state_dim`). Empty unless `has_jacobian`.
+        jacobian: Vec<f32>,
+        /// Whether `solve` was called with `with_grad = true`.
+        has_jacobian: bool,
+        /// Lower-triangular Cholesky factor `L` of the normal-equations
+        /// matrix at the same linearization as `jacobian` (`jtj = L @
+        /// L^T`), flattened row-major (`state_dim * state_dim` long). Empty
+        /// unless `has_cholesky_l`.
+        cholesky_l: Vec<f32>,
+        /// Whether `with_grad` was `true` *and* that linearization's normal
+        /// equations were positive-definite; gradients can't be computed
+        /// from this solve otherwise.
+        has_cholesky_l: bool,
     }
 
-    /// Configuration for `solve_sequence_segmented_parallel`.
-    #[derive(Clone, Copy, Debug)]
-    struct ParallelSolveConfig {
-        segment_len: usize,
-        overlap_len: usize,
-        overlap_tolerance: f32,
-        /// Number of worker threads. A positive value is used directly,
-        /// unless it exceeds the number of available cores: it's then
-        /// clipped to that count and a warning is logged. A negative
-        /// value counts backward from all available cores: `-1` uses all,
-        /// `-2` uses all but one, etc. `0` is invalid.
-        n_workers: isize,
+    /// Every `BatchedSolver::solve` item's converged pose and (optional)
+    /// linearization, as flattened, batch-major arrays (see this module's
+    /// top-level docs). `batch_size` is however many items were passed to
+    /// `solve`; `n_dofs`/`n_joints`/`state_dim` come from the
+    /// `KinematicTree` `BatchedSolver` was constructed with.
+    struct BatchedSolverResult {
+        /// Flattened `batch_size * n_dofs`.
+        joint_angles: Vec<f32>,
+        /// Flattened `batch_size * 3`.
+        base_pos: Vec<f32>,
+        /// Flattened `batch_size * 4` (`w, x, y, z` per item).
+        base_quat: Vec<f32>,
+        /// Flattened `batch_size * n_joints * 3`, in the `KinematicTree`'s
+        /// internal joint order (*not* `keypoints_order`). Empty unless
+        /// `has_keypoint_pos`.
+        keypoint_pos: Vec<f32>,
+        /// Whether `solve` was called with `with_fk = true`.
+        has_keypoint_pos: bool,
+        /// Flattened `batch_size * (3 * n_joints) * state_dim`, row-major
+        /// per item, in the `KinematicTree`'s internal keypoint/state order
+        /// (*not* `keypoints_order`). Empty unless `has_jacobian`.
+        jacobian: Vec<f32>,
+        /// Whether `solve` was called with `with_grad = true`.
+        has_jacobian: bool,
+        /// Flattened `batch_size * state_dim * state_dim`, row-major per
+        /// item; zeroed for any item whose `valid` entry is `false`. Empty
+        /// unless `has_cholesky_l`.
+        cholesky_l: Vec<f32>,
+        /// Whether `with_grad` was `true` (`cholesky_l`/`valid` are only
+        /// meaningful then).
+        has_cholesky_l: bool,
+        /// Length `batch_size`; `false` where that item's last iteration
+        /// wasn't positive-definite, so its `cholesky_l` block can't be used
+        /// for gradients. Empty unless `has_cholesky_l`.
+        valid: Vec<bool>,
     }
 
     extern "Rust" {
@@ -107,7 +159,7 @@ mod ffi {
         /// cameras.
         fn keypoint_position_3d(pos: [f32; 3], weight: f32) -> KeypointObservation;
         /// A 2D pixel position from the camera (or other mapper) that the
-        /// consuming `Solver`/`SequenceSolver` was constructed with.
+        /// consuming solver was constructed with.
         fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> KeypointObservation;
 
         /// A `Mapper` for solvers that receive 3D keypoint observations only.
@@ -117,17 +169,6 @@ mod ffi {
         /// A `Mapper` that takes a 3D keypoint's world X/Y coordinates as its
         /// 2D projection.
         fn xyview_mapper() -> Mapper;
-
-        /// A `SolverConfig` with reasonable defaults: 10 iterations, small
-        /// damping and neutral-pose weight, and tolerances of 1e-3.
-        fn default_solver_config() -> SolverConfig;
-
-        /// A `ParallelSolveConfig` that spreads `total_len` frames evenly
-        /// across every available core: one segment per core, `total_len /
-        /// n_workers` frames each (plus a fixed default overlap). For finer
-        /// control over cold-start frequency, build a `ParallelSolveConfig`
-        /// directly instead.
-        fn parallel_solve_config_for_recording(total_len: usize) -> ParallelSolveConfig;
 
         /// A kinematic tree, i.e. body plan, or skeleton.
         type KinematicTree;
@@ -139,6 +180,11 @@ mod ffi {
         fn n_joints(self: &KinematicTree) -> usize;
         /// Total number of rotational degrees of freedom across all joints.
         fn n_dofs(self: &KinematicTree) -> usize;
+        /// Dimensionality of the flattened solver state (`n_dofs` plus 6 for
+        /// the free-floating root, or just `n_dofs` for a fixed-base tree).
+        /// The column count of `SolverResult::jacobian`/`BatchedSolverResult::jacobian`,
+        /// and the row/column count of `cholesky_l`.
+        fn state_dim(self: &KinematicTree) -> usize;
 
         /// The pose being solved for.
         type State;
@@ -153,94 +199,164 @@ mod ffi {
         /// `(w, x, y, z)`.
         fn root_rot(self: &State) -> [f32; 4];
 
-        /// A list of `State`s returned by `solve_sequence`/
-        /// `solve_sequence_segmented_parallel`.
-        type StateList;
-        /// Number of states in the list.
-        fn len(self: &StateList) -> usize;
-        /// The state at index `i`. Raises an exception (rather than
+        /// A list of `SolverResult`s returned by `SequenceSolver::solve`/
+        /// `solve_segments_parallel`.
+        type SolverResultList;
+        /// Number of results in the list.
+        fn len(self: &SolverResultList) -> usize;
+        /// The result at index `i`. Raises an exception (rather than
         /// aborting the process) if `i >= len()`.
-        fn at(self: &StateList, i: usize) -> Result<Box<State>>;
+        fn at(self: &SolverResultList, i: usize) -> Result<SolverResult>;
 
         /// The inverse kinematics solver, backed by a single `Mapper` fixed
         /// at construction (see this module's top-level docs).
         type Solver;
-        /// Constructs a `Solver` for `tree` with the given `config` and
-        /// `mapper`.
-        fn new_solver(tree: &KinematicTree, config: SolverConfig, mapper: Mapper) -> Box<Solver>;
-        /// Runs `config.n_iterations` Gauss-Newton steps in place on `state`,
-        /// given one observation per joint (some may be `Missing`).
-        /// Panics from the underlying solve (e.g. a `Position2D` observation
-        /// given to a mapper-less solver) are caught and raised as an
-        /// exception rather than aborting the process.
+        /// Constructs a `Solver` for `tree` with the given `mapper` and
+        /// tuning parameters.
+        fn new_solver(
+            tree: &KinematicTree,
+            mapper: Mapper,
+            n_iterations: usize,
+            neutral_weight: f32,
+            position_tolerance: f32,
+            angle_tolerance: f32,
+            damping: f32,
+        ) -> Box<Solver>;
+        /// Runs up to `n_iterations` Gauss-Newton steps in place on `state`,
+        /// given one observation per joint (some may be `Missing`), and
+        /// returns the converged pose. `with_grad`/`with_fk` gate
+        /// `SolverResult::jacobian`/`cholesky_l` and `keypoint_pos`
+        /// respectively; each costs a little extra work, so only request
+        /// what you'll use. Panics from the underlying solve (e.g. a
+        /// `Position2D` observation given to a mapper-less solver) are
+        /// caught and raised as an exception rather than aborting the
+        /// process.
         fn solve(
             self: &mut Solver,
             state: &mut State,
             observations: &[KeypointObservation],
-        ) -> Result<()>;
-        /// The solver's current configuration.
-        fn config(self: &Solver) -> SolverConfig;
-        /// Replaces the solver's configuration in place.
-        fn set_config(self: &mut Solver, config: SolverConfig);
+            with_grad: bool,
+            with_fk: bool,
+        ) -> Result<SolverResult>;
         /// Fixed at construction; there is no setter.
         fn mapper(self: &Solver) -> Mapper;
-        /// World-space keypoint positions at the pose from the most recent
-        /// `solve` call, in `tree`'s joint order. Flattened (`n_joints * 3`
-        /// long, 3 floats per keypoint) like `observations`/`split_into_frames`
-        /// elsewhere in this bridge -- see this module's top-level docs.
-        fn last_fk_positions(self: &Solver) -> Vec<f32>;
+        /// Number of Gauss-Newton steps per `solve` call. Also the cap on
+        /// early termination: see `position_tolerance`/`angle_tolerance`.
+        fn n_iterations(self: &Solver) -> usize;
+        fn set_n_iterations(self: &mut Solver, value: usize);
+        /// Weight pulling every joint angle toward the neutral pose.
+        fn neutral_weight(self: &Solver) -> f32;
+        fn set_neutral_weight(self: &mut Solver, value: f32);
+        /// Stop iterating early once an update step's largest root-position
+        /// component drops below this value, and the largest angle update
+        /// drops below `angle_tolerance`. 0 disables early termination.
+        fn position_tolerance(self: &Solver) -> f32;
+        fn set_position_tolerance(self: &mut Solver, value: f32);
+        /// Angle-space counterpart to `position_tolerance`, in radians.
+        fn angle_tolerance(self: &Solver) -> f32;
+        fn set_angle_tolerance(self: &mut Solver, value: f32);
+        /// Levenberg-Marquardt damping added to the normal equations'
+        /// diagonal, for numerical stability only; keep it very small
+        /// (e.g. 1e-6).
+        fn damping(self: &Solver) -> f32;
+        fn set_damping(self: &mut Solver, value: f32);
 
-        /// Solves a continuous sequence of frames for a single tracked body,
-        /// warm starting each frame from the previous frame's converged pose.
+        /// Warm-started solving for a continuous sequence of frames, backed
+        /// by a single `Mapper` fixed at construction. `solve` always
+        /// continues from wherever the previous call left off, for this
+        /// object's whole lifetime; `solve_segments_parallel` is unrelated
+        /// to that continuity (a self-contained bulk operation that never
+        /// reads or writes it). Unlike `Solver`, the tuning parameters
+        /// aren't retunable after construction.
         type SequenceSolver;
         /// Starts a new sequence at the neutral pose, for `tree`, with the
-        /// given `config` and `mapper`.
+        /// given `mapper` and tuning parameters.
         fn new_sequence_solver(
             tree: &KinematicTree,
-            config: SolverConfig,
             mapper: Mapper,
+            n_iterations: usize,
+            neutral_weight: f32,
+            position_tolerance: f32,
+            angle_tolerance: f32,
+            damping: f32,
         ) -> Box<SequenceSolver>;
-        /// Solves the next frame in place, warm-started from the current
-        /// pose, and returns the converged state.
-        /// See `Solver::solve`'s docs on panics being raised as exceptions.
-        fn solve_frame(
-            self: &mut SequenceSolver,
-            observations: &[KeypointObservation],
-        ) -> Result<Box<State>>;
-        /// Solves every frame in order, each warm-started from the previous
-        /// one, returning the converged pose after each frame.
-        /// `observations` is flattened: `n_joints * n_frames` long, frame `i`
-        /// spanning `[i * n_joints, (i + 1) * n_joints)`.
-        fn solve_sequence(
+        /// Solves every frame in order, each warm-started from wherever this
+        /// object's last `solve`/`solve_segments_parallel` call left off.
+        /// `observations` is flattened: `n_joints * n_frames` long, frame
+        /// `i` spanning `[i * n_joints, (i + 1) * n_joints)`. See
+        /// `Solver::solve`'s docs for `with_grad`/`with_fk` and for panics
+        /// being raised as exceptions.
+        fn solve(
             self: &mut SequenceSolver,
             observations: &[KeypointObservation],
             n_joints: usize,
-        ) -> Result<Box<StateList>>;
-        /// The most recently converged pose (a snapshot).
-        fn state(self: &SequenceSolver) -> Box<State>;
-        /// The solver's current configuration.
-        fn config(self: &SequenceSolver) -> SolverConfig;
-        /// Replaces the solver's configuration in place.
-        fn set_config(self: &mut SequenceSolver, config: SolverConfig);
+            with_grad: bool,
+            with_fk: bool,
+        ) -> Result<Box<SolverResultList>>;
+        /// Solves `observations` in parallel by splitting them into exactly
+        /// `n_workers` contiguous, non-overlapping segments, each
+        /// cold-started at the neutral pose and then warm-started within
+        /// itself. Never reads or writes this object's own `solve` state.
+        /// `n_workers`: a positive value is used directly, unless it
+        /// exceeds the number of available cores: it's then clipped to that
+        /// count and a warning is logged. A negative value counts backward
+        /// from all available cores: `-1` uses all, `-2` uses all but one,
+        /// etc. `0` is invalid.
+        fn solve_segments_parallel(
+            self: &SequenceSolver,
+            observations: &[KeypointObservation],
+            n_joints: usize,
+            n_workers: isize,
+            with_grad: bool,
+            with_fk: bool,
+        ) -> Result<Box<SolverResultList>>;
         /// Fixed at construction; there is no setter.
         fn mapper(self: &SequenceSolver) -> Mapper;
-        /// World-space keypoint positions at the most recently converged
-        /// pose, in `tree`'s joint order. Flattened, same convention as
-        /// `Solver::last_fk_positions`.
-        fn last_fk_positions(self: &SequenceSolver) -> Vec<f32>;
 
-        /// Solves a single long sequence in parallel by splitting it into
-        /// slightly overlapping segments, each solved on its own thread. See
-        /// Rust's `quickik::high_level::solve_sequence_segmented_parallel`.
-        /// See `Solver::solve`'s docs on panics being raised as exceptions.
-        fn solve_sequence_segmented_parallel(
+        /// Solves a batch of fully independent (never warm-started) sets of
+        /// keypoint observations in parallel, for training/inference with
+        /// an autodiff framework, backed by a single `Mapper` fixed at
+        /// construction.
+        type BatchedSolver;
+        /// `tree` must be free-floating (not fixed-base). `keypoints_order[i]`
+        /// is the joint name that `solve`'s `observations` keypoint axis
+        /// position `i` corresponds to; every joint in `tree` must appear in
+        /// it exactly once. `n_workers` follows the same convention as
+        /// `SequenceSolver::solve_segments_parallel`'s. Raises an exception
+        /// if `tree` is fixed-base, `keypoints_order` is malformed, or
+        /// `n_workers` is `0`.
+        fn new_batched_solver(
             tree: &KinematicTree,
-            config: SolverConfig,
+            mapper: Mapper,
+            n_iterations: usize,
+            neutral_weight: f32,
+            position_tolerance: f32,
+            angle_tolerance: f32,
+            damping: f32,
+            keypoints_order: Vec<String>,
+            n_workers: isize,
+        ) -> Result<Box<BatchedSolver>>;
+        /// Solves every item in `observations` independently and in
+        /// parallel, each starting from `tree`'s neutral pose. `observations`
+        /// is flattened: `n_joints * batch_size` long, item `i` spanning
+        /// `[i * n_joints, (i + 1) * n_joints)`, in this `BatchedSolver`'s
+        /// own `keypoints_order` (*not* the `KinematicTree`'s internal joint
+        /// order). See `Solver::solve`'s docs for `with_grad`/`with_fk` and
+        /// for panics being raised as exceptions.
+        fn solve(
+            self: &BatchedSolver,
             observations: &[KeypointObservation],
             n_joints: usize,
-            parallel_config: ParallelSolveConfig,
-            mapper: Mapper,
-        ) -> Result<Box<StateList>>;
+            with_grad: bool,
+            with_fk: bool,
+        ) -> Result<BatchedSolverResult>;
+        /// Fixed at construction; there is no setter.
+        fn mapper(self: &BatchedSolver) -> Mapper;
+        /// `keypoint_to_joint_idx()[i]` is the `KinematicTree`'s internal
+        /// joint index that `solve`'s keypoint axis position `i` corresponds
+        /// to (the resolved inverse of the by-name `keypoints_order` this
+        /// solver was constructed with).
+        fn keypoint_to_joint_idx(self: &BatchedSolver) -> Vec<usize>;
     }
 }
 
@@ -295,9 +411,14 @@ fn to_core_observation(
 }
 
 /// Runtime stand-in for Rust's generic mapper type parameter `M`, mirroring
-/// `python/src/observation.rs`'s `Mapper`.
+/// `python/src/observation.rs`'s `Mapper`. Unlike Rust, where "no mapper" is
+/// a distinct compile-time type (`quickik_core::observation::NoMapper`),
+/// every solver here always instantiates the same concrete
+/// `Solver<RuntimeMapper>` (etc.), so `None` has to be one more runtime
+/// variant of this same enum rather than a separate type.
 #[derive(Clone, Copy, Debug)]
 enum RuntimeMapper {
+    None,
     Camera(quickik_core::observation::Camera),
     XYView,
 }
@@ -314,6 +435,11 @@ impl Mapper3Dto2D for RuntimeMapper {
         S2: nalgebra::StorageMut<f32, nalgebra::Dyn, nalgebra::Dyn>,
     {
         match self {
+            // Mirrors NoMapper::project_3d_to_2d's own panic.
+            RuntimeMapper::None => unreachable!(
+                "a Solver/SequenceSolver/BatchedSolver constructed with no_mapper() was given a \
+                 Position2D observation"
+            ),
             RuntimeMapper::Camera(camera) => {
                 camera.project_3d_to_2d(pos_world3d, jacobian_world3d, jacobian_2d_out)
             }
@@ -337,13 +463,11 @@ fn to_core_camera(camera: &ffi::Camera) -> quickik_core::observation::Camera {
     }
 }
 
-fn to_runtime_mapper(mapper: &ffi::Mapper) -> Option<RuntimeMapper> {
+fn to_runtime_mapper(mapper: &ffi::Mapper) -> RuntimeMapper {
     match mapper.kind {
-        ffi::MapperKind::NoMapper => None,
-        ffi::MapperKind::CameraMapper => {
-            Some(RuntimeMapper::Camera(to_core_camera(&mapper.camera)))
-        }
-        ffi::MapperKind::XYViewMapper => Some(RuntimeMapper::XYView),
+        ffi::MapperKind::NoMapper => RuntimeMapper::None,
+        ffi::MapperKind::CameraMapper => RuntimeMapper::Camera(to_core_camera(&mapper.camera)),
+        ffi::MapperKind::XYViewMapper => RuntimeMapper::XYView,
         _ => unreachable!("unknown MapperKind"),
     }
 }
@@ -383,10 +507,10 @@ fn xyview_mapper() -> ffi::Mapper {
     }
 }
 
-fn runtime_mapper_to_ffi(mapper: Option<RuntimeMapper>) -> ffi::Mapper {
+fn runtime_mapper_to_ffi(mapper: RuntimeMapper) -> ffi::Mapper {
     match mapper {
-        None => no_mapper(),
-        Some(RuntimeMapper::Camera(camera)) => {
+        RuntimeMapper::None => no_mapper(),
+        RuntimeMapper::Camera(camera) => {
             let p = camera.world2cam_pos;
             camera_mapper(ffi::Camera {
                 fx: camera.fx,
@@ -402,41 +526,7 @@ fn runtime_mapper_to_ffi(mapper: Option<RuntimeMapper>) -> ffi::Mapper {
                     .unwrap(),
             })
         }
-        Some(RuntimeMapper::XYView) => xyview_mapper(),
-    }
-}
-
-// =============================================================================
-//  SolverConfig
-// =============================================================================
-
-fn default_solver_config() -> ffi::SolverConfig {
-    from_core_config(&quickik_core::solver::SolverConfig::<RuntimeMapper>::default())
-}
-
-fn to_core_config(
-    config: ffi::SolverConfig,
-    mapper: Option<RuntimeMapper>,
-) -> quickik_core::solver::SolverConfig<RuntimeMapper> {
-    quickik_core::solver::SolverConfig {
-        n_iterations: config.n_iterations,
-        neutral_weight: config.neutral_weight,
-        position_tolerance: config.position_tolerance,
-        angle_tolerance: config.angle_tolerance,
-        damping: config.damping,
-        mapper,
-    }
-}
-
-fn from_core_config(
-    config: &quickik_core::solver::SolverConfig<RuntimeMapper>,
-) -> ffi::SolverConfig {
-    ffi::SolverConfig {
-        n_iterations: config.n_iterations,
-        neutral_weight: config.neutral_weight,
-        position_tolerance: config.position_tolerance,
-        angle_tolerance: config.angle_tolerance,
-        damping: config.damping,
+        RuntimeMapper::XYView => xyview_mapper(),
     }
 }
 
@@ -488,6 +578,9 @@ impl KinematicTree {
     fn n_dofs(&self) -> usize {
         self.0.n_dofs()
     }
+    fn state_dim(&self) -> usize {
+        self.0.state_dim()
+    }
 }
 
 // =============================================================================
@@ -516,25 +609,9 @@ impl State {
     }
 }
 
-// =============================================================================
-//  StateList
-// =============================================================================
-
-struct StateList(Vec<quickik_core::state::State>);
-
-impl StateList {
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-    fn at(&self, i: usize) -> Result<Box<State>, String> {
-        let states = &self.0;
-        catch_panic(move || Box::new(State(states[i].clone())))
-    }
-}
-
 /// Splits a flat, `n_joints * n_frames`-long slice into per-frame chunks and
 /// converts each observation to the core crate's type. See this module's
-/// top-level docs for why sequences are passed flattened.
+/// top-level docs for why sequences (and batches) are passed flattened.
 fn split_into_frames(
     flat: &[ffi::KeypointObservation],
     n_joints: usize,
@@ -549,28 +626,103 @@ fn split_into_frames(
         .collect()
 }
 
+/// Flattens world-space keypoint positions into `n_joints * 3` floats (3 per
+/// keypoint), matching how sequences/batches of observations are flattened
+/// elsewhere in this bridge (see this module's top-level docs).
+fn flatten_positions(positions: &[nalgebra::Vector3<f32>]) -> Vec<f32> {
+    positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect()
+}
+
+/// Flattens a matrix row-major (row 0 first, then row 1, etc.), matching how
+/// `Jacobian`/`Cholesky` factors are flattened elsewhere in this bridge.
+fn flatten_matrix_row_major(mat: &DMatrix<f32>) -> Vec<f32> {
+    let mut out = Vec::with_capacity(mat.nrows() * mat.ncols());
+    for r in 0..mat.nrows() {
+        for c in 0..mat.ncols() {
+            out.push(mat[(r, c)]);
+        }
+    }
+    out
+}
+
+/// Converts a core `SolverResult` into the bridge's flattened
+/// `ffi::SolverResult`.
+fn core_result_to_ffi(result: &quickik_core::solver::SolverResult) -> ffi::SolverResult {
+    let root_pos = result.state.root_pos;
+    let root_rot = result.state.root_rot.quaternion();
+    ffi::SolverResult {
+        dof_angles: result.state.dof_angles.clone(),
+        root_pos: [root_pos.x, root_pos.y, root_pos.z],
+        root_rot: [root_rot.w, root_rot.i, root_rot.j, root_rot.k],
+        keypoint_pos: result
+            .keypoint_pos
+            .as_deref()
+            .map(flatten_positions)
+            .unwrap_or_default(),
+        has_keypoint_pos: result.keypoint_pos.is_some(),
+        jacobian: result
+            .jacobian
+            .as_ref()
+            .map(flatten_matrix_row_major)
+            .unwrap_or_default(),
+        has_jacobian: result.jacobian.is_some(),
+        cholesky_l: result
+            .cholesky_l
+            .as_ref()
+            .map(|chol| flatten_matrix_row_major(&chol.l()))
+            .unwrap_or_default(),
+        has_cholesky_l: result.cholesky_l.is_some(),
+    }
+}
+
+// =============================================================================
+//  SolverResultList
+// =============================================================================
+
+struct SolverResultList(Vec<quickik_core::solver::SolverResult>);
+
+impl SolverResultList {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn at(&self, i: usize) -> Result<ffi::SolverResult, String> {
+        let results = &self.0;
+        catch_panic(move || core_result_to_ffi(&results[i]))
+    }
+}
+
 // =============================================================================
 //  Solver
 // =============================================================================
 
 struct Solver {
     inner: quickik_core::solver::Solver<RuntimeMapper>,
-    mapper: Option<RuntimeMapper>,
+    mapper: RuntimeMapper,
 }
 
-fn new_solver(tree: &KinematicTree, config: ffi::SolverConfig, mapper: ffi::Mapper) -> Box<Solver> {
+#[allow(clippy::too_many_arguments)]
+fn new_solver(
+    tree: &KinematicTree,
+    mapper: ffi::Mapper,
+    n_iterations: usize,
+    neutral_weight: f32,
+    position_tolerance: f32,
+    angle_tolerance: f32,
+    damping: f32,
+) -> Box<Solver> {
     let mapper = to_runtime_mapper(&mapper);
     Box::new(Solver {
-        inner: quickik_core::solver::Solver::new(&tree.0, to_core_config(config, mapper)),
+        inner: quickik_core::solver::Solver::new(
+            &tree.0,
+            mapper,
+            n_iterations,
+            neutral_weight,
+            position_tolerance,
+            angle_tolerance,
+            damping,
+        ),
         mapper,
     })
-}
-
-/// Flattens world-space keypoint positions into `n_joints * 3` floats (3 per
-/// keypoint), matching how sequences of observations are flattened
-/// elsewhere in this bridge (see this module's top-level docs).
-fn flatten_positions(positions: &[nalgebra::Vector3<f32>]) -> Vec<f32> {
-    positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect()
 }
 
 impl Solver {
@@ -578,23 +730,48 @@ impl Solver {
         &mut self,
         state: &mut State,
         observations: &[ffi::KeypointObservation],
-    ) -> Result<(), String> {
+        with_grad: bool,
+        with_fk: bool,
+    ) -> Result<ffi::SolverResult, String> {
         let observations: Vec<_> = observations.iter().map(to_core_observation).collect();
         let inner = &mut self.inner;
         let state = &mut state.0;
-        catch_panic(move || inner.solve(state, &observations))
-    }
-    fn config(&self) -> ffi::SolverConfig {
-        from_core_config(&self.inner.config)
-    }
-    fn set_config(&mut self, config: ffi::SolverConfig) {
-        self.inner.config = to_core_config(config, self.mapper);
+        catch_panic(move || {
+            core_result_to_ffi(&inner.solve(state, &observations, with_grad, with_fk))
+        })
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
     }
-    fn last_fk_positions(&self) -> Vec<f32> {
-        flatten_positions(self.inner.last_fk_positions())
+    fn n_iterations(&self) -> usize {
+        self.inner.n_iterations
+    }
+    fn set_n_iterations(&mut self, value: usize) {
+        self.inner.n_iterations = value;
+    }
+    fn neutral_weight(&self) -> f32 {
+        self.inner.neutral_weight
+    }
+    fn set_neutral_weight(&mut self, value: f32) {
+        self.inner.neutral_weight = value;
+    }
+    fn position_tolerance(&self) -> f32 {
+        self.inner.position_tolerance
+    }
+    fn set_position_tolerance(&mut self, value: f32) {
+        self.inner.position_tolerance = value;
+    }
+    fn angle_tolerance(&self) -> f32 {
+        self.inner.angle_tolerance
+    }
+    fn set_angle_tolerance(&mut self, value: f32) {
+        self.inner.angle_tolerance = value;
+    }
+    fn damping(&self) -> f32 {
+        self.inner.damping
+    }
+    fn set_damping(&mut self, value: f32) {
+        self.inner.damping = value;
     }
 }
 
@@ -603,105 +780,211 @@ impl Solver {
 // =============================================================================
 
 struct SequenceSolver {
-    inner: quickik_core::high_level::SequenceSolver<RuntimeMapper>,
-    mapper: Option<RuntimeMapper>,
+    inner: quickik_core::sequential_solver::SequenceSolver<RuntimeMapper>,
+    mapper: RuntimeMapper,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn new_sequence_solver(
     tree: &KinematicTree,
-    config: ffi::SolverConfig,
     mapper: ffi::Mapper,
+    n_iterations: usize,
+    neutral_weight: f32,
+    position_tolerance: f32,
+    angle_tolerance: f32,
+    damping: f32,
 ) -> Box<SequenceSolver> {
     let mapper = to_runtime_mapper(&mapper);
     Box::new(SequenceSolver {
-        inner: quickik_core::high_level::SequenceSolver::new(
-            tree.0.clone(),
-            to_core_config(config, mapper),
+        inner: quickik_core::sequential_solver::SequenceSolver::new(
+            &tree.0,
+            mapper,
+            n_iterations,
+            neutral_weight,
+            position_tolerance,
+            angle_tolerance,
+            damping,
         ),
         mapper,
     })
 }
 
 impl SequenceSolver {
-    fn solve_frame(
-        &mut self,
-        observations: &[ffi::KeypointObservation],
-    ) -> Result<Box<State>, String> {
-        let observations: Vec<_> = observations.iter().map(to_core_observation).collect();
-        let inner = &mut self.inner;
-        catch_panic(move || Box::new(State(inner.solve_frame(&observations).clone())))
-    }
-    fn solve_sequence(
+    fn solve(
         &mut self,
         observations: &[ffi::KeypointObservation],
         n_joints: usize,
-    ) -> Result<Box<StateList>, String> {
+        with_grad: bool,
+        with_fk: bool,
+    ) -> Result<Box<SolverResultList>, String> {
         let inner = &mut self.inner;
         catch_panic(move || {
             let sequence = split_into_frames(observations, n_joints);
-            Box::new(StateList(inner.solve_sequence(&sequence)))
+            Box::new(SolverResultList(inner.solve(&sequence, with_grad, with_fk)))
         })
     }
-    fn state(&self) -> Box<State> {
-        Box::new(State(self.inner.state.clone()))
-    }
-    fn config(&self) -> ffi::SolverConfig {
-        from_core_config(&self.inner.solver.config)
-    }
-    fn set_config(&mut self, config: ffi::SolverConfig) {
-        self.inner.solver.config = to_core_config(config, self.mapper);
+    fn solve_segments_parallel(
+        &self,
+        observations: &[ffi::KeypointObservation],
+        n_joints: usize,
+        n_workers: isize,
+        with_grad: bool,
+        with_fk: bool,
+    ) -> Result<Box<SolverResultList>, String> {
+        let inner = &self.inner;
+        catch_panic(move || {
+            let sequence = split_into_frames(observations, n_joints);
+            Box::new(SolverResultList(inner.solve_segments_parallel(
+                &sequence, n_workers, with_grad, with_fk,
+            )))
+        })
     }
     fn mapper(&self) -> ffi::Mapper {
         runtime_mapper_to_ffi(self.mapper)
     }
-    fn last_fk_positions(&self) -> Vec<f32> {
-        flatten_positions(self.inner.last_fk_positions())
-    }
 }
 
 // =============================================================================
-//  ParallelSolveConfig
+//  BatchedSolver
 // =============================================================================
 
-fn parallel_solve_config_for_recording(total_len: usize) -> ffi::ParallelSolveConfig {
-    let config = quickik_core::high_level::ParallelSolveConfig::for_recording(total_len);
-    ffi::ParallelSolveConfig {
-        segment_len: config.segment_len,
-        overlap_len: config.overlap_len,
-        overlap_tolerance: config.overlap_tolerance,
-        n_workers: config.n_workers,
-    }
+struct BatchedSolver {
+    inner: quickik_core::batched_solver::BatchedSolver<RuntimeMapper>,
+    mapper: RuntimeMapper,
 }
 
-// =============================================================================
-//  solve_sequence_segmented_parallel
-// =============================================================================
-
-fn solve_sequence_segmented_parallel(
+#[allow(clippy::too_many_arguments)]
+fn new_batched_solver(
     tree: &KinematicTree,
-    config: ffi::SolverConfig,
-    observations: &[ffi::KeypointObservation],
-    n_joints: usize,
-    parallel_config: ffi::ParallelSolveConfig,
     mapper: ffi::Mapper,
-) -> Result<Box<StateList>, String> {
+    n_iterations: usize,
+    neutral_weight: f32,
+    position_tolerance: f32,
+    angle_tolerance: f32,
+    damping: f32,
+    keypoints_order: Vec<String>,
+    n_workers: isize,
+) -> Result<Box<BatchedSolver>, String> {
     let mapper = to_runtime_mapper(&mapper);
-    let core_parallel_config = quickik_core::high_level::ParallelSolveConfig {
-        segment_len: parallel_config.segment_len,
-        overlap_len: parallel_config.overlap_len,
-        overlap_tolerance: parallel_config.overlap_tolerance,
-        n_workers: parallel_config.n_workers,
-    };
-    let core_config = to_core_config(config, mapper);
     catch_panic(move || {
-        let sequence = split_into_frames(observations, n_joints);
-        Box::new(StateList(
-            quickik_core::high_level::solve_sequence_segmented_parallel(
+        Box::new(BatchedSolver {
+            inner: quickik_core::batched_solver::BatchedSolver::new(
                 &tree.0,
-                core_config,
-                &sequence,
-                core_parallel_config,
+                mapper,
+                n_iterations,
+                neutral_weight,
+                position_tolerance,
+                angle_tolerance,
+                damping,
+                keypoints_order,
+                n_workers,
             ),
-        ))
+            mapper,
+        })
     })
+}
+
+/// Converts a core `BatchedSolverResult` into the bridge's flattened,
+/// batch-major `ffi::BatchedSolverResult`.
+fn batched_result_to_ffi(
+    result: &quickik_core::batched_solver::BatchedSolverResult,
+) -> ffi::BatchedSolverResult {
+    let batch_size = result.joint_angles.len();
+
+    let mut joint_angles = Vec::new();
+    let mut base_pos = Vec::new();
+    let mut base_quat = Vec::new();
+    for i in 0..batch_size {
+        joint_angles.extend_from_slice(&result.joint_angles[i]);
+        let p = result.base_pos[i];
+        base_pos.extend_from_slice(&[p.x, p.y, p.z]);
+        let q = result.base_quat[i].quaternion();
+        base_quat.extend_from_slice(&[q.w, q.i, q.j, q.k]);
+    }
+
+    let (keypoint_pos, has_keypoint_pos) = match &result.keypoint_pos {
+        Some(batch_positions) => {
+            let mut flat = Vec::new();
+            for positions in batch_positions {
+                flat.extend(flatten_positions(positions));
+            }
+            (flat, true)
+        }
+        None => (Vec::new(), false),
+    };
+
+    let (jacobian, has_jacobian) = match &result.jacobian {
+        Some(batch_jacobians) => {
+            let mut flat = Vec::new();
+            for jac in batch_jacobians {
+                flat.extend(flatten_matrix_row_major(jac));
+            }
+            (flat, true)
+        }
+        None => (Vec::new(), false),
+    };
+
+    let (cholesky_l, valid, has_cholesky_l) = match &result.cholesky_l {
+        Some(batch_cholesky) => {
+            // Every item shares the same state_dim as the jacobian
+            // (with_grad gates both the same way), so invalid items can be
+            // zero-filled to that same width.
+            let state_dim = result
+                .jacobian
+                .as_ref()
+                .and_then(|jacs| jacs.first())
+                .map_or(0, |jac| jac.ncols());
+            let mut flat = Vec::with_capacity(batch_size * state_dim * state_dim);
+            let mut valid_flags = Vec::with_capacity(batch_size);
+            for chol in batch_cholesky {
+                match chol {
+                    Some(chol) => {
+                        flat.extend(flatten_matrix_row_major(&chol.l()));
+                        valid_flags.push(true);
+                    }
+                    None => {
+                        flat.extend(std::iter::repeat_n(0.0, state_dim * state_dim));
+                        valid_flags.push(false);
+                    }
+                }
+            }
+            (flat, valid_flags, true)
+        }
+        None => (Vec::new(), Vec::new(), false),
+    };
+
+    ffi::BatchedSolverResult {
+        joint_angles,
+        base_pos,
+        base_quat,
+        keypoint_pos,
+        has_keypoint_pos,
+        jacobian,
+        has_jacobian,
+        cholesky_l,
+        has_cholesky_l,
+        valid,
+    }
+}
+
+impl BatchedSolver {
+    fn solve(
+        &self,
+        observations: &[ffi::KeypointObservation],
+        n_joints: usize,
+        with_grad: bool,
+        with_fk: bool,
+    ) -> Result<ffi::BatchedSolverResult, String> {
+        let inner = &self.inner;
+        catch_panic(move || {
+            let observations_array = split_into_frames(observations, n_joints);
+            batched_result_to_ffi(&inner.solve(&observations_array, with_grad, with_fk))
+        })
+    }
+    fn mapper(&self) -> ffi::Mapper {
+        runtime_mapper_to_ffi(self.mapper)
+    }
+    fn keypoint_to_joint_idx(&self) -> Vec<usize> {
+        self.inner.keypoint_to_joint_idx().to_vec()
+    }
 }
