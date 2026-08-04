@@ -12,8 +12,9 @@ struct Frame {
     rotation: UnitQuaternion<f32>,
 }
 
-/// A record of a single DOF's current configuration.
-struct DofRecord {
+/// A representation of a single DOF's current configuration, including its
+/// angle (hinge) or position (slide) and its placement in world coordinates.
+struct DofFrame {
     /// DOF's flat index in the state vector, starting from the tree's
     /// [`n_root_dofs`](crate::body_plan::KinematicTree::n_root_dofs)
     state_idx: usize,
@@ -30,21 +31,21 @@ struct DofRecord {
 
 /// Reusable workspace for forward kinematics computations, including memory
 /// buffers that should be allocated once and reused across multiple (typically
-/// all) calls to [`evaluate_fwdkin`].
+/// all) calls to [`forward_kinematics`].
 pub struct ForwardKinematicsWorkspace {
     /// Number of joints (and therefore keypoints) in the kinematic tree
     n_joints: usize,
     /// Keypoint positions in world coordinates
     pub kpt_positions: Vec<Vector3<f32>>,
-    /// Stacked per-keypoint Jacobians:
-    /// keypoint k's `3 x state_dim` block is rows `3*k .. 3*k+3`
+    /// Stacked per-keypoint Jacobians of shape (`3*n_joints x state_dim`).
+    /// Keypoint k's `3 x state_dim` block is rows `3*k .. 3*k+3`.
     pub kpt_jacobian: DMatrix<f32>,
     /// Records of which DOFs can affect each keypoint's position. This enables
     /// sparse Jacobian computation in the solver, since most DOFs do not impact
     /// any given keypoint.
-    pub relevant_dof_idxs_by_joint: Vec<Vec<usize>>,
-    /// Records of all DOFs in the kinematic tree in order of their flat indices
-    dof_records: Vec<DofRecord>,
+    pub upstream_dof_idxs_by_joint: Vec<Vec<usize>>,
+    /// All current body DOFs frames in order of their flat indices
+    dof_frames: Vec<DofFrame>,
 }
 
 impl ForwardKinematicsWorkspace {
@@ -55,30 +56,34 @@ impl ForwardKinematicsWorkspace {
             n_joints,
             kpt_positions: vec![Vector3::zeros(); n_joints],
             kpt_jacobian: DMatrix::zeros(3 * n_joints, state_dim),
-            relevant_dof_idxs_by_joint: std::iter::repeat_with(|| Vec::with_capacity(state_dim))
+            upstream_dof_idxs_by_joint: std::iter::repeat_with(|| Vec::with_capacity(state_dim))
                 .take(n_joints)
                 .collect(),
-            dof_records: Vec::with_capacity(kinematic_tree.n_dofs()),
+            dof_frames: Vec::with_capacity(kinematic_tree.n_dofs()),
         }
     }
 }
-pub fn evaluate_fwdkin(workspace: &mut ForwardKinematicsWorkspace, state: &State) {
+pub fn forward_kinematics(workspace: &mut ForwardKinematicsWorkspace, state: &State) {
     debug_assert_eq!(workspace.n_joints, state.kinematic_tree.n_joints());
 
-    // Matrix::fill is a generic, unspecialized per-element loop and it's ~60x
-    // slower than filling the underlying contiguous storage directly using
-    // matrix.as_mut_slice().fill.
+    // Use `.as_mut_slice().fill(0.0);` instead of of `.fill(0.0)`: the latter
+    // is generic while the former is specialized for contiguous storage of
+    // specific type and is ~60x faster.
+    workspace
+        .kpt_positions
+        .as_mut_slice()
+        .fill(Vector3::zeros());
     workspace.kpt_jacobian.as_mut_slice().fill(0.0);
-    workspace.dof_records.clear();
+    workspace.dof_frames.clear();
 
     let root_frame = Frame {
         origin: state.root_pos,
-        rotation: state.root_rot,
+        rotation: state.root_quat,
     };
     traverse_dfs(workspace, state, state.kinematic_tree.root_idx, root_frame);
 }
 
-/// Recursively traverses the kinematic tree in depth-first order, unrolling
+/// Recursively traverse the kinematic tree in depth-first order, unrolling
 /// forward kinematics and recording the Jacobian of each keypoint with respect
 /// to the DOF states.
 fn traverse_dfs(
@@ -89,9 +94,9 @@ fn traverse_dfs(
 ) {
     let joint = &state.kinematic_tree.joints[curr_joint_idx];
 
-    let n_records_before = workspace.dof_records.len();
+    let n_records_before = workspace.dof_frames.len();
     let (joint_origin, frame) =
-        evaluate_frame_at_joint(joint, parent_frame, state, &mut workspace.dof_records);
+        evaluate_frame_at_joint(joint, parent_frame, state, &mut workspace.dof_frames);
 
     // A joint's own DOFs (hinge or slide) never move its own keypoint, only its
     // descendants' (see this module's doc comment on `joint_origin` in
@@ -99,28 +104,31 @@ fn traverse_dfs(
     // `joint_origin` (computed before this joint's own DOFs) rather than
     // `frame.origin` (which children use, and which does reflect them).
     workspace.kpt_positions[curr_joint_idx] = joint_origin;
-    write_keypoint_jacobian(
+    update_jacobian_for_curr_keypoint(
         &mut workspace.kpt_jacobian,
         state,
         curr_joint_idx,
         joint_origin,
-        &workspace.dof_records[..n_records_before],
+        &workspace.dof_frames[..n_records_before],
     );
 
-    // Record which DOFs can affect this keypoint. Root pos/rot (if any --
-    // empty for a fixed-base tree) affect all.
-    workspace.relevant_dof_idxs_by_joint[curr_joint_idx].clear();
-    workspace.relevant_dof_idxs_by_joint[curr_joint_idx]
+    // Record which DOFs can affect this keypoint.
+    workspace.upstream_dof_idxs_by_joint[curr_joint_idx].clear();
+    // If the root is floating, its six DOFs affect all keypoints.
+    workspace.upstream_dof_idxs_by_joint[curr_joint_idx]
         .extend(0..state.kinematic_tree.n_root_dofs());
     for i in 0..n_records_before {
-        let state_idx = workspace.dof_records[i].state_idx;
-        workspace.relevant_dof_idxs_by_joint[curr_joint_idx].push(state_idx);
+        let state_idx = workspace.dof_frames[i].state_idx;
+        workspace.upstream_dof_idxs_by_joint[curr_joint_idx].push(state_idx);
     }
 
+    // Recurse to children joints
     for &child_idx in state.kinematic_tree.children_indices(curr_joint_idx) {
         traverse_dfs(workspace, state, child_idx, frame);
     }
-    workspace.dof_records.truncate(n_records_before);
+    // Revert to the DOF frames until the current point (i.e. discard downstream
+    // frames that are only for the children branches).
+    workspace.dof_frames.truncate(n_records_before);
 }
 
 /// Compute the frame of a single joint in world coordinates.
@@ -135,7 +143,7 @@ fn evaluate_frame_at_joint(
     joint: &Joint,
     parent_frame: Frame,
     state: &State,
-    dof_records: &mut Vec<DofRecord>,
+    dof_records: &mut Vec<DofFrame>,
 ) -> (Vector3<f32>, Frame) {
     // Start with parent frame...
     let own_origin = parent_frame.origin + parent_frame.rotation * joint.offset_pos;
@@ -143,23 +151,22 @@ fn evaluate_frame_at_joint(
     let mut origin_for_children = own_origin;
     let n_root_dofs = state.kinematic_tree.n_root_dofs();
 
-    // ... then apply the joint's own DOFs
+    // Then apply the joint's own DOFs
     for (i, dof) in joint.dofs.iter().enumerate() {
-        let axis_local = dof.axis;
+        let axis_local = dof.axis();
         let axis_world = rotation * axis_local;
-        let record = DofRecord {
-            state_idx: n_root_dofs + joint.dof_offset + i,
+        let record = DofFrame {
+            state_idx: n_root_dofs + joint.dof_startidx + i,
             dof_type: dof.dof_type,
             axis_world,
             origin_world: origin_for_children,
         };
         dof_records.push(record);
 
-        let value = state.dof_angles[joint.dof_offset + i]; // angle or slide pos
+        let value = state.dof_values[joint.dof_startidx + i]; // angle or slide pos
         match dof.dof_type {
             DofType::Hinge => {
-                // `Dof::axis` is already unit. Skip re-normalization here in
-                // the hot loop.
+                // `Dof::axis` is already unit, skip normalization here
                 let unit_axis_local = Unit::new_unchecked(axis_local);
                 rotation *= UnitQuaternion::from_axis_angle(&unit_axis_local, value);
             }
@@ -176,15 +183,15 @@ fn evaluate_frame_at_joint(
     )
 }
 
-/// Write the Jacobian of a single keypoint with respect to the state variables
-fn write_keypoint_jacobian(
-    jacobian: &mut DMatrix<f32>,
+/// Add entries of the Jacobian for the current keypoint to the Jacobian buffer.
+fn update_jacobian_for_curr_keypoint(
+    full_jacobian_buf: &mut DMatrix<f32>,
     state: &State,
-    node_idx: usize,
+    joint_idx: usize,
     pos: Vector3<f32>,
-    dof_records_until_now: &[DofRecord],
+    upstream_dof_frames: &[DofFrame],
 ) {
-    let row0 = 3 * node_idx;
+    let row0 = 3 * joint_idx;
     let row1: usize = row0 + 1;
     let row2: usize = row0 + 2;
 
@@ -193,37 +200,37 @@ fn write_keypoint_jacobian(
     if state.kinematic_tree.n_root_dofs() > 0 {
         // Root translation (state cols 0..3):
         // Moving the root moves every keypoint by the same amount
-        jacobian[(row0, 0)] = 1.0;
-        jacobian[(row1, 1)] = 1.0;
-        jacobian[(row2, 2)] = 1.0;
+        full_jacobian_buf[(row0, 0)] = 1.0;
+        full_jacobian_buf[(row1, 1)] = 1.0;
+        full_jacobian_buf[(row2, 2)] = 1.0;
 
-        // Root rotation (state cols 3..6):
-        // Rotate about the root's current position
+        // Root rotation (state cols 3..6): rotate about root's current position
         let radius = pos - state.root_pos;
         for (i, axis) in [Vector3::x(), Vector3::y(), Vector3::z()]
             .iter()
             .enumerate()
         {
             let d = axis.cross(&radius);
-            jacobian[(row0, 3 + i)] = d.x;
-            jacobian[(row1, 3 + i)] = d.y;
-            jacobian[(row2, 3 + i)] = d.z;
+            full_jacobian_buf[(row0, 3 + i)] = d.x;
+            full_jacobian_buf[(row1, 3 + i)] = d.y;
+            full_jacobian_buf[(row2, 3 + i)] = d.z;
         }
     }
 
-    // Upstream joint dofs. Note that each keypoint is only affected by a few
-    // DOFs, so this is rather sparse
-    for record in dof_records_until_now {
-        let jac = match record.dof_type {
+    // Upstream joint DOFs. Note that each keypoint is only affected by a few
+    // DOFs, so this is rather sparse.
+    for frame in upstream_dof_frames {
+        let jac = match frame.dof_type {
             // Rotating about `axis_world` through `origin_world` moves a
-            // point in its orbit: standard angular-velocity cross product.
-            DofType::Hinge => record.axis_world.cross(&(pos - record.origin_world)),
+            // point in its orbit, so this is the "angular velocity" cross
+            // product with the rotational axis.
+            DofType::Hinge => frame.axis_world.cross(&(pos - frame.origin_world)),
             // Sliding along `axis_world` moves every downstream point by the
             // same amount along that direction, regardless of position.
-            DofType::Slide => record.axis_world,
+            DofType::Slide => frame.axis_world,
         };
-        jacobian[(row0, record.state_idx)] = jac.x;
-        jacobian[(row1, record.state_idx)] = jac.y;
-        jacobian[(row2, record.state_idx)] = jac.z;
+        full_jacobian_buf[(row0, frame.state_idx)] = jac.x;
+        full_jacobian_buf[(row1, frame.state_idx)] = jac.y;
+        full_jacobian_buf[(row2, frame.state_idx)] = jac.z;
     }
 }

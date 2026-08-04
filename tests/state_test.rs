@@ -15,14 +15,14 @@ fn apply_delta_clamps_limited_dofs_but_not_unbounded_ones() {
     delta[7] = 10.0;
     state.apply_delta(&delta);
 
-    assert!((state.dof_angles[0] - 10.0).abs() < 1e-6);
-    assert!((state.dof_angles[1] - 0.5).abs() < 1e-6);
+    assert!((state.dof_values[0] - 10.0).abs() < 1e-6);
+    assert!((state.dof_values[1] - 0.5).abs() < 1e-6);
 
     // Push the limited DOF back down past its lower bound too.
     let mut delta = DVector::zeros(state.state_dim());
     delta[7] = -10.0;
     state.apply_delta(&delta);
-    assert!((state.dof_angles[1] - (-0.5)).abs() < 1e-6);
+    assert!((state.dof_values[1] - (-0.5)).abs() < 1e-6);
 }
 
 #[test]
@@ -52,8 +52,8 @@ fn apply_delta_on_fixed_base_tree_never_touches_root() {
     delta[1] = 10.0; // joint2 (limited to [-0.5, 0.5])
     state.apply_delta(&delta);
 
-    assert!((state.dof_angles[0] - 10.0).abs() < 1e-6);
-    assert!((state.dof_angles[1] - 0.5).abs() < 1e-6);
+    assert!((state.dof_values[0] - 10.0).abs() < 1e-6);
+    assert!((state.dof_values[1] - 0.5).abs() < 1e-6);
     assert_eq!(state.root_pos, nalgebra::Vector3::zeros());
-    assert_eq!(state.root_rot, nalgebra::UnitQuaternion::identity());
+    assert_eq!(state.root_quat, nalgebra::UnitQuaternion::identity());
 }

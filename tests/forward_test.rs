@@ -1,7 +1,7 @@
 mod common;
 
 use nalgebra::Vector3;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
 use quickik::state::State;
 
 #[test]
@@ -9,7 +9,7 @@ fn neutral_pose_positions() {
     let tree = common::two_joint_chain();
     let state = State::neutral_pose(tree.clone());
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     assert!((workspace.kpt_positions[0] - Vector3::new(0.0, 0.0, 0.0)).norm() < 1e-6);
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
@@ -21,9 +21,9 @@ fn bent_pose_positions() {
     let tree = common::two_joint_chain();
     let mut state = State::neutral_pose(tree.clone());
     // Rotate joint1 by 90 degrees about Z: joint2 should swing to (1, 1, 0).
-    state.dof_angles[0] = std::f32::consts::FRAC_PI_2;
+    state.dof_values[0] = std::f32::consts::FRAC_PI_2;
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-5);
     assert!((workspace.kpt_positions[2] - Vector3::new(1.0, 1.0, 0.0)).norm() < 1e-5);
@@ -39,27 +39,27 @@ fn active_indices_track_ancestor_dofs_not_own_dof() {
     let tree = common::two_joint_chain();
     let state = State::neutral_pose(tree.clone());
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     // root: only N_ROOT_DOFS, no ancestors.
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[0],
+        workspace.upstream_dof_idxs_by_joint[0],
         vec![0, 1, 2, 3, 4, 5]
     );
     // joint1: only N_ROOT_DOFS -- its own DOF (state index 6) never affects
     // its own keypoint.
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[1],
+        workspace.upstream_dof_idxs_by_joint[1],
         vec![0, 1, 2, 3, 4, 5]
     );
     // joint2: N_ROOT_DOFS plus joint1's DOF (its ancestor), not its own.
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[2],
+        workspace.upstream_dof_idxs_by_joint[2],
         vec![0, 1, 2, 3, 4, 5, 6]
     );
     // tip: N_ROOT_DOFS plus both upstream joints' DOFs.
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[3],
+        workspace.upstream_dof_idxs_by_joint[3],
         vec![0, 1, 2, 3, 4, 5, 6, 7]
     );
 }
@@ -73,18 +73,18 @@ fn active_indices_exclude_other_branches_dofs() {
     let tree = common::two_independent_single_dof_branches();
     let state = State::neutral_pose(tree.clone());
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     // branch_a_tip (index 2): N_ROOT_DOFS plus branch_a_joint's DOF (index
     // 0's flattened state index, 6) -- never branch_b_joint's (state index
     // 7), even though both are only one hop from the root.
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[2],
+        workspace.upstream_dof_idxs_by_joint[2],
         vec![0, 1, 2, 3, 4, 5, 6]
     );
     // branch_b_tip (index 4): symmetric, only branch_b_joint's DOF (7).
     assert_eq!(
-        workspace.relevant_dof_idxs_by_joint[4],
+        workspace.upstream_dof_idxs_by_joint[4],
         vec![0, 1, 2, 3, 4, 5, 7]
     );
 }
@@ -97,10 +97,10 @@ fn assert_jacobian_matches_finite_differences(
     dof_values: &[f32],
 ) {
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles.copy_from_slice(dof_values);
+    state.dof_values.copy_from_slice(dof_values);
 
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
     let analytical_jacobian = workspace.kpt_jacobian.clone();
     let baseline_positions = workspace.kpt_positions.clone();
 
@@ -111,7 +111,7 @@ fn assert_jacobian_matches_finite_differences(
         let mut perturbed = state.clone();
         perturbed.apply_delta(&delta);
 
-        evaluate_fwdkin(&mut workspace, &perturbed);
+        forward_kinematics(&mut workspace, &perturbed);
         for (k, (numerical_position, baseline_position)) in workspace
             .kpt_positions
             .iter()
@@ -161,9 +161,9 @@ fn jacobian_matches_finite_differences_with_hinge_and_slide_on_same_joint() {
 fn slide_dof_moves_only_descendants() {
     let tree = common::slide_joint_chain();
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles[0] = 0.5;
+    state.dof_values[0] = 0.5;
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     assert!((workspace.kpt_positions[0] - Vector3::new(0.0, 0.0, 0.0)).norm() < 1e-6);
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
@@ -177,10 +177,10 @@ fn slide_dof_moves_only_descendants() {
 fn hinge_then_slide_positions() {
     let tree = common::hinge_then_slide_chain();
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles[0] = std::f32::consts::FRAC_PI_2; // hinge_joint: 90 deg about Z
-    state.dof_angles[1] = 0.3; // slide_joint: slide by 0.3 along its local X
+    state.dof_values[0] = std::f32::consts::FRAC_PI_2; // hinge_joint: 90 deg about Z
+    state.dof_values[1] = 0.3; // slide_joint: slide by 0.3 along its local X
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-5);
     assert!((workspace.kpt_positions[2] - Vector3::new(1.0, 1.0, 0.0)).norm() < 1e-5);
@@ -196,12 +196,12 @@ fn fixed_base_tree_has_no_root_dofs_in_active_indices() {
     let tree = common::fixed_base_two_joint_chain();
     let state = State::neutral_pose(tree.clone());
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
-    assert_eq!(workspace.relevant_dof_idxs_by_joint[0], Vec::<usize>::new());
-    assert_eq!(workspace.relevant_dof_idxs_by_joint[1], Vec::<usize>::new());
-    assert_eq!(workspace.relevant_dof_idxs_by_joint[2], vec![0]);
-    assert_eq!(workspace.relevant_dof_idxs_by_joint[3], vec![0, 1]);
+    assert_eq!(workspace.upstream_dof_idxs_by_joint[0], Vec::<usize>::new());
+    assert_eq!(workspace.upstream_dof_idxs_by_joint[1], Vec::<usize>::new());
+    assert_eq!(workspace.upstream_dof_idxs_by_joint[2], vec![0]);
+    assert_eq!(workspace.upstream_dof_idxs_by_joint[3], vec![0, 1]);
 }
 
 /// A fixed-base tree's keypoints move exactly like its free-floating
@@ -213,7 +213,7 @@ fn fixed_base_tree_neutral_pose_matches_free_floating_counterpart() {
     let tree = common::fixed_base_two_joint_chain();
     let state = State::neutral_pose(tree.clone());
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     assert!((workspace.kpt_positions[0] - Vector3::new(0.0, 0.0, 0.0)).norm() < 1e-6);
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);
@@ -236,10 +236,10 @@ fn jacobian_matches_finite_differences_fixed_base() {
 fn hinge_and_slide_on_same_joint_cross_term() {
     let tree = common::joint_with_hinge_and_slide();
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles[0] = std::f32::consts::FRAC_PI_2;
-    state.dof_angles[1] = 0.5;
+    state.dof_values[0] = std::f32::consts::FRAC_PI_2;
+    state.dof_values[1] = 0.5;
     let mut workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
 
     // joint1's own keypoint is unaffected by either of its own DOFs.
     assert!((workspace.kpt_positions[1] - Vector3::new(1.0, 0.0, 0.0)).norm() < 1e-6);

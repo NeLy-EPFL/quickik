@@ -19,62 +19,87 @@ pub const N_ROOT_DOFS: usize = 6;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DofType {
-    /// Rotates about `axis`.
     Hinge,
-    /// Translates along `axis`.
     Slide,
 }
 
 /// A single degree of freedom (DOF) on the kinematic tree.
 #[derive(Clone, Copy, Debug)]
 pub struct Dof {
-    /// Rotational or translational axis in local frame (relative to the
-    /// joint's `offset_quat`). Must be unit length: forward kinematics
-    /// trusts this invariant (rather than re-normalizing on every solve
-    /// iteration) instead of checking it, so a `Dof` built directly (rather
-    /// than parsed from JSON, which normalizes it) must provide one itself.
-    pub axis: Vector3<f32>,
     /// Whether this is a hinge or slide DOF.
     pub dof_type: DofType,
+    /// Rotational or translational axis in local frame relative to the joint's
+    /// `offset_quat`). Normalized to unit length by [`Dof::new`].
+    axis: Vector3<f32>, // use explicit getter/setter to ensure normalization
     /// Neutral value of the DOF: an angle in radians for a hinge DOF, or a
     /// position for a slide DOF.
     pub neutral: f32,
     /// Optional angle limits in [min, max]. Unbounded if `None`.
     pub limits: Option<[f32; 2]>,
     /// Scales this DOF's contribution to the deviation-from-neutral penalty,
-    /// multiplied together with [`SolverConfig::neutral_weight`].
+    /// multiplied together with [`SolverConfig::neutral_weight`] (same pattern
+    /// as [`Joint::weight_scaler`]).
     ///
     /// [`SolverConfig::neutral_weight`]: crate::solver::SolverConfig::neutral_weight
     pub weight_scaler: f32,
+}
+
+impl Dof {
+    /// Construct a DOF, normalizing `axis` to unit length.
+    pub fn new(
+        dof_type: DofType,
+        axis: Vector3<f32>,
+        neutral: f32,
+        limits: Option<[f32; 2]>,
+        weight_scaler: f32,
+    ) -> Self {
+        Self {
+            dof_type,
+            axis: axis.normalize(),
+            neutral,
+            limits,
+            weight_scaler,
+        }
+    }
+
+    /// Rotational or translational axis in local frame relative to the
+    /// joint's `offset_quat`. Always unit length.
+    pub fn axis(&self) -> Vector3<f32> {
+        self.axis
+    }
+
+    /// Set the axis, normalizing it to unit length.
+    pub fn set_axis(&mut self, axis: Vector3<f32>) {
+        self.axis = axis.normalize();
+    }
 }
 
 /// An anatomical joint with any number of hinge and/or slide DOFs.
 /// Also serves as a tracking keypoint in the MoCap data.
 #[derive(Clone, Debug)]
 pub struct Joint {
-    /// Joint name, e.g. "lf_thorax_coxa"
+    /// Joint name.
     pub name: String,
-    /// Offset of the joint from its parent in the kinematic tree
+    /// Offset of the joint from its parent (i.e. length of the body segment
+    /// connecting the parent to this joint).
     pub offset_pos: Vector3<f32>,
-    /// Offset rotation of the joint from its parent in the kinematic tree
+    /// Offset rotation of the joint from its parent (i.e. "curvature" oof the
+    /// body segment connecting the parent to this joint).
     pub offset_quat: UnitQuaternion<f32>,
-    /// Hinge and/or slide DOFs at this joint. Can be empty. The ordering is
-    /// important (rotations and translations don't commute) and should be
-    /// consistent with MoCap data.
+    /// DOFs at this joint. Can be empty. The ordering is important because
+    /// 3D transformations are not commutative.
     pub dofs: Vec<Dof>,
-    /// Index of the parent joint in the body plan. Should be `None` for the
-    /// root joint, which is attached to the world: either via an imaginary
-    /// free joint (floating base), or fixed in place if the tree's
-    /// [`fixed_base`](KinematicTree::fixed_base) is set.
+    /// Index of the parent joint in the body plan. `None` for the root joint.
     pub parent: Option<usize>,
     /// Indices of this joint's direct children. Populated by
     // `KinematicTree::new`. Redundant with `parent` but useful as a cache.
     pub children: Vec<usize>,
     /// Index of this joint's 0th DOF in the flattened DOF vector of the
     /// kinematic tree.
-    pub dof_offset: usize,
-    /// Scales this joint's keypoint residual, multiplied together with each
-    /// frame's [`KeypointObservation`] weight for this keypoint.
+    pub dof_startidx: usize,
+    /// Scaling factor for the weight this joint's keypoint residual. The final
+    /// weight for this keypoint is the product of this factor and the
+    /// [`weight_scaler`](Dof::weight_scaler) of each observation.
     ///
     /// [`KeypointObservation`]: crate::observation::KeypointObservation
     pub weight_scaler: f32,
@@ -91,31 +116,20 @@ pub struct KinematicTree {
     /// Whether the root is fixed in the world (e.g. a robot arm bolted to a
     /// table) rather than a free-floating base with its own `N_ROOT_DOFS`.
     ///
-    /// A semi-fixed base (one that only slides along a rail or spins on a
-    /// turntable) isn't modeled by this flag. Instead, keep `fixed_base`
-    /// set and give the root a zero-offset child joint carrying the one
-    /// hinge/slide DOF the base actually has, then attach the rest of the
-    /// body to that joint: since a joint's own DOF only moves its
-    /// descendants (never its own keypoint), this joint acts as exactly that
-    /// one-DOF base, and, unlike the root's own DOFs, it gets `limits`
-    /// and `weight_scaler` like any other DOF.
+    /// In case of a semi-fixed base with some but not all six DOFs, keep the
+    /// base as fixed and give the root a zero-offset child joint carrying the
+    /// DOFs that the base actually has, then attache the rest of the body to
+    /// that joint.
     pub fixed_base: bool,
 }
 
 impl KinematicTree {
-    /// Construct a free-floating-base tree directly from parsed `joints` and
-    /// a `root_idx`, populating each joint's `children` from `parent`.
-    pub fn new(joints: Vec<Joint>, root_idx: usize) -> Self {
-        Self::new_impl(joints, root_idx, false)
-    }
-
-    /// Same as [`new`](Self::new), but the root is fixed in the world;
-    /// see [`fixed_base`](Self::fixed_base).
-    pub fn new_fixed_base(joints: Vec<Joint>, root_idx: usize) -> Self {
-        Self::new_impl(joints, root_idx, true)
-    }
-
-    fn new_impl(mut joints: Vec<Joint>, root_idx: usize, fixed_base: bool) -> Self {
+    /// Construct a tree directly from parsed `joints` and a `root_idx`,
+    /// populating each joint's `children` from `parent`. See
+    /// [`fixed_base`](Self::fixed_base) for the `fixed_base` argument.
+    pub fn new(mut joints: Vec<Joint>, root_idx: usize, fixed_base: bool) -> Self {
+        // Build list of children for each joint. Cache it for O(1) access in
+        // the solver hot loop
         for i in 0..joints.len() {
             if let Some(parent_idx) = joints[i].parent {
                 joints[parent_idx].children.push(i);
@@ -146,7 +160,7 @@ impl KinematicTree {
         self.n_root_dofs() + self.n_dofs()
     }
 
-    /// Return indices of the direct children of the joint at the given index
+    /// Indices of the direct children joints of the joint at the given index
     pub fn children_indices(&self, joint_idx: usize) -> &[usize] {
         &self.joints[joint_idx].children
     }
@@ -160,14 +174,14 @@ impl KinematicTree {
             let dofs = joint_spec
                 .dofs
                 .into_iter()
-                .map(|dof| Dof {
-                    // Normalized once here rather than on every solve
-                    // iteration -- see `Dof::axis`'s doc comment.
-                    axis: Vector3::from(dof.axis).normalize(),
-                    dof_type: dof.dof_type,
-                    neutral: dof.neutral,
-                    limits: dof.limits,
-                    weight_scaler: dof.weight_scaler,
+                .map(|dof| {
+                    Dof::new(
+                        dof.dof_type,
+                        Vector3::from(dof.axis),
+                        dof.neutral,
+                        dof.limits,
+                        dof.weight_scaler,
+                    )
                 })
                 .collect();
             let joint = Joint {
@@ -177,13 +191,13 @@ impl KinematicTree {
                 dofs,
                 parent: parent_idx,
                 children: Vec::new(),
-                dof_offset: curr_dof_offset,
+                dof_startidx: curr_dof_offset,
                 weight_scaler: joint_spec.weight_scaler,
             };
             joints.push(joint);
             curr_dof_offset += n_dofs;
         }
-        Self::new_impl(joints, root_idx, body.fixed_base)
+        Self::new(joints, root_idx, body.fixed_base)
     }
 
     pub fn from_json_str(json_str: &str) -> Self {

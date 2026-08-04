@@ -46,8 +46,8 @@ fn parses_joints_parents_and_dof_offsets() {
     assert_eq!(tree.joints[1].parent, Some(0));
     assert_eq!(tree.joints[2].parent, Some(1));
 
-    assert_eq!(tree.joints[1].dof_offset, 0);
-    assert_eq!(tree.joints[2].dof_offset, 1);
+    assert_eq!(tree.joints[1].dof_startidx, 0);
+    assert_eq!(tree.joints[2].dof_startidx, 1);
     assert_eq!(tree.joints[2].dofs[0].neutral, 0.1);
     assert_eq!(tree.joints[2].dofs[0].limits, Some([-0.5, 0.5]));
 
@@ -139,7 +139,7 @@ fn parses_slide_dofs() {
     assert_eq!(dof.neutral, 0.5);
     assert_eq!(dof.limits, Some([-1.0, 1.0]));
     // Non-unit axes are normalized once at parse time, same as hinge DOFs.
-    assert!((dof.axis - nalgebra::Vector3::new(0.0, 0.0, 1.0)).norm() < 1e-6);
+    assert!((dof.axis() - nalgebra::Vector3::new(0.0, 0.0, 1.0)).norm() < 1e-6);
 }
 
 #[test]
