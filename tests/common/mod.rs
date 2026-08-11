@@ -22,39 +22,33 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint1 = Joint {
         name: "joint1".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint2 = Joint {
         name: "joint2".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: Some([-0.5, 0.5]),
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(
+            DofType::Hinge,
+            Vector3::z(),
+            0.0,
+            Some([-0.5, 0.5]),
+            1.0,
+        )],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
     let tip = Joint {
@@ -64,10 +58,14 @@ pub fn two_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(2),
         children: Vec::new(),
-        dof_offset: 2,
+        dof_startidx: 2,
         weight_scaler: 1.0,
     };
-    Arc::new(KinematicTree::new(vec![root, joint1, joint2, tip], 0))
+    Arc::new(KinematicTree::new(
+        vec![root, joint1, joint2, tip],
+        0,
+        false,
+    ))
 }
 
 /// A root with two independent single-DOF branches (each a joint + a fixed
@@ -93,23 +91,17 @@ pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let branch_a_joint = Joint {
         name: "branch_a_joint".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let branch_a_tip = Joint {
@@ -119,23 +111,17 @@ pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
     let branch_b_joint = Joint {
         name: "branch_b_joint".to_string(),
         offset_pos: Vector3::new(-1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
     let branch_b_tip = Joint {
@@ -145,7 +131,7 @@ pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(3),
         children: Vec::new(),
-        dof_offset: 2,
+        dof_startidx: 2,
         weight_scaler: 1.0,
     };
     Arc::new(KinematicTree::new(
@@ -157,6 +143,7 @@ pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
             branch_b_tip,
         ],
         0,
+        false,
     ))
 }
 
@@ -178,23 +165,17 @@ pub fn slide_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint1 = Joint {
         name: "joint1".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::x(),
-            dof_type: DofType::Slide,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let tip = Joint {
@@ -204,10 +185,10 @@ pub fn slide_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
-    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0))
+    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0, false))
 }
 
 /// A chain combining a hinge and a slide DOF on separate joints, so the
@@ -228,39 +209,27 @@ pub fn hinge_then_slide_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let hinge_joint = Joint {
         name: "hinge_joint".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let slide_joint = Joint {
         name: "slide_joint".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::x(),
-            dof_type: DofType::Slide,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0)],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
     let tip = Joint {
@@ -270,12 +239,13 @@ pub fn hinge_then_slide_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(2),
         children: Vec::new(),
-        dof_offset: 2,
+        dof_startidx: 2,
         weight_scaler: 1.0,
     };
     Arc::new(KinematicTree::new(
         vec![root, hinge_joint, slide_joint, tip],
         0,
+        false,
     ))
 }
 
@@ -295,39 +265,33 @@ pub fn fixed_base_two_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint1 = Joint {
         name: "joint1".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: None,
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint2 = Joint {
         name: "joint2".to_string(),
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof {
-            axis: Vector3::z(),
-            dof_type: DofType::Hinge,
-            neutral: 0.0,
-            limits: Some([-0.5, 0.5]),
-            weight_scaler: 1.0,
-        }],
+        dofs: vec![Dof::new(
+            DofType::Hinge,
+            Vector3::z(),
+            0.0,
+            Some([-0.5, 0.5]),
+            1.0,
+        )],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 1,
+        dof_startidx: 1,
         weight_scaler: 1.0,
     };
     let tip = Joint {
@@ -337,13 +301,10 @@ pub fn fixed_base_two_joint_chain() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(2),
         children: Vec::new(),
-        dof_offset: 2,
+        dof_startidx: 2,
         weight_scaler: 1.0,
     };
-    Arc::new(KinematicTree::new_fixed_base(
-        vec![root, joint1, joint2, tip],
-        0,
-    ))
+    Arc::new(KinematicTree::new(vec![root, joint1, joint2, tip], 0, true))
 }
 
 /// A single joint carrying both a hinge DOF (applied first) and a slide DOF,
@@ -364,7 +325,7 @@ pub fn joint_with_hinge_and_slide() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: None,
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let joint1 = Joint {
@@ -372,24 +333,12 @@ pub fn joint_with_hinge_and_slide() -> Arc<KinematicTree> {
         offset_pos: Vector3::new(1.0, 0.0, 0.0),
         offset_quat: UnitQuaternion::identity(),
         dofs: vec![
-            Dof {
-                axis: Vector3::z(),
-                dof_type: DofType::Hinge,
-                neutral: 0.0,
-                limits: None,
-                weight_scaler: 1.0,
-            },
-            Dof {
-                axis: Vector3::x(),
-                dof_type: DofType::Slide,
-                neutral: 0.0,
-                limits: None,
-                weight_scaler: 1.0,
-            },
+            Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0),
+            Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0),
         ],
         parent: Some(0),
         children: Vec::new(),
-        dof_offset: 0,
+        dof_startidx: 0,
         weight_scaler: 1.0,
     };
     let tip = Joint {
@@ -399,8 +348,8 @@ pub fn joint_with_hinge_and_slide() -> Arc<KinematicTree> {
         dofs: vec![],
         parent: Some(1),
         children: Vec::new(),
-        dof_offset: 2,
+        dof_startidx: 2,
         weight_scaler: 1.0,
     };
-    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0))
+    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0, false))
 }

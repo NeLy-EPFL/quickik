@@ -1,10 +1,9 @@
 //! PyO3 bindings for the `quickik` crate. Mirrors the Rust API where
-//! reasonable; the main departure is the mapper: Rust's `Solver<M>` /
-//! `SequenceSolver<M>` / `BatchedSolver<M>` are generic over the mapper type
-//! at compile time, but Python has no equivalent, so every Python-facing
-//! solver is backed by a single `Mapper` enum (`Camera`, `XYView`, or none)
-//! chosen at runtime instead. `mapper` is a constructor-only, read-only
-//! property on all three, so it can never be swapped mid-lifetime.
+//! reasonable, including the projection: the core crate's `Projection` is a
+//! plain `Copy` value built from `new_3d`/`new_ortho_xy`/`new_pinhole_camera`,
+//! so the Python class wraps it one-to-one with the same three constructors.
+//! `projection` is a constructor-only, read-only property on all three
+//! solvers, so it can never be swapped mid-lifetime.
 //!
 //! Submodules mirror the core crate's own layout (`body_plan`, `observation`,
 //! `state`, `solver`, `sequential_solver`, `batched_solver`).
@@ -38,7 +37,7 @@ pub(crate) fn catch_panic<T>(f: impl FnOnce() -> T) -> PyResult<T> {
 
 use batched_solver::{BatchedSolver, BatchedSolverResult};
 use body_plan::KinematicTree;
-use observation::{Camera, KeypointObservation, XYView};
+use observation::{KeypointObservation, Projection};
 use sequential_solver::SequenceSolver;
 use solver::{Solver, SolverResult};
 use state::State;
@@ -48,8 +47,7 @@ fn quickik(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<KinematicTree>()?;
     m.add_class::<State>()?;
     m.add_class::<KeypointObservation>()?;
-    m.add_class::<Camera>()?;
-    m.add_class::<XYView>()?;
+    m.add_class::<Projection>()?;
     m.add_class::<SolverResult>()?;
     m.add_class::<Solver>()?;
     m.add_class::<SequenceSolver>()?;

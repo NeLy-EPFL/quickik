@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
+use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
 use quickik::observation::KeypointObservation;
 use quickik::state::State;
 
@@ -51,11 +51,11 @@ const G1_BASELINE: Baseline = Baseline {
 /// target difficulty rather than any change in per-iteration cost.
 fn small_perturbation_target(tree: &Arc<KinematicTree>) -> Vec<KeypointObservation> {
     let mut perturbed = State::neutral_pose(tree.clone());
-    for (i, angle) in perturbed.dof_angles.iter_mut().enumerate() {
+    for (i, angle) in perturbed.dof_values.iter_mut().enumerate() {
         *angle += 0.1 * (i as f32 * 1.37).sin();
     }
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    evaluate_fwdkin(&mut workspace, &perturbed);
+    forward_kinematics(&mut workspace, &perturbed);
 
     workspace
         .kpt_positions

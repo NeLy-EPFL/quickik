@@ -1,13 +1,11 @@
 use nalgebra::DMatrix;
-use numpy::ndarray::Array2;
 use numpy::{IntoPyArray, PyArray2};
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
 use crate::catch_panic;
 use crate::observation::{
-    KeypointObservation, Mapper, extract_mapper, extract_observations, mapper_to_py,
-    positions_to_pyarray,
+    KeypointObservation, Projection, as_row_major, extract_observations, positions_to_pyarray,
 };
 use crate::state::State;
 
@@ -17,13 +15,7 @@ pub(crate) fn matrix_to_pyarray<'py>(
     py: Python<'py>,
     mat: &DMatrix<f32>,
 ) -> Bound<'py, PyArray2<f32>> {
-    let mut arr = Array2::<f32>::zeros((mat.nrows(), mat.ncols()));
-    for r in 0..mat.nrows() {
-        for c in 0..mat.ncols() {
-            arr[[r, c]] = mat[(r, c)];
-        }
-    }
-    arr.into_pyarray(py)
+    as_row_major(mat).to_owned().into_pyarray(py)
 }
 
 /// The converged pose (and, optionally, linearization) from one
@@ -45,7 +37,7 @@ impl SolverResult {
     /// for `.state.dof_angles`.
     #[getter]
     fn dof_angles(&self) -> Vec<f32> {
-        self.inner.state.dof_angles.clone()
+        self.inner.state.dof_values.clone()
     }
 
     /// Position of the root joint in world coordinates. Shorthand for
@@ -59,7 +51,7 @@ impl SolverResult {
     /// `(w, x, y, z)`. Shorthand for `.state.root_rot`.
     #[getter]
     fn root_rot(&self) -> (f32, f32, f32, f32) {
-        let q = self.inner.state.root_rot.quaternion();
+        let q = self.inner.state.root_quat.quaternion();
         (q.w, q.i, q.j, q.k)
     }
 
@@ -75,7 +67,7 @@ impl SolverResult {
     }
 
     /// World-space keypoint positions (`(n_joints, 3)` float32, always 3D
-    /// regardless of the solver's mapper), in `KinematicTree`'s joint order.
+    /// regardless of the solver's projection), in `KinematicTree`'s joint order.
     /// `None` unless `solve` was called with `with_fk=True`.
     #[getter]
     fn keypoint_pos<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray2<f32>>> {
@@ -85,10 +77,12 @@ impl SolverResult {
             .map(|p| positions_to_pyarray(py, p))
     }
 
-    /// The keypoint-position Jacobian (`(3 * n_joints, state_dim)` float32)
-    /// at (approximately) the converged pose. See
-    /// `quickik_core::solver::Solver::solve`'s docs for exactly which pose.
-    /// `None` unless `solve` was called with `with_grad=True`.
+    /// The residual Jacobian at (approximately) the converged pose: float32,
+    /// `(3 * n_joints, state_dim)` for a 3D projection, or
+    /// `(2 * n_joints, state_dim)` otherwise, in which case it's already
+    /// mapped through that projection. See
+    /// `quickik_core::solver::SolverResult::jacobian`'s docs. `None` unless
+    /// `solve` was called with `with_grad=True`.
     #[getter]
     fn jacobian<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray2<f32>>> {
         self.inner
@@ -121,49 +115,44 @@ impl SolverResult {
 
 /// The inverse kinematics solver.
 ///
-/// `mapper` is a `Camera`, an `XYView`, or `None` (the default, for 3D-only
-/// observations); it's fixed for this `Solver`'s lifetime, mirroring Rust's
-/// `Solver<M>` generic parameter, so there's no setter, only the read-only
-/// `mapper` property. The other tuning parameters (`n_iterations`,
-/// `neutral_weight`, `position_tolerance`, `angle_tolerance`, `damping`) are
-/// plain attributes, freely retunable between `solve` calls.
+/// `projection` says what space this solver's observations live in; it
+/// defaults to `Projection.new_3d()` and is fixed for this `Solver`'s
+/// lifetime, so there's no setter, only the read-only `projection` property.
+/// The other tuning parameters (`n_iterations`, `neutral_weight`,
+/// `position_tolerance`, `angle_tolerance`, `damping`) are plain attributes,
+/// freely retunable between `solve` calls.
 #[pyclass(module = "quickik")]
 pub(crate) struct Solver {
-    inner: quickik_core::solver::Solver<Mapper>,
-    mapper: Mapper,
+    inner: quickik_core::solver::Solver,
 }
 
 #[pymethods]
 impl Solver {
-    /// Raises `ValueError` if `mapper` is not a `Camera`, an `XYView`, or
-    /// `None`.
     #[new]
     #[pyo3(signature = (
-        kinematic_tree, mapper=None, n_iterations=10, neutral_weight=1e-3,
+        kinematic_tree, projection=Projection::default(), n_iterations=10, neutral_weight=1e-3,
         position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         kinematic_tree: KinematicTree,
-        mapper: Option<Bound<'_, PyAny>>,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
         damping: f32,
     ) -> PyResult<Self> {
-        let mapper = extract_mapper(mapper.as_ref())?;
         Ok(Solver {
             inner: quickik_core::solver::Solver::new(
                 &kinematic_tree.inner,
-                mapper,
+                projection.inner,
                 n_iterations,
                 neutral_weight,
                 position_tolerance,
                 angle_tolerance,
                 damping,
             ),
-            mapper,
         })
     }
 
@@ -190,11 +179,12 @@ impl Solver {
         })
     }
 
-    /// Fixed at construction (read-only); mutating the returned object has
-    /// no effect on this solver.
+    /// Fixed at construction (read-only).
     #[getter]
-    fn mapper(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        mapper_to_py(py, self.mapper)
+    fn projection(&self) -> Projection {
+        Projection {
+            inner: self.inner.projection(),
+        }
     }
 
     /// Number of Gauss-Newton steps per `solve` call. Also the cap on early

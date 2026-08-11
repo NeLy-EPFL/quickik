@@ -102,9 +102,9 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
   std::printf("== Synthetic exact-fit frames (bug hunt) ==\n");
   std::printf("%6s %16s %16s %18s %20s\n", "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)");
 
-  auto default_solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto default_solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                              kPositionTolerance, kAngleTolerance, kDamping);
-  auto zero_reg_solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto zero_reg_solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                               kAngleTolerance, kDamping);
 
   size_t i = 0;
@@ -144,7 +144,7 @@ void run_correctness(const BodyPlan &plan, const Json &fixtures, rust::Box<quick
     auto obs = build_observations(to_vec3s(frame["target_ego"]));
     flat.insert(flat.end(), obs.begin(), obs.end());
   }
-  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto seq = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                            kPositionTolerance, kAngleTolerance, kDamping);
   auto results = seq->solve(slice_of(flat), n_joints, false, false);
 
@@ -215,7 +215,7 @@ std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree>
                                                 const std::vector<quickik::KeypointObservation> &obs, int n_calls,
                                                 float neutral_weight, float position_tolerance,
                                                 float angle_tolerance) {
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, neutral_weight, position_tolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, neutral_weight, position_tolerance,
                                      angle_tolerance, kDamping);
   for (int i = 0; i < 500; i++) {
     auto state = quickik::state_neutral_pose(*tree);
@@ -241,11 +241,11 @@ std::vector<double> bench_single_frame_latency(rust::Box<quickik::KinematicTree>
 std::vector<double> bench_solve_sequence(rust::Box<quickik::KinematicTree> &tree,
                                           const std::vector<std::vector<quickik::KeypointObservation>> &all_obs) {
   size_t n_joints = all_obs.front().size();
-  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto seq = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                            kPositionTolerance, kAngleTolerance, kDamping);
   for (auto &obs : all_obs) seq->solve(slice_of(obs), n_joints, false, false);
 
-  auto timed_seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto timed_seq = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                                  kPositionTolerance, kAngleTolerance, kDamping);
   std::vector<double> samples;
   samples.reserve(all_obs.size());
@@ -292,7 +292,7 @@ double bench_multithread_sequence_throughput(rust::Box<quickik::KinematicTree> &
   flat.reserve(sequence.size() * n_joints);
   for (auto &obs : sequence) flat.insert(flat.end(), obs.begin(), obs.end());
 
-  auto seq = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto seq = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                            kPositionTolerance, kAngleTolerance, kDamping);
   auto run_once = [&] { return seq->solve_segments_parallel(slice_of(flat), n_joints, n_workers, false, false); };
   run_once();  // warm up

@@ -5,50 +5,45 @@ use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
 use crate::catch_panic;
-use crate::observation::{
-    Mapper, extract_mapper, mapper_to_py, observations_from_arrays, validate_position_weight_shapes,
-};
+use crate::observation::{Projection, observations_from_arrays, validate_position_weight_shapes};
 use crate::solver::SolverResult;
 
 /// Warm-started solving for a continuous sequence of frames; see
 /// `quickik_core::sequential_solver::SequenceSolver`'s docs for exactly what
 /// "warm-started" means and how `solve_segments_parallel` relates to it.
 ///
-/// `mapper` is fixed for this object's lifetime, mirroring `Solver`'s own
-/// `mapper` property (no setter). Unlike `Solver`, the other tuning
+/// `projection` is fixed for this object's lifetime, mirroring `Solver`'s own
+/// `projection` property (no setter). Unlike `Solver`, the other tuning
 /// parameters (`n_iterations`, `neutral_weight`, ...) aren't exposed as
 /// retunable attributes here.
 #[pyclass(module = "quickik")]
 pub(crate) struct SequenceSolver {
-    inner: quickik_core::sequential_solver::SequenceSolver<Mapper>,
+    inner: quickik_core::sequential_solver::SequenceSolver,
     kinematic_tree: Arc<quickik_core::body_plan::KinematicTree>,
-    mapper: Mapper,
 }
 
 #[pymethods]
 impl SequenceSolver {
-    /// Starts a new continuous sequence at the neutral pose. Raises
-    /// `ValueError` if `mapper` is not a `Camera`, an `XYView`, or `None`.
+    /// Starts a new continuous sequence at the neutral pose.
     #[new]
     #[pyo3(signature = (
-        kinematic_tree, mapper=None, n_iterations=10, neutral_weight=1e-3,
+        kinematic_tree, projection=Projection::default(), n_iterations=10, neutral_weight=1e-3,
         position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         kinematic_tree: KinematicTree,
-        mapper: Option<Bound<'_, PyAny>>,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
         angle_tolerance: f32,
         damping: f32,
     ) -> PyResult<Self> {
-        let mapper = extract_mapper(mapper.as_ref())?;
         Ok(SequenceSolver {
             inner: quickik_core::sequential_solver::SequenceSolver::new(
                 &kinematic_tree.inner,
-                mapper,
+                projection.inner,
                 n_iterations,
                 neutral_weight,
                 position_tolerance,
@@ -56,7 +51,6 @@ impl SequenceSolver {
                 damping,
             ),
             kinematic_tree: Arc::clone(&kinematic_tree.inner),
-            mapper,
         })
     }
 
@@ -65,8 +59,8 @@ impl SequenceSolver {
     /// class docstring). Returns one `SolverResult` per frame.
     ///
     /// `weights` is `(n_frames, n_joints)`; `positions` is `(n_frames,
-    /// n_joints, 3)` if `mapper` is `None` (3D observations), or `(n_frames,
-    /// n_joints, 2)` if set (2D observations, projected by that mapper). Both
+    /// n_joints, 3)` for a 3D projection, or `(n_frames, n_joints, 2)`
+    /// otherwise (2D observations in that projection's space). Both
     /// are in `kinematic_tree.joints` order; a keypoint with `weight <= 0`
     /// (or NaN) is treated as missing. Given as raw arrays rather than a list
     /// of per-frame `KeypointObservation` lists so this never constructs one
@@ -87,7 +81,7 @@ impl SequenceSolver {
             &positions_arr,
             &weights_arr,
             self.kinematic_tree.n_joints(),
-            self.mapper.is_set(),
+            !self.inner.projection().is_3d(),
         )?;
         let sequence = observations_from_arrays(positions_arr, weights_arr);
         let inner = &mut self.inner;
@@ -125,7 +119,7 @@ impl SequenceSolver {
             &positions_arr,
             &weights_arr,
             self.kinematic_tree.n_joints(),
-            self.mapper.is_set(),
+            !self.inner.projection().is_3d(),
         )?;
         let inner = &self.inner;
         py.detach(|| {
@@ -140,10 +134,11 @@ impl SequenceSolver {
         })
     }
 
-    /// Fixed at construction (read-only); mutating the returned object has
-    /// no effect on this solver.
+    /// Fixed at construction (read-only).
     #[getter]
-    fn mapper(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        mapper_to_py(py, self.mapper)
+    fn projection(&self) -> Projection {
+        Projection {
+            inner: self.inner.projection(),
+        }
     }
 }

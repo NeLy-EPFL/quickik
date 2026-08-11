@@ -22,7 +22,7 @@ impl State {
     /// Angles of all joint DOFs, in body-plan order.
     #[getter]
     fn dof_angles(&self) -> Vec<f32> {
-        self.inner.dof_angles.clone()
+        self.inner.dof_values.clone()
     }
 
     /// Position of the root joint in world coordinates.
@@ -35,7 +35,7 @@ impl State {
     /// `(w, x, y, z)`.
     #[getter]
     fn root_rot(&self) -> (f32, f32, f32, f32) {
-        let q = self.inner.root_rot.quaternion();
+        let q = self.inner.root_quat.quaternion();
         (q.w, q.i, q.j, q.k)
     }
 

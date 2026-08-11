@@ -115,7 +115,7 @@ bool test_recovers_pose_from_3d_observations() {
   auto observations = observations_for(0.4f, 0.3f);
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -133,7 +133,7 @@ bool test_solve_with_fk_reports_keypoint_positions_matching_recovered_pose() {
   auto observations = observations_for(0.4f, 0.3f);
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, true);
 
@@ -158,7 +158,7 @@ bool test_solve_without_with_fk_or_with_grad_leaves_optional_fields_empty() {
   for (size_t i = 0; i < tree->n_joints(); i++) observations.push_back(quickik::keypoint_missing());
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -177,7 +177,7 @@ bool test_solve_with_grad_reports_jacobian_and_cholesky_l() {
   auto observations = observations_for(0.4f, 0.3f);
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), true, false);
 
@@ -192,7 +192,7 @@ bool test_solve_with_grad_reports_jacobian_and_cholesky_l() {
   return ok;
 }
 
-bool test_position2d_observation_on_mapperless_solver_throws() {
+bool test_position2d_observation_on_3d_projection_solver_throws() {
   bool ok = true;
   auto tree = two_joint_chain();
   auto state = quickik::state_neutral_pose(*tree);
@@ -200,11 +200,11 @@ bool test_position2d_observation_on_mapperless_solver_throws() {
   for (size_t i = 0; i < tree->n_joints(); i++) observations.push_back(quickik::keypoint_missing());
   observations[1] = quickik::keypoint_position_2d({1.0f, 0.0f}, 1.0f);
 
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   try {
     solver->solve(*state, slice_of(observations), false, false);
-    std::fprintf(stderr, "  FAILED: expected an exception for a Position2D observation with no mapper set\n");
+    std::fprintf(stderr, "  FAILED: expected an exception for a Position2D observation with no projection set\n");
     ok = false;
   } catch (const std::exception &) {
     // expected: the underlying panic is caught and rethrown as a C++
@@ -213,7 +213,28 @@ bool test_position2d_observation_on_mapperless_solver_throws() {
   return ok;
 }
 
-bool test_recovers_pose_from_xyview_observations() {
+// All three solvers report back the projection they were built with, so a
+// caller can tell which observation kind a given solver expects.
+bool test_every_solver_reports_the_projection_it_was_built_with() {
+  bool ok = true;
+  auto tree = two_joint_chain();
+  auto solver = quickik::new_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f,
+                                    kPositionTolerance, kAngleTolerance, kDamping);
+  auto solver_3d = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
+                                       kPositionTolerance, kAngleTolerance, kDamping);
+  auto seq = quickik::new_sequence_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f,
+                                          kPositionTolerance, kAngleTolerance, kDamping);
+
+#define CHECK(cond) \
+  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
+  CHECK(solver->projection().kind == quickik::ProjectionKind::XYOrthoProjection);
+  CHECK(solver_3d->projection().kind == quickik::ProjectionKind::NoProjection);
+  CHECK(seq->projection().kind == quickik::ProjectionKind::XYOrthoProjection);
+#undef CHECK
+  return ok;
+}
+
+bool test_recovers_pose_from_ortho_xy_observations() {
   bool ok = true;
   auto tree = two_joint_chain();
   auto positions = two_link_positions(0.35f, -0.25f);
@@ -224,7 +245,7 @@ bool test_recovers_pose_from_xyview_observations() {
   }
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::xyview_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -259,7 +280,7 @@ bool test_recovers_pose_from_camera_observations() {
   }
 
   auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::camera_mapper(camera), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_pinhole_camera(camera), kNIterations, 0.0f, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -271,7 +292,7 @@ bool test_recovers_pose_from_camera_observations() {
   return ok;
 }
 
-// Sanity check, not a benchmark (see benchmark/ for real numbers): XYView's
+// Sanity check, not a benchmark (see benchmark/ for real numbers): XYOrtho's
 // per-keypoint sparse-accumulation path (solver.rs's Position2D branch)
 // shouldn't be dramatically slower than the Position3D path it mirrors. A
 // generous factor: this only needs to catch a gross regression (e.g. an
@@ -279,8 +300,8 @@ bool test_recovers_pose_from_camera_observations() {
 // parity, since single-frame timing on this tiny fixture is dominated by
 // FFI call overhead common to both paths.
 double mean_solve_seconds(rust::Box<quickik::KinematicTree> &tree,
-                           const std::vector<quickik::KeypointObservation> &observations, quickik::Mapper mapper) {
-  auto solver = quickik::new_solver(*tree, mapper, kNIterations, kNeutralWeight, kPositionTolerance, kAngleTolerance,
+                           const std::vector<quickik::KeypointObservation> &observations, quickik::Projection projection) {
+  auto solver = quickik::new_solver(*tree, projection, kNIterations, kNeutralWeight, kPositionTolerance, kAngleTolerance,
                                      kDamping);
   auto warm_state = quickik::state_neutral_pose(*tree);
   solver->solve(*warm_state, slice_of(observations), false, false);  // warm up
@@ -295,7 +316,7 @@ double mean_solve_seconds(rust::Box<quickik::KinematicTree> &tree,
   return std::chrono::duration<double>(elapsed).count() / kNCalls;
 }
 
-bool test_xyview_latency_not_much_worse_than_3d() {
+bool test_ortho_xy_latency_not_much_worse_than_3d() {
   bool ok = true;
   auto tree = two_joint_chain();
   auto positions = two_link_positions(0.4f, 0.3f);
@@ -304,8 +325,8 @@ bool test_xyview_latency_not_much_worse_than_3d() {
   std::vector<quickik::KeypointObservation> observations_2d;
   for (auto &pos : positions) observations_2d.push_back(quickik::keypoint_position_2d({pos[0], pos[1]}, 1.0f));
 
-  double t_3d = mean_solve_seconds(tree, observations_3d, quickik::no_mapper());
-  double t_2d = mean_solve_seconds(tree, observations_2d, quickik::xyview_mapper());
+  double t_3d = mean_solve_seconds(tree, observations_3d, quickik::projection_3d());
+  double t_2d = mean_solve_seconds(tree, observations_2d, quickik::projection_ortho_xy());
 
 #define CHECK(cond) \
   if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
@@ -324,7 +345,7 @@ bool test_missing_observations_leave_state_at_neutral_prior() {
     observations.push_back(quickik::keypoint_missing());
   }
 
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -346,7 +367,7 @@ bool test_solver_fields_can_be_tuned_between_solve_calls() {
     observations.push_back(quickik::keypoint_missing());
   }
 
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   solver->solve(*state, slice_of(observations), false, false);
 
@@ -374,7 +395,7 @@ bool test_solve_respects_joint_limits() {
       quickik::keypoint_position_3d({2.3624f, 0.9320f, 0.0f}, 1.0f),
   };
 
-  auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                      kAngleTolerance, kDamping);
   auto result = solver->solve(*state, slice_of(observations), false, false);
 
@@ -392,12 +413,12 @@ bool test_sequence_solver_warm_starts_across_separate_calls() {
   auto tree = two_joint_chain();
   auto target = observations_for(0.4f, 0.3f);
 
-  auto cold = quickik::new_sequence_solver(*tree, quickik::no_mapper(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
+  auto cold = quickik::new_sequence_solver(*tree, quickik::projection_3d(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
                                             kDamping);
   auto cold_results = cold->solve(slice_of(target), tree->n_joints(), false, false);
   float cold_error = std::abs(cold_results->at(0).dof_angles[0] - 0.4f);
 
-  auto warm = quickik::new_sequence_solver(*tree, quickik::no_mapper(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
+  auto warm = quickik::new_sequence_solver(*tree, quickik::projection_3d(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
                                             kDamping);
   warm->solve(slice_of(target), tree->n_joints(), false, false);
   auto warm_results = warm->solve(slice_of(target), tree->n_joints(), false, false);
@@ -413,7 +434,7 @@ bool test_sequence_solver_warm_starts_across_separate_calls() {
 bool test_sequence_solver_solve_returns_one_result_per_frame() {
   bool ok = true;
   auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
 
   std::vector<quickik::KeypointObservation> flat;
@@ -436,7 +457,7 @@ bool test_sequence_solver_solve_returns_one_result_per_frame() {
 bool test_sequence_solver_solve_with_fk_matches_recovered_pose() {
   bool ok = true;
   auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                               kAngleTolerance, kDamping);
   auto target = observations_for(0.4f, 0.3f);
   auto results = solver->solve(slice_of(target), tree->n_joints(), false, true);
@@ -459,7 +480,7 @@ bool test_sequence_solver_solve_with_fk_matches_recovered_pose() {
 bool test_solver_result_list_at_out_of_range_throws() {
   bool ok = true;
   auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
 
   auto flat = observations_for(0.1f, 0.05f);
@@ -479,7 +500,7 @@ bool test_solver_result_list_at_out_of_range_throws() {
 bool test_sequence_solver_solve_rejects_length_not_a_multiple_of_n_joints() {
   bool ok = true;
   auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
 
   // One fewer than a whole frame's worth of observations.
@@ -516,7 +537,7 @@ bool test_solve_segments_parallel_reconstructs_smooth_trajectory() {
   const size_t n_frames = 40;
   auto [flat, true_angles] = sine_trajectory(n_frames);
 
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
   auto results = solver->solve_segments_parallel(slice_of(flat), tree->n_joints(), 4, false, false);
 
@@ -540,7 +561,7 @@ bool test_solve_segments_parallel_honors_explicit_n_workers() {
 
   // n_workers=1 forces the whole sequence through a single segment,
   // exercising a different code path than the >1 case used above.
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
   auto results = solver->solve_segments_parallel(slice_of(flat), tree->n_joints(), 1, false, false);
 
@@ -560,7 +581,7 @@ bool test_solve_segments_parallel_rejects_zero_workers() {
   bool ok = true;
   auto tree = two_joint_chain();
   auto [flat, true_angles] = sine_trajectory(5);
-  auto solver = quickik::new_sequence_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                               kPositionTolerance, kAngleTolerance, kDamping);
 
   try {
@@ -586,7 +607,7 @@ bool test_batched_solver_matches_sequential_solve() {
   std::vector<std::vector<float>> expected_dof_angles;
   for (auto &angles : targets) {
     auto state = quickik::state_neutral_pose(*tree);
-    auto solver = quickik::new_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f, kPositionTolerance,
+    auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
                                        kAngleTolerance, kDamping);
     auto result = solver->solve(*state, slice_of(observations_for(angles[0], angles[1])), false, false);
     expected_dof_angles.emplace_back(result.dof_angles.begin(), result.dof_angles.end());
@@ -598,7 +619,7 @@ bool test_batched_solver_matches_sequential_solve() {
     for (size_t idx : order_joint_indices) flat.push_back(internal_order[idx]);
   }
 
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f,
+  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
                                                       kPositionTolerance, kAngleTolerance, kDamping,
                                                       keypoints_order, -1);
   auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, false);
@@ -621,7 +642,7 @@ bool test_batched_solver_with_grad_reports_jacobian_and_valid() {
   auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
   auto flat = observations_for(0.4f, 0.3f);
 
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, 0.0f,
+  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
                                                       kPositionTolerance, kAngleTolerance, kDamping,
                                                       keypoints_order, -1);
   auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), true, false);
@@ -648,7 +669,7 @@ bool test_batched_solver_without_with_grad_or_with_fk_leaves_optional_fields_emp
   for (auto &obs : observations_for(0.4f, 0.3f)) flat.push_back(obs);
   for (auto &obs : observations_for(-0.1f, 0.2f)) flat.push_back(obs);
 
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                                       kPositionTolerance, kAngleTolerance, kDamping,
                                                       keypoints_order, -1);
   auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, false);
@@ -669,7 +690,7 @@ bool test_batched_solver_with_fk_reports_keypoint_positions() {
   auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
   auto flat = observations_for(0.4f, 0.3f);
 
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                                       kPositionTolerance, kAngleTolerance, kDamping,
                                                       keypoints_order, -1);
   auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, true);
@@ -692,7 +713,7 @@ bool test_batched_solver_keypoint_to_joint_idx_matches_keypoints_order() {
   bool ok = true;
   auto tree = two_joint_chain();
   auto keypoints_order = joint_names({"tip", "root", "joint2", "joint1"});
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight,
+  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
                                                       kPositionTolerance, kAngleTolerance, kDamping,
                                                       keypoints_order, -1);
   auto idx = batched_solver->keypoint_to_joint_idx();
@@ -710,7 +731,7 @@ bool test_batched_solver_rejects_unknown_joint_name() {
   auto tree = two_joint_chain();
   auto keypoints_order = joint_names({"root", "joint1", "joint2", "nonexistent"});
   try {
-    quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                  kAngleTolerance, kDamping, keypoints_order, -1);
     std::fprintf(stderr, "  FAILED: expected an exception for an unknown joint name\n");
     ok = false;
@@ -725,7 +746,7 @@ bool test_batched_solver_rejects_duplicate_joint_name() {
   auto tree = two_joint_chain();
   auto keypoints_order = joint_names({"root", "joint1", "joint1", "tip"});
   try {
-    quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                  kAngleTolerance, kDamping, keypoints_order, -1);
     std::fprintf(stderr, "  FAILED: expected an exception for a duplicate joint name\n");
     ok = false;
@@ -740,7 +761,7 @@ bool test_batched_solver_rejects_fixed_base_tree() {
   auto tree = fixed_base_two_joint_chain();
   auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
   try {
-    quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                  kAngleTolerance, kDamping, keypoints_order, -1);
     std::fprintf(stderr, "  FAILED: expected an exception for a fixed-base tree\n");
     ok = false;
@@ -755,7 +776,7 @@ bool test_batched_solver_rejects_zero_workers() {
   auto tree = two_joint_chain();
   auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
   try {
-    quickik::new_batched_solver(*tree, quickik::no_mapper(), kNIterations, kNeutralWeight, kPositionTolerance,
+    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
                                  kAngleTolerance, kDamping, keypoints_order, 0);
     std::fprintf(stderr, "  FAILED: expected an exception for n_workers = 0\n");
     ok = false;
@@ -781,10 +802,12 @@ int main() {
       {"solve_without_with_fk_or_with_grad_leaves_optional_fields_empty",
        test_solve_without_with_fk_or_with_grad_leaves_optional_fields_empty},
       {"solve_with_grad_reports_jacobian_and_cholesky_l", test_solve_with_grad_reports_jacobian_and_cholesky_l},
-      {"position2d_observation_on_mapperless_solver_throws", test_position2d_observation_on_mapperless_solver_throws},
-      {"recovers_pose_from_xyview_observations", test_recovers_pose_from_xyview_observations},
+      {"position2d_observation_on_3d_projection_solver_throws", test_position2d_observation_on_3d_projection_solver_throws},
+      {"every_solver_reports_the_projection_it_was_built_with",
+       test_every_solver_reports_the_projection_it_was_built_with},
+      {"recovers_pose_from_ortho_xy_observations", test_recovers_pose_from_ortho_xy_observations},
       {"recovers_pose_from_camera_observations", test_recovers_pose_from_camera_observations},
-      {"xyview_latency_not_much_worse_than_3d", test_xyview_latency_not_much_worse_than_3d},
+      {"ortho_xy_latency_not_much_worse_than_3d", test_ortho_xy_latency_not_much_worse_than_3d},
       {"missing_observations_leave_state_at_neutral_prior", test_missing_observations_leave_state_at_neutral_prior},
       {"solver_fields_can_be_tuned_between_solve_calls", test_solver_fields_can_be_tuned_between_solve_calls},
       {"solve_respects_joint_limits", test_solve_respects_joint_limits},

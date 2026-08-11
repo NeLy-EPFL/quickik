@@ -57,7 +57,7 @@ fn main() {
         perf::run_all(&tree, &fixtures, body.name);
         regression::run(&tree, body.name);
 
-        // Same task, but observed only in 2D via XYView (see twod.rs) --
+        // Same task, but observed only in 2D via ortho-XY projection (see twod.rs) --
         // NeuroMechFly only for now (G1's more symmetric limb structure is
         // even more prone to the mirror ambiguity of monocular 2D fitting;
         // its 2D fit hasn't been validated).

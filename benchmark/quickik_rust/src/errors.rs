@@ -1,5 +1,5 @@
 //! Collects per-frame average fit-residual distributions (3D vs.
-//! XYView-observed) for `../plot/plot_2d_comparison.py`'s KDE panel.
+//! ortho-XY projection-observed) for `../plot/plot_2d_comparison.py`'s KDE panel.
 //! Computed once, from the Rust API only: every binding (Rust/Python/C++)
 //! runs the identical compiled solver, so the fit-quality distribution
 //! doesn't depend on which one produced it.
@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::observation::{Mapper3Dto2D, NoMapper, XYView};
+use quickik::observation::Projection;
 use quickik::sequential_solver::SequenceSolver;
 
 use crate::correctness::build_observations;
@@ -20,14 +20,14 @@ use crate::twod::observations_2d_xyview;
 /// sequence, adaptive early stop): the same per-frame quantity
 /// `correctness::residual_stats` computes, kept here across every frame
 /// instead of reduced further to a single aggregate.
-fn per_frame_average_distances<M: Mapper3Dto2D + Sync + Send>(
+fn per_frame_average_distances(
     tree: &Arc<KinematicTree>,
     frames: &[RealFrame],
-    mapper: M,
+    projection: Projection,
     to_obs: impl Fn(&[[f32; 3]]) -> Vec<quickik::observation::KeypointObservation>,
 ) -> Vec<f32> {
-    let mut sequence_solver: SequenceSolver<M> =
-        SequenceSolver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut sequence_solver: SequenceSolver =
+        SequenceSolver::new(tree, projection, 10, 1e-3, 1e-3, 1e-3, 1e-6);
     let mut frame_rms = Vec::with_capacity(frames.len());
     for frame in frames {
         let obs = to_obs(&frame.target_ego);
@@ -47,13 +47,21 @@ fn per_frame_average_distances<M: Mapper3Dto2D + Sync + Send>(
 }
 
 /// Writes `../plot/results/errors-<body>.json`: per-frame average (RMS) 3D
-/// distances (model units) for 3D and XYView observations of the same real
+/// distances (model units) for 3D and ortho-XY projection observations of the same real
 /// mocap frames.
 pub fn write_errors_json(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
-    let avg_3d =
-        per_frame_average_distances(tree, &fixtures.real_frames, NoMapper, build_observations);
-    let avg_xyview =
-        per_frame_average_distances(tree, &fixtures.real_frames, XYView, observations_2d_xyview);
+    let avg_3d = per_frame_average_distances(
+        tree,
+        &fixtures.real_frames,
+        Projection::new_3d(),
+        build_observations,
+    );
+    let avg_xyview = per_frame_average_distances(
+        tree,
+        &fixtures.real_frames,
+        Projection::new_ortho_xy(),
+        observations_2d_xyview,
+    );
 
     let results = serde_json::json!({
         "body": body,

@@ -1,3 +1,4 @@
+use nalgebra::DMatrix;
 use numpy::ndarray::{Array1, Array2, Array3, Axis};
 use numpy::{
     AllowTypeChange, IntoPyArray, PyArray1, PyArray2, PyArray3, PyArrayLike2, PyArrayLike3,
@@ -7,7 +8,7 @@ use pyo3::prelude::*;
 use crate::body_plan::KinematicTree;
 use crate::catch_panic;
 use crate::observation::{
-    Mapper, extract_mapper, mapper_to_py, observations_from_arrays, validate_position_weight_shapes,
+    Projection, as_row_major, observations_from_arrays, validate_position_weight_shapes,
 };
 
 /// Every `BatchedSolver.solve` item's converged pose and (optional)
@@ -17,69 +18,60 @@ use crate::observation::{
 /// field's exact shape and ordering.
 #[pyclass(module = "quickik", frozen)]
 pub(crate) struct BatchedSolverResult {
-    joint_angles: Py<PyArray2<f32>>,
-    base_pos: Py<PyArray2<f32>>,
-    base_quat: Py<PyArray2<f32>>,
-    keypoint_pos: Option<Py<PyArray3<f32>>>,
-    jacobian: Option<Py<PyArray3<f32>>>,
-    cholesky_l: Option<Py<PyArray3<f32>>>,
-    valid: Option<Py<PyArray1<bool>>>,
-}
-
-#[pymethods]
-impl BatchedSolverResult {
     /// `(batch_size, n_dofs)`, in `kinematic_tree`'s own DOF order --
     /// unrelated to `keypoints_order`, since DOF order is already fully
     /// caller-controlled via how the tree was built.
-    #[getter]
-    fn joint_angles(&self, py: Python<'_>) -> Py<PyArray2<f32>> {
-        self.joint_angles.clone_ref(py)
-    }
-
+    #[pyo3(get)]
+    joint_angles: Py<PyArray2<f32>>,
     /// `(batch_size, 3)`.
-    #[getter]
-    fn base_pos(&self, py: Python<'_>) -> Py<PyArray2<f32>> {
-        self.base_pos.clone_ref(py)
-    }
-
+    #[pyo3(get)]
+    base_pos: Py<PyArray2<f32>>,
     /// `(batch_size, 4)`, `(w, x, y, z)`.
-    #[getter]
-    fn base_quat(&self, py: Python<'_>) -> Py<PyArray2<f32>> {
-        self.base_quat.clone_ref(py)
-    }
-
-    /// `(batch_size, n_joints, 3)`, in `kinematic_tree`'s internal joint
-    /// order (*not* `keypoints_order`). `None` unless `solve` was called with
+    #[pyo3(get)]
+    base_quat: Py<PyArray2<f32>>,
+    /// `(batch_size, n_joints, 3)`, in `kinematic_tree`'s internal joint order
+    /// (*not* `keypoints_order`). `None` unless `solve` was called with
     /// `with_fk=True`.
-    #[getter]
-    fn keypoint_pos(&self, py: Python<'_>) -> Option<Py<PyArray3<f32>>> {
-        self.keypoint_pos.as_ref().map(|a| a.clone_ref(py))
-    }
-
-    /// `(batch_size, 3 * n_joints, state_dim)`, always the raw 3D Jacobian
-    /// regardless of `mapper`, in `kinematic_tree`'s internal keypoint/state
-    /// order (*not* `keypoints_order`). `None` unless `solve` was called with
+    #[pyo3(get)]
+    keypoint_pos: Option<Py<PyArray3<f32>>>,
+    /// The residual Jacobian: `(batch_size, 3 * n_joints, state_dim)` for a 3D
+    /// projection, or `(batch_size, 2 * n_joints, state_dim)` otherwise, in
+    /// which case it's already mapped through that projection. Rows and columns
+    /// are in `kinematic_tree`'s internal keypoint/state order (*not*
+    /// `keypoints_order`). `None` unless `solve` was called with
     /// `with_grad=True`.
-    #[getter]
-    fn jacobian(&self, py: Python<'_>) -> Option<Py<PyArray3<f32>>> {
-        self.jacobian.as_ref().map(|a| a.clone_ref(py))
-    }
-
-    /// `(batch_size, state_dim, state_dim)`; zeroed for any item where
-    /// `valid` is `False`. `None` unless `solve` was called with
-    /// `with_grad=True`.
-    #[getter]
-    fn cholesky_l(&self, py: Python<'_>) -> Option<Py<PyArray3<f32>>> {
-        self.cholesky_l.as_ref().map(|a| a.clone_ref(py))
-    }
-
+    #[pyo3(get)]
+    jacobian: Option<Py<PyArray3<f32>>>,
+    /// `(batch_size, state_dim, state_dim)`; zeroed for any item where `valid`
+    /// is `False`. `None` unless `solve` was called with `with_grad=True`.
+    #[pyo3(get)]
+    cholesky_l: Option<Py<PyArray3<f32>>>,
     /// `(batch_size,)`; `False` where that item's last iteration wasn't
     /// positive-definite, so its `cholesky_l` can't be used for gradients.
     /// `None` unless `solve` was called with `with_grad=True`.
-    #[getter]
-    fn valid(&self, py: Python<'_>) -> Option<Py<PyArray1<bool>>> {
-        self.valid.as_ref().map(|a| a.clone_ref(py))
+    #[pyo3(get)]
+    valid: Option<Py<PyArray1<bool>>>,
+}
+
+/// Stacks one `DMatrix` per batch item into a `(batch_size, rows, cols)`
+/// array. `shape` is taken from the matrices themselves rather than recomputed
+/// here, since the Jacobian's row count depends on the solver's projection.
+fn stack_matrices<'a>(
+    py: Python<'_>,
+    mats: impl ExactSizeIterator<Item = Option<&'a DMatrix<f32>>>,
+    fallback_shape: (usize, usize),
+) -> Py<PyArray3<f32>> {
+    let batch_size = mats.len();
+    let mut arr: Option<Array3<f32>> = None;
+    for (i, mat) in mats.enumerate() {
+        // Items with no matrix (a non-positive-definite Cholesky) stay zeroed.
+        let Some(mat) = mat else { continue };
+        let arr = arr.get_or_insert_with(|| Array3::zeros((batch_size, mat.nrows(), mat.ncols())));
+        arr.index_axis_mut(Axis(0), i).assign(&as_row_major(mat));
     }
+    arr.unwrap_or_else(|| Array3::zeros((batch_size, fallback_shape.0, fallback_shape.1)))
+        .into_pyarray(py)
+        .unbind()
 }
 
 fn to_py_result(
@@ -88,85 +80,46 @@ fn to_py_result(
     result: quickik_core::batched_solver::BatchedSolverResult,
 ) -> BatchedSolverResult {
     let batch_size = result.joint_angles.len();
-    let n_dofs = kinematic_tree.n_dofs();
-    let n_joints = kinematic_tree.n_joints();
     let state_dim = kinematic_tree.state_dim();
 
-    let mut joint_angles_arr = Array2::<f32>::zeros((batch_size, n_dofs));
-    let mut base_pos_arr = Array2::<f32>::zeros((batch_size, 3));
-    let mut base_quat_arr = Array2::<f32>::zeros((batch_size, 4));
-    for i in 0..batch_size {
-        joint_angles_arr
-            .row_mut(i)
-            .iter_mut()
-            .zip(&result.joint_angles[i])
-            .for_each(|(dst, &src)| *dst = src);
-
-        let p = result.base_pos[i];
-        base_pos_arr
-            .row_mut(i)
-            .assign(&Array1::from_vec(vec![p.x, p.y, p.z]));
-
+    let joint_angles = Array2::from_shape_fn((batch_size, kinematic_tree.n_dofs()), |(i, d)| {
+        result.joint_angles[i][d]
+    });
+    let base_pos = Array2::from_shape_fn((batch_size, 3), |(i, axis)| result.base_pos[i][axis]);
+    let base_quat = Array2::from_shape_fn((batch_size, 4), |(i, c)| {
         let q = result.base_quat[i].quaternion();
-        base_quat_arr
-            .row_mut(i)
-            .assign(&Array1::from_vec(vec![q.w, q.i, q.j, q.k]));
-    }
-
-    let keypoint_pos = result.keypoint_pos.map(|batch_positions| {
-        let mut arr = Array3::<f32>::zeros((batch_size, n_joints, 3));
-        for (i, positions) in batch_positions.iter().enumerate() {
-            let mut frame_view = arr.index_axis_mut(Axis(0), i);
-            for (mut row, pos) in frame_view.rows_mut().into_iter().zip(positions) {
-                row[0] = pos.x;
-                row[1] = pos.y;
-                row[2] = pos.z;
-            }
-        }
-        arr.into_pyarray(py).unbind()
+        [q.w, q.i, q.j, q.k][c]
     });
 
-    let jacobian = result.jacobian.map(|batch_jacobians| {
-        let mut arr = Array3::<f32>::zeros((batch_size, 3 * n_joints, state_dim));
-        for (i, jac) in batch_jacobians.iter().enumerate() {
-            let mut view = arr.index_axis_mut(Axis(0), i);
-            for r in 0..jac.nrows() {
-                for c in 0..jac.ncols() {
-                    view[[r, c]] = jac[(r, c)];
-                }
-            }
-        }
-        arr.into_pyarray(py).unbind()
+    let keypoint_pos = result.keypoint_pos.map(|batch| {
+        Array3::from_shape_fn(
+            (batch_size, kinematic_tree.n_joints(), 3),
+            |(i, k, axis)| batch[i][k][axis],
+        )
+        .into_pyarray(py)
+        .unbind()
     });
 
-    let (cholesky_l, valid) = match result.cholesky_l {
-        None => (None, None),
-        Some(batch_cholesky_l) => {
-            let mut chol_arr = Array3::<f32>::zeros((batch_size, state_dim, state_dim));
-            let mut valid_arr = Array1::<bool>::from_elem(batch_size, false);
-            for (i, chol) in batch_cholesky_l.iter().enumerate() {
-                if let Some(chol) = chol {
-                    valid_arr[i] = true;
-                    let l = chol.l();
-                    let mut view = chol_arr.index_axis_mut(Axis(0), i);
-                    for r in 0..l.nrows() {
-                        for c in 0..l.ncols() {
-                            view[[r, c]] = l[(r, c)];
-                        }
-                    }
-                }
-            }
-            (
-                Some(chol_arr.into_pyarray(py).unbind()),
-                Some(valid_arr.into_pyarray(py).unbind()),
-            )
-        }
-    };
+    let jacobian = result
+        .jacobian
+        .map(|batch| stack_matrices(py, batch.iter().map(Some), (0, state_dim)));
+
+    // `valid` marks the items whose last iteration was positive-definite;
+    // the rest keep `cholesky_l`'s zeroed block.
+    let valid = result.cholesky_l.as_ref().map(|batch| {
+        Array1::from_iter(batch.iter().map(Option::is_some))
+            .into_pyarray(py)
+            .unbind()
+    });
+    let cholesky_l = result.cholesky_l.map(|batch| {
+        let ls: Vec<Option<DMatrix<f32>>> = batch.into_iter().map(|c| c.map(|c| c.l())).collect();
+        stack_matrices(py, ls.iter().map(Option::as_ref), (state_dim, state_dim))
+    });
 
     BatchedSolverResult {
-        joint_angles: joint_angles_arr.into_pyarray(py).unbind(),
-        base_pos: base_pos_arr.into_pyarray(py).unbind(),
-        base_quat: base_quat_arr.into_pyarray(py).unbind(),
+        joint_angles: joint_angles.into_pyarray(py).unbind(),
+        base_pos: base_pos.into_pyarray(py).unbind(),
+        base_quat: base_quat.into_pyarray(py).unbind(),
         keypoint_pos,
         jacobian,
         cholesky_l,
@@ -181,9 +134,8 @@ fn to_py_result(
 /// docs.
 #[pyclass(module = "quickik")]
 pub(crate) struct BatchedSolver {
-    inner: quickik_core::batched_solver::BatchedSolver<Mapper>,
+    inner: quickik_core::batched_solver::BatchedSolver,
     kinematic_tree: KinematicTree,
-    mapper: Mapper,
 }
 
 #[pymethods]
@@ -204,18 +156,17 @@ impl BatchedSolver {
     /// invalid.
     ///
     /// Raises `ValueError` if `kinematic_tree` is fixed-base,
-    /// `keypoints_order` is malformed, `n_workers` is `0`, or `mapper` is not
-    /// a `Camera`, an `XYView`, or `None`.
+    /// `keypoints_order` is malformed, or `n_workers` is `0`.
     #[new]
     #[pyo3(signature = (
-        kinematic_tree, keypoints_order, mapper=None, n_iterations=10, neutral_weight=1e-3,
+        kinematic_tree, keypoints_order, projection=Projection::default(), n_iterations=10, neutral_weight=1e-3,
         position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6, n_workers=-1,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         kinematic_tree: KinematicTree,
         keypoints_order: Vec<String>,
-        mapper: Option<Bound<'_, PyAny>>,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
@@ -223,12 +174,11 @@ impl BatchedSolver {
         damping: f32,
         n_workers: isize,
     ) -> PyResult<Self> {
-        let mapper = extract_mapper(mapper.as_ref())?;
         let tree = &kinematic_tree.inner;
         let inner = catch_panic(|| {
             quickik_core::batched_solver::BatchedSolver::new(
                 tree,
-                mapper,
+                projection.inner,
                 n_iterations,
                 neutral_weight,
                 position_tolerance,
@@ -241,7 +191,6 @@ impl BatchedSolver {
         Ok(BatchedSolver {
             inner,
             kinematic_tree,
-            mapper,
         })
     }
 
@@ -249,8 +198,8 @@ impl BatchedSolver {
     /// parallel, each starting from `kinematic_tree`'s neutral pose.
     ///
     /// `weights` is `(batch_size, n_joints)`; `positions` is `(batch_size,
-    /// n_joints, 3)` if `mapper` is `None`, or `(batch_size, n_joints, 2)` if
-    /// set, both in this solver's own `keypoints_order` (*not*
+    /// n_joints, 3)` for a 3D projection, or `(batch_size, n_joints, 2)`
+    /// otherwise, both in this solver's own `keypoints_order` (*not*
     /// `kinematic_tree`'s internal joint order). A keypoint with `weight <=
     /// 0` (or NaN) is treated as missing. Any dtype is accepted and cast to
     /// `float32`, following NumPy's own casting rules.
@@ -269,7 +218,7 @@ impl BatchedSolver {
             &positions_arr,
             &weights_arr,
             self.kinematic_tree.inner.n_joints(),
-            self.mapper.is_set(),
+            !self.inner.projection().is_3d(),
         )?;
         let inner = &self.inner;
         let result = py.detach(|| {
@@ -289,8 +238,10 @@ impl BatchedSolver {
 
     /// Fixed at construction (read-only).
     #[getter]
-    fn mapper(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        mapper_to_py(py, self.mapper)
+    fn projection(&self) -> Projection {
+        Projection {
+            inner: self.inner.projection(),
+        }
     }
 
     /// `keypoint_to_joint_idx[i]` is `kinematic_tree`'s internal joint index

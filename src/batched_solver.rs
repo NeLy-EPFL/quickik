@@ -11,7 +11,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::body_plan::KinematicTree;
-use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
+use crate::observation::{KeypointObservation, Projection};
 use crate::sequential_solver::resolve_n_workers;
 use crate::solver::Solver;
 use crate::state::State;
@@ -37,12 +37,15 @@ pub struct BatchedSolverResult {
     /// `KinematicTree`'s internal joint order (*not* `keypoints_order`).
     /// `Some` iff `solve` was called with `with_fk: true`.
     pub keypoint_pos: Option<Vec<Vec<Vector3<f32>>>>,
-    /// `(batch_size)`, each item's keypoint-position Jacobian. Rows/columns
+    /// `(batch_size)`, each item's residual Jacobian (3 rows per keypoint with
+    /// a 3D projection, 2 otherwise; see [`SolverResult::jacobian`]). Rows/columns
     /// are in `KinematicTree`'s internal keypoint/state order, *not*
     /// `keypoints_order`: nothing outside this crate reads these entries
     /// directly, so only the input observations and `joint_angles` need
     /// reordering by `keypoints_order`. `Some` iff `solve` was called with
     /// `with_grad: true`.
+    ///
+    /// [`SolverResult::jacobian`]: crate::solver::SolverResult::jacobian
     pub jacobian: Option<Vec<DMatrix<f32>>>,
     /// `(batch_size)`, each item's Cholesky factor L. The inner `Option` is
     /// `None` if that item's last iteration wasn't positive-definite
@@ -63,9 +66,9 @@ pub struct BatchedSolverResult {
 /// calling `solve` on it repeatedly (rather than reconstructing one per
 /// call) still pays off: `keypoints_order` is resolved into internal joint
 /// indices once, at construction, not re-resolved every call.
-pub struct BatchedSolver<M: Mapper3Dto2D = NoMapper> {
+pub struct BatchedSolver {
     kinematic_tree: Arc<KinematicTree>,
-    mapper: M,
+    projection: Projection,
     n_iterations: usize,
     neutral_weight: f32,
     position_tolerance: f32,
@@ -81,7 +84,7 @@ pub struct BatchedSolver<M: Mapper3Dto2D = NoMapper> {
     thread_pool: ThreadPool,
 }
 
-impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
+impl BatchedSolver {
     /// `kinematic_tree` must be free-floating (not
     /// [`fixed_base`](KinematicTree::fixed_base)), since
     /// [`BatchedSolverResult`] always reports `base_pos`/`base_quat`.
@@ -100,7 +103,7 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         kinematic_tree: &Arc<KinematicTree>,
-        mapper: M,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
@@ -121,7 +124,7 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
             .expect("failed to build BatchedSolver's thread pool");
         Self {
             kinematic_tree: Arc::clone(kinematic_tree),
-            mapper,
+            projection,
             n_iterations,
             neutral_weight,
             position_tolerance,
@@ -130,6 +133,12 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
             keypoint_to_joint_idx,
             thread_pool,
         }
+    }
+
+    /// The projection this solver was built with; fixed for its lifetime, same
+    /// as [`Solver::projection`](crate::solver::Solver::projection).
+    pub fn projection(&self) -> Projection {
+        self.projection
     }
 
     /// `keypoint_to_joint_idx()[i]` is the internal joint/keypoint index that
@@ -179,7 +188,7 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
 
                     let mut solver = Solver::new(
                         &self.kinematic_tree,
-                        self.mapper,
+                        self.projection,
                         self.n_iterations,
                         self.neutral_weight,
                         self.position_tolerance,
@@ -200,9 +209,9 @@ impl<M: Mapper3Dto2D + Sync> BatchedSolver<M> {
         let mut jacobian = with_grad.then(|| Vec::with_capacity(batch_size));
         let mut cholesky_l = with_grad.then(|| Vec::with_capacity(batch_size));
         for result in per_item_results {
-            joint_angles.push(result.state.dof_angles);
+            joint_angles.push(result.state.dof_values);
             base_pos.push(result.state.root_pos);
-            base_quat.push(result.state.root_rot);
+            base_quat.push(result.state.root_quat);
             if let Some(keypoint_pos) = &mut keypoint_pos {
                 keypoint_pos.push(result.keypoint_pos.unwrap());
             }

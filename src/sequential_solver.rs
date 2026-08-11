@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::body_plan::KinematicTree;
-use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
+use crate::observation::{KeypointObservation, Projection};
 use crate::solver::{Solver, SolverResult};
 use crate::state::State;
 
@@ -23,18 +23,18 @@ use crate::state::State;
 /// this continuity: it's a self-contained bulk operation over whatever
 /// sequence you pass it, split across worker threads, and never reads or
 /// writes the object's own running state.
-pub struct SequenceSolver<M: Mapper3Dto2D = NoMapper> {
-    solver: Solver<M>,
+pub struct SequenceSolver {
+    solver: Solver,
     state: State,
     kinematic_tree: Arc<KinematicTree>,
 }
 
-impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
+impl SequenceSolver {
     /// Starts a new continuous sequence at the neutral pose.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         kinematic_tree: &Arc<KinematicTree>,
-        mapper: M,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
@@ -43,7 +43,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
     ) -> Self {
         let solver = Solver::new(
             kinematic_tree,
-            mapper,
+            projection,
             n_iterations,
             neutral_weight,
             position_tolerance,
@@ -56,6 +56,12 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
             state,
             kinematic_tree: Arc::clone(kinematic_tree),
         }
+    }
+
+    /// The projection this sequence's solver was built with; fixed for its
+    /// lifetime, same as [`Solver::projection`].
+    pub fn projection(&self) -> Projection {
+        self.solver.projection()
     }
 
     /// Solves every frame in `sequence` in order, continuing to warm-start
@@ -101,7 +107,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
     ) -> Vec<SolverResult> {
         let n_workers = resolve_n_workers(n_workers);
         let bounds = even_segment_bounds(sequence.len(), n_workers);
-        let mapper = self.solver.mapper();
+        let projection = self.solver.projection();
         let n_iterations = self.solver.n_iterations;
         let neutral_weight = self.solver.neutral_weight;
         let position_tolerance = self.solver.position_tolerance;
@@ -115,7 +121,7 @@ impl<M: Mapper3Dto2D + Sync + Send> SequenceSolver<M> {
                     scope.spawn(move || {
                         let mut solver = Solver::new(
                             &self.kinematic_tree,
-                            mapper,
+                            projection,
                             n_iterations,
                             neutral_weight,
                             position_tolerance,

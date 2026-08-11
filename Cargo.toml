@@ -13,3 +13,19 @@ nalgebra = "0.35"
 rayon = "1.12.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Release builds trade compile time for run time without reservation. Both
+# settings exist to let the optimizer see across boundaries it otherwise can't:
+# `lto = "fat"` across crates (the bindings and benchmarks call into `quickik`
+# as a separate crate), `codegen-units = 1` across compilation units within a
+# crate. Without them, a non-generic function like `Projection::project_to_2d`
+# can't be inlined into callers at all unless it's individually annotated.
+#
+# Deliberately *not* `panic = "abort"`: both binding layers translate Rust
+# panics into Python/C++ exceptions via `catch_unwind`, which abort would break.
+#
+# Profiles are only honored in the workspace root manifest, so this governs
+# every member (`python`, `cpp`, both benchmark crates) too.
+[profile.release]
+lto = "fat"
+codegen-units = 1

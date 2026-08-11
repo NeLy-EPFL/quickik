@@ -10,7 +10,7 @@ The solver configuration bundles the iteration count, regularization weight, con
 - **`neutral_weight`:** how strongly every joint angle is pulled toward its neutral pose, multiplied with each DOF's own `weight_scaler` from the body plan. This is what keeps `Missing` keypoints, and under-constrained DOFs generally, from drifting to an arbitrary angle, at the cost of some bias where that DOF *is* observed.
 - **`position_tolerance`/`angle_tolerance`:** stop iterating early once an update step's largest position and angle components both drop below these. `0` disables early stopping.
 - **`damping`:** Levenberg-Marquardt damping added to the normal equations' diagonal, for numerical stability only. Keep it very small (default `1e-6`).
-- **`mapper`:** used for keypoint positions given in 2D projections (see ["From 2D keypoint positions"](2d-keypoints.md)). By default, it is `NoMapper` for 3D keypoint positions (as is the case here).
+- **`projection`:** used for keypoint positions given in 2D projections (see ["From 2D keypoint positions"](2d-keypoints.md)). By default there is no projection, meaning keypoint positions are given in 3D (as is the case here).
 
 It stays mutable for retuning between calls: in Rust and Python it's a live handle attached to the solver, so changing a field takes effect on the next solve. C++'s configuration is a plain value struct instead, with no shared live handle: mutate a copy and pass it back to the solver to apply it.
 
@@ -59,7 +59,7 @@ The example below loads a body plan, then creates a solver with the default conf
     auto solver = quickik::new_solver(
         *tree,
         solver_config,
-        quickik::no_mapper()  // mapper must be written out explicitly in C++
+        quickik::projection_3d()  // projection must be written out explicitly in C++
     );
 
     // Initiate a state object once, reuse across many solves (to be used later)

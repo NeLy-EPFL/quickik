@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::observation::{KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
+use quickik::observation::{KeypointObservation, Projection};
 use quickik::sequential_solver::SequenceSolver;
 use quickik::solver::Solver;
 use quickik::state::State;
@@ -65,8 +65,8 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
         "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)"
     );
 
-    let mut default_solver: Solver = Solver::new(tree, NoMapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
-    let mut zero_reg_solver: Solver = Solver::new(tree, NoMapper, 10, 0.0, 1e-3, 1e-3, 1e-6);
+    let mut default_solver = Solver::new(tree, Projection::new_3d(), 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut zero_reg_solver = Solver::new(tree, Projection::new_3d(), 10, 0.0, 1e-3, 1e-3, 1e-6);
 
     for (i, frame) in frames.iter().enumerate() {
         let obs = build_observations(&frame.target_ego);
@@ -75,11 +75,11 @@ pub fn run_synthetic_frame_tests(tree: &Arc<KinematicTree>, frames: &[SyntheticF
         let mut state = State::neutral_pose(tree.clone());
         let result = default_solver.solve(&mut state, &obs, false, true);
         let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
-        let angle_err = angle_error_deg(&result.state.dof_angles, &ground_truth);
+        let angle_err = angle_error_deg(&result.state.dof_values, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
         let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
-        let angle_err0 = angle_error_deg(&result0.state.dof_angles, &ground_truth);
+        let angle_err0 = angle_error_deg(&result0.state.dof_values, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
@@ -103,7 +103,7 @@ pub fn run_real_frame_tests(tree: &Arc<KinematicTree>, frames: &[RealFrame]) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik) ==");
 
     let mut sequence_solver: SequenceSolver =
-        SequenceSolver::new(tree, NoMapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+        SequenceSolver::new(tree, Projection::new_3d(), 10, 1e-3, 1e-3, 1e-3, 1e-6);
 
     let mut quickik_rms_all = Vec::new();
     let mut quickik_max_all = Vec::new();
@@ -162,10 +162,10 @@ pub fn run_all(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
 /// Fit quality is still measured in 3D (the distance between the solved
 /// pose's FK output and the *original* 3D target), since that's the
 /// physical quantity that matters, even though the solver never saw it.
-pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
+pub fn run_synthetic_frame_tests_2d(
     tree: &Arc<KinematicTree>,
     frames: &[SyntheticFrame],
-    mapper: M,
+    projection: Projection,
     label: &str,
     to_2d: impl Fn(&[[f32; 3]]) -> Vec<KeypointObservation>,
 ) {
@@ -175,8 +175,8 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
         "frame", "kpt rms", "kpt max", "angle err deg", "angle err deg (w=0)"
     );
 
-    let mut default_solver: Solver<M> = Solver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
-    let mut zero_reg_solver: Solver<M> = Solver::new(tree, mapper, 10, 0.0, 1e-3, 1e-3, 1e-6);
+    let mut default_solver = Solver::new(tree, projection, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut zero_reg_solver = Solver::new(tree, projection, 10, 0.0, 1e-3, 1e-3, 1e-6);
 
     for (i, frame) in frames.iter().enumerate() {
         let obs = to_2d(&frame.target_ego);
@@ -185,11 +185,11 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
         let mut state = State::neutral_pose(tree.clone());
         let result = default_solver.solve(&mut state, &obs, false, true);
         let (rms, max) = residual_stats(&result.keypoint_pos.unwrap(), &frame.target_ego);
-        let angle_err = angle_error_deg(&result.state.dof_angles, &ground_truth);
+        let angle_err = angle_error_deg(&result.state.dof_values, &ground_truth);
 
         let mut state0 = State::neutral_pose(tree.clone());
         let result0 = zero_reg_solver.solve(&mut state0, &obs, false, false);
-        let angle_err0 = angle_error_deg(&result0.state.dof_angles, &ground_truth);
+        let angle_err0 = angle_error_deg(&result0.state.dof_values, &ground_truth);
 
         println!(
             "{:>6} {rms:>16.6} {max:>16.6} {angle_err:>18.4} {angle_err0:>18.6}",
@@ -206,17 +206,17 @@ pub fn run_synthetic_frame_tests_2d<M: Mapper3Dto2D>(
 
 /// Same real-data check as [`run_real_frame_tests`], but the solver only ever
 /// sees `to_2d`'s projection of each frame's target.
-pub fn run_real_frame_tests_2d<M: Mapper3Dto2D + Sync + Send>(
+pub fn run_real_frame_tests_2d(
     tree: &Arc<KinematicTree>,
     frames: &[RealFrame],
-    mapper: M,
+    projection: Projection,
     label: &str,
     to_2d: impl Fn(&[[f32; 3]]) -> Vec<KeypointObservation>,
 ) {
     println!("== Real mocap frames (cross-solver vs. flygym.ik), 2D via {label} ==");
 
-    let mut sequence_solver: SequenceSolver<M> =
-        SequenceSolver::new(tree, mapper, 10, 1e-3, 1e-3, 1e-3, 1e-6);
+    let mut sequence_solver: SequenceSolver =
+        SequenceSolver::new(tree, projection, 10, 1e-3, 1e-3, 1e-3, 1e-6);
 
     let mut quickik_rms_all = Vec::new();
     let mut quickik_max_all = Vec::new();
@@ -265,13 +265,21 @@ pub fn run_real_frame_tests_2d<M: Mapper3Dto2D + Sync + Send>(
     }
 }
 
-/// Runs the 2D-observation correctness suite via [`XYView`], on the same
+/// Runs the 2D-observation correctness suite via ortho-XY projection, on the same
 /// fixtures used by [`run_all`].
 pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures) {
-    run_synthetic_frame_tests_2d(tree, &fixtures.synthetic_frames, XYView, "XYView", |t| {
-        crate::twod::observations_2d_xyview(t)
-    });
-    run_real_frame_tests_2d(tree, &fixtures.real_frames, XYView, "XYView", |t| {
-        crate::twod::observations_2d_xyview(t)
-    });
+    run_synthetic_frame_tests_2d(
+        tree,
+        &fixtures.synthetic_frames,
+        Projection::new_ortho_xy(),
+        "ortho-XY projection",
+        crate::twod::observations_2d_xyview,
+    );
+    run_real_frame_tests_2d(
+        tree,
+        &fixtures.real_frames,
+        Projection::new_ortho_xy(),
+        "ortho-XY projection",
+        crate::twod::observations_2d_xyview,
+    );
 }

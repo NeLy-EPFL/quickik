@@ -5,8 +5,8 @@ use std::sync::Arc;
 use nalgebra::Vector3;
 use quickik::batched_solver::BatchedSolver;
 use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::observation::{KeypointObservation, NoMapper};
+use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
+use quickik::observation::{KeypointObservation, Projection};
 use quickik::solver::Solver;
 use quickik::state::State;
 
@@ -17,9 +17,9 @@ const DAMPING: f32 = 1e-6;
 
 fn keypoints_at(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<Vector3<f32>> {
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles.copy_from_slice(angles);
+    state.dof_values.copy_from_slice(angles);
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
     workspace.kpt_positions.clone()
 }
 
@@ -61,7 +61,7 @@ fn solve_matches_sequential_solve_with_grad() {
         let mut state = State::neutral_pose(tree.clone());
         let mut solver: Solver = Solver::new(
             &tree,
-            NoMapper,
+            Projection::new_3d(),
             N_ITERATIONS,
             0.0,
             POSITION_TOLERANCE,
@@ -71,9 +71,9 @@ fn solve_matches_sequential_solve_with_grad() {
         let result = solver.solve(&mut state, &observations_for(&tree, angles), true, false);
         expected_ok.push(result.cholesky_l.is_some());
         expected_jacobians.push(result.jacobian.unwrap());
-        expected_dof_angles.push(result.state.dof_angles);
+        expected_dof_angles.push(result.state.dof_values);
         expected_root_pos.push(result.state.root_pos);
-        expected_root_rot.push(result.state.root_rot);
+        expected_root_rot.push(result.state.root_quat);
     }
 
     // Same observations, but permuted into `keypoints_order`: this is what
@@ -91,7 +91,7 @@ fn solve_matches_sequential_solve_with_grad() {
 
     let batched_solver = BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         0.0,
         POSITION_TOLERANCE,
@@ -137,7 +137,7 @@ fn with_grad_false_and_with_fk_false_leaves_optional_fields_none() {
     let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
     let batched_solver = BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         1e-3,
         POSITION_TOLERANCE,
@@ -167,7 +167,7 @@ fn with_fk_true_reports_keypoint_positions() {
     let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
     let batched_solver = BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         0.0,
         POSITION_TOLERANCE,
@@ -196,7 +196,7 @@ fn new_rejects_unknown_joint_name() {
     let keypoints_order = joint_names(&["root", "joint1", "joint2", "nonexistent"]);
     BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         1e-3,
         POSITION_TOLERANCE,
@@ -214,7 +214,7 @@ fn new_rejects_duplicate_joint_name() {
     let keypoints_order = joint_names(&["root", "joint1", "joint1", "tip"]);
     BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         1e-3,
         POSITION_TOLERANCE,
@@ -232,7 +232,7 @@ fn new_rejects_fixed_base_tree() {
     let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
     BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         1e-3,
         POSITION_TOLERANCE,
@@ -255,7 +255,7 @@ fn solve_with_single_worker_matches_solve_with_all_workers() {
 
     let single_worker = BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         0.0,
         POSITION_TOLERANCE,
@@ -266,7 +266,7 @@ fn solve_with_single_worker_matches_solve_with_all_workers() {
     );
     let all_workers = BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         0.0,
         POSITION_TOLERANCE,
@@ -291,7 +291,7 @@ fn new_rejects_zero_workers() {
     let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
     BatchedSolver::new(
         &tree,
-        NoMapper,
+        Projection::new_3d(),
         N_ITERATIONS,
         1e-3,
         POSITION_TOLERANCE,

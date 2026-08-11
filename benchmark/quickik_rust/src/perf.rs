@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quickik::body_plan::KinematicTree;
-use quickik::observation::{KeypointObservation, Mapper3Dto2D, NoMapper, XYView};
+use quickik::observation::{KeypointObservation, Projection};
 use quickik::sequential_solver::SequenceSolver;
 use quickik::solver::Solver;
 use quickik::state::State;
@@ -39,8 +39,8 @@ const SINGLE_THREAD_N_FRAMES: usize = 1000;
 /// have to spell out all five numeric constructor args every time. Not part
 /// of `quickik`'s own public API: purely a benchmark-internal convenience.
 #[derive(Clone, Copy)]
-pub struct BenchConfig<M: Mapper3Dto2D> {
-    pub mapper: M,
+pub struct BenchConfig {
+    pub projection: Projection,
     pub n_iterations: usize,
     pub neutral_weight: f32,
     pub position_tolerance: f32,
@@ -48,18 +48,16 @@ pub struct BenchConfig<M: Mapper3Dto2D> {
     pub damping: f32,
 }
 
-impl BenchConfig<NoMapper> {
+impl BenchConfig {
     /// Default config (adaptive early stop enabled), 3D observations.
     pub fn default_3d() -> Self {
-        Self::default_with_mapper(NoMapper)
+        Self::default_with_projection(Projection::new_3d())
     }
-}
 
-impl<M: Mapper3Dto2D> BenchConfig<M> {
-    /// Default config (adaptive early stop enabled) with the given mapper.
-    pub fn default_with_mapper(mapper: M) -> Self {
+    /// Default config (adaptive early stop enabled) with the given projection.
+    pub fn default_with_projection(projection: Projection) -> Self {
         Self {
-            mapper,
+            projection,
             n_iterations: 10,
             neutral_weight: 1e-3,
             position_tolerance: 1e-3,
@@ -79,10 +77,10 @@ impl<M: Mapper3Dto2D> BenchConfig<M> {
         }
     }
 
-    pub(crate) fn new_solver(self, tree: &KinematicTree) -> Solver<M> {
+    pub(crate) fn new_solver(&self, tree: &KinematicTree) -> Solver {
         Solver::new(
             tree,
-            self.mapper,
+            self.projection,
             self.n_iterations,
             self.neutral_weight,
             self.position_tolerance,
@@ -91,13 +89,10 @@ impl<M: Mapper3Dto2D> BenchConfig<M> {
         )
     }
 
-    fn new_sequence_solver(self, tree: &Arc<KinematicTree>) -> SequenceSolver<M>
-    where
-        M: Sync + Send,
-    {
+    fn new_sequence_solver(&self, tree: &Arc<KinematicTree>) -> SequenceSolver {
         SequenceSolver::new(
             tree,
-            self.mapper,
+            self.projection,
             self.n_iterations,
             self.neutral_weight,
             self.position_tolerance,
@@ -160,11 +155,11 @@ pub fn tiled_native_rate_sequence(
 
 /// Single-frame latency: a fresh `State::neutral_pose()` solved against a
 /// fixed real target every call (no warm start).
-fn bench_single_frame_latency<M: Mapper3Dto2D>(
+fn bench_single_frame_latency(
     tree: &Arc<KinematicTree>,
     target_obs: &[KeypointObservation],
     n_calls: usize,
-    config: BenchConfig<M>,
+    config: BenchConfig,
 ) -> Vec<Duration> {
     let mut solver = config.new_solver(tree);
     for _ in 0..500 {
@@ -188,10 +183,10 @@ fn bench_single_frame_latency<M: Mapper3Dto2D>(
 /// continuous tracking pipeline would see), default config. A second, fresh
 /// `SequenceSolver` is used for the timed pass after warming up once, so the
 /// sequence's own frame-to-frame warm-starting is what's measured.
-fn bench_single_thread_sequence_throughput<M: Mapper3Dto2D + Sync + Send>(
+fn bench_single_thread_sequence_throughput(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
-    config: BenchConfig<M>,
+    config: BenchConfig,
 ) -> Vec<Duration> {
     let mut seq = config.new_sequence_solver(tree);
     for obs in sequence {
@@ -225,11 +220,11 @@ pub fn bench_multithread_sequence_throughput(
     )
 }
 
-fn bench_multithread_sequence_throughput_with_config<M: Mapper3Dto2D + Sync + Send>(
+fn bench_multithread_sequence_throughput_with_config(
     tree: &Arc<KinematicTree>,
     sequence: &[Vec<KeypointObservation>],
     n_workers: isize,
-    config: BenchConfig<M>,
+    config: BenchConfig,
 ) -> Duration {
     let seq = config.new_sequence_solver(tree);
     let _ = seq.solve_segments_parallel(sequence, n_workers, false, false);
@@ -345,12 +340,12 @@ fn tiled_native_rate_sequence_2d(
 }
 
 /// Runs the same latency/throughput suite as [`run_all`], but every
-/// observation is its fixture target reprojected through [`XYView`]. Writes
+/// observation is its fixture target reprojected through ortho-XY projection. Writes
 /// `../plot/results/quickik-rust-2d-xyview-<body>.json` for
 /// `../plot/plot_2d_comparison.py` to pick up.
 pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
     println!(
-        "quickik Rust benchmark, 2D via XYView (state_dim={})\n",
+        "quickik Rust benchmark, 2D via ortho-XY projection (state_dim={})\n",
         tree.state_dim()
     );
 
@@ -362,13 +357,14 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
             tree,
             &target_obs,
             10_000,
-            BenchConfig::default_with_mapper(XYView),
+            BenchConfig::default_with_projection(Projection::new_ortho_xy()),
         ),
     );
 
     // Early stop disabled (tolerances = 0), so every call runs the full
     // `n_iterations`, the worst case if a frame never converges early.
-    let max_iterations_config = BenchConfig::default_with_mapper(XYView).forced_max_iterations();
+    let max_iterations_config =
+        BenchConfig::default_with_projection(Projection::new_ortho_xy()).forced_max_iterations();
     println!(
         "\n-- single-frame time (latency), early stop disabled ({} iterations) --",
         max_iterations_config.n_iterations
@@ -389,7 +385,7 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         bench_single_thread_sequence_throughput(
             tree,
             &single_thread_sequence,
-            BenchConfig::default_with_mapper(XYView),
+            BenchConfig::default_with_projection(Projection::new_ortho_xy()),
         ),
     );
 
@@ -405,7 +401,7 @@ pub fn run_all_2d(tree: &Arc<KinematicTree>, fixtures: &Fixtures, body: &str) {
         tree,
         &sequence,
         MULTITHREAD_N_THREADS as isize,
-        BenchConfig::default_with_mapper(XYView),
+        BenchConfig::default_with_projection(Projection::new_ortho_xy()),
     );
     let multithread_fps = sequence.len() as f64 / elapsed.as_secs_f64();
     println!(

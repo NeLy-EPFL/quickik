@@ -149,7 +149,7 @@ def test_solve_with_grad_reports_jacobian_and_cholesky_l(tree):
     assert result.cholesky_l.shape == (state_dim, state_dim)
 
 
-def test_position2d_observation_on_mapperless_solver_raises(tree):
+def test_position2d_observation_on_projectionless_solver_raises(tree):
     state = quickik.State.neutral_pose(tree)
     observations = [quickik.KeypointObservation.missing() for _ in range(tree.n_joints)]
     observations[1] = quickik.KeypointObservation.position_2d([1.0, 0.0], 1.0)
@@ -172,14 +172,49 @@ def test_solve_rejects_wrong_observation_count(tree):
         solver.solve(state, too_many)
 
 
-def test_recovers_pose_from_xyview_observations(tree):
+def test_projection_constructors_and_is_3d():
+    assert quickik.Projection.new_3d().is_3d
+    assert not quickik.Projection.new_ortho_xy().is_3d
+    camera = quickik.Projection.new_pinhole_camera(
+        500.0, 500.0, 320.0, 240.0, [0.0, 0.0, 5.0], [1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0]
+    )
+    assert not camera.is_3d
+
+
+@pytest.mark.parametrize("bad_kwargs", [
+    {"world2cam_pos": [0.0, 0.0]},
+    {"world2cam_rot_mat": [1.0, 0.0, 0.0]},
+])
+def test_projection_pinhole_camera_rejects_malformed_extrinsics(bad_kwargs):
+    kwargs = {
+        "world2cam_pos": [0.0, 0.0, 5.0],
+        "world2cam_rot_mat": [1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0],
+    }
+    kwargs.update(bad_kwargs)
+    with pytest.raises(ValueError):
+        quickik.Projection.new_pinhole_camera(500.0, 500.0, 320.0, 240.0, **kwargs)
+
+
+def test_every_solver_reports_the_projection_it_was_built_with(tree):
+    """The `projection` property is read-only and delegates to the core solver,
+    so it must reflect what each solver was actually constructed with."""
+    ortho = quickik.Projection.new_ortho_xy()
+    assert not quickik.Solver(tree, projection=ortho).projection.is_3d
+    assert quickik.Solver(tree).projection.is_3d
+    assert not quickik.SequenceSolver(tree, projection=ortho).projection.is_3d
+    keypoints_order = ["root", "joint1", "joint2", "tip"]
+    batched = quickik.BatchedSolver(tree, keypoints_order, projection=ortho)
+    assert not batched.projection.is_3d
+
+
+def test_recovers_pose_from_ortho_xy_observations(tree):
     positions = two_link_positions(0.35, -0.25)
     observations = [
         quickik.KeypointObservation.position_2d([p[0], p[1]], 1.0) for p in positions
     ]
 
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+    solver = quickik.Solver(tree, projection=quickik.Projection.new_ortho_xy(), neutral_weight=0.0)
     result = solver.solve(state, observations)
 
     assert result.dof_angles[0] == pytest.approx(0.35, abs=1e-3)
@@ -188,42 +223,39 @@ def test_recovers_pose_from_xyview_observations(tree):
 
 def test_recovers_pose_from_camera_observations(tree):
     positions = two_link_positions(0.2, 0.15)
-    camera = quickik.Camera(
-        fx=500.0,
-        fy=500.0,
-        cx=320.0,
-        cy=240.0,
-        world2cam_pos=[0.0, 0.0, 5.0],
-        world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    fx, fy, cx, cy = 500.0, 500.0, 320.0, 240.0
+    world2cam_pos = [0.0, 0.0, 5.0]
+    camera = quickik.Projection.new_pinhole_camera(
+        fx, fy, cx, cy, world2cam_pos, [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
     )
 
     observations = []
     for x, y, z in positions:
         # Pinhole projection with world2cam_rot_mat = identity: cam == world.
-        cam_z = z + camera.world2cam_pos[2]
-        u = camera.fx * x / cam_z + camera.cx
-        v = camera.fy * y / cam_z + camera.cy
+        cam_z = z + world2cam_pos[2]
+        u = fx * x / cam_z + cx
+        v = fy * y / cam_z + cy
         observations.append(quickik.KeypointObservation.position_2d([u, v], 1.0))
 
     state = quickik.State.neutral_pose(tree)
-    solver = quickik.Solver(tree, mapper=camera, neutral_weight=0.0)
+    solver = quickik.Solver(tree, projection=camera, neutral_weight=0.0)
     result = solver.solve(state, observations)
 
     assert result.dof_angles[0] == pytest.approx(0.2, abs=1e-3)
     assert result.dof_angles[1] == pytest.approx(0.15, abs=1e-3)
 
 
-def test_xyview_latency_not_much_worse_than_3d(tree):
+def test_ortho_xy_latency_not_much_worse_than_3d(tree):
     """Sanity check, not a benchmark (see benchmark/ for real numbers):
-    XYView's per-keypoint sparse-accumulation path (solver.rs's Position2D
+    ortho-XY's per-keypoint sparse-accumulation path (solver.rs's Position2D
     branch) shouldn't be dramatically slower than the Position3D path it
     mirrors. A generous factor: this only needs to catch a gross
     regression (e.g. an accidental per-call allocation creeping back in),
     not assert precise parity, since single-frame timing on this tiny
     fixture is dominated by Python/FFI call overhead common to both paths."""
 
-    def mean_solve_seconds(observations, mapper=None):
-        solver = quickik.Solver(tree, mapper=mapper)
+    def mean_solve_seconds(observations, projection=quickik.Projection.new_3d()):
+        solver = quickik.Solver(tree, projection=projection)
         state = quickik.State.neutral_pose(tree)
         solver.solve(state, observations)  # warm up
 
@@ -241,7 +273,7 @@ def test_xyview_latency_not_much_worse_than_3d(tree):
     ]
 
     t_3d = mean_solve_seconds(observations_3d)
-    t_2d = mean_solve_seconds(observations_2d, mapper=quickik.XYView())
+    t_2d = mean_solve_seconds(observations_2d, projection=quickik.Projection.new_ortho_xy())
 
     assert t_2d < t_3d * 5
 
@@ -392,10 +424,10 @@ def test_sequence_solver_treats_nan_weight_as_missing(tree):
     assert last.dof_angles[1] == pytest.approx(a2, abs=5e-2)
 
 
-def sine_trajectory_2d_xyview_arrays(tree, n_frames):
-    """2D (XYView-projected) counterpart to `sine_trajectory_arrays`: same
+def sine_trajectory_2d_ortho_xy_arrays(tree, n_frames):
+    """2D (ortho-XY-projected) counterpart to `sine_trajectory_arrays`: same
     sine trajectory, but `positions` drops each keypoint's Z coordinate,
-    matching XYView's own (identity, Z-dropping) projection."""
+    matching ortho-XY's own (identity, Z-dropping) projection."""
     true_angles = []
     positions = np.zeros((n_frames, tree.n_joints, 2), dtype=np.float32)
     weights = np.ones((n_frames, tree.n_joints), dtype=np.float32)
@@ -406,12 +438,12 @@ def sine_trajectory_2d_xyview_arrays(tree, n_frames):
     return positions, weights, true_angles
 
 
-def test_sequence_solver_xyview_reconstructs_trajectory(tree):
-    positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
+def test_sequence_solver_ortho_xy_reconstructs_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_2d_ortho_xy_arrays(
         tree, n_frames=10
     )
 
-    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+    solver = quickik.SequenceSolver(tree, projection=quickik.Projection.new_ortho_xy(), neutral_weight=0.0)
     results = solver.solve(positions, weights)
 
     assert len(results) == len(true_angles)
@@ -420,15 +452,15 @@ def test_sequence_solver_xyview_reconstructs_trajectory(tree):
     assert last.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_sequence_solver_solve_rejects_3d_positions_when_mapper_set(tree):
+def test_sequence_solver_solve_rejects_3d_positions_when_projection_set(tree):
     positions = np.zeros((3, tree.n_joints, 3), dtype=np.float32)
     weights = np.ones((3, tree.n_joints), dtype=np.float32)
-    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView())
+    solver = quickik.SequenceSolver(tree, projection=quickik.Projection.new_ortho_xy())
     with pytest.raises(ValueError, match="2"):
         solver.solve(positions, weights)
 
 
-def test_sequence_solver_solve_rejects_2d_positions_without_mapper(tree):
+def test_sequence_solver_solve_rejects_2d_positions_without_projection(tree):
     positions = np.zeros((3, tree.n_joints, 2), dtype=np.float32)
     weights = np.ones((3, tree.n_joints), dtype=np.float32)
     solver = quickik.SequenceSolver(tree)
@@ -462,12 +494,12 @@ def test_solve_segments_parallel_casts_float64_arrays_to_float32(tree):
         assert result.dof_angles[1] == pytest.approx(a2, abs=1e-2)
 
 
-def test_solve_segments_parallel_xyview_reconstructs_trajectory(tree):
-    positions, weights, true_angles = sine_trajectory_2d_xyview_arrays(
+def test_solve_segments_parallel_ortho_xy_reconstructs_trajectory(tree):
+    positions, weights, true_angles = sine_trajectory_2d_ortho_xy_arrays(
         tree, n_frames=40
     )
 
-    solver = quickik.SequenceSolver(tree, mapper=quickik.XYView())
+    solver = quickik.SequenceSolver(tree, projection=quickik.Projection.new_ortho_xy())
     results = solver.solve_segments_parallel(positions, weights, n_workers=4)
 
     assert len(results) == len(true_angles)

@@ -1,4 +1,4 @@
-"""Compares QuickIK's 2D-observation IK (via XYView) against its own
+"""Compares QuickIK's 2D-observation IK (via XYOrtho) against its own
 3D-observation baseline, Rust only. 2D observations are a QuickIK-only
 feature -- none of KDL/Pinocchio/RBDL support this (see
 quickik_rust/src/twod.rs) -- and Python/C++ only carry a lightweight perf
@@ -13,7 +13,7 @@ Reads, both under results/:
   - quickik-rust-2d-xyview-neuromechfly.json (written by this repo's Rust 2D
     benchmark)
   - errors-neuromechfly.json (per-frame average fit-residual distributions
-    for 3D/XYView, computed once from the Rust API -- see errors.rs)
+    for 3D/XYOrtho, computed once from the Rust API -- see errors.rs)
 
 Writes results/comparison-2d.svg. Usage (with devtools-pyenv/'s shared venv
 active):
@@ -77,7 +77,7 @@ METRICS = [
 # from plot_comparison.py's own body colors, so the two charts read as one
 # consistent palette rather than introducing a third, unrelated pair.
 OBSERVATIONS = ["3d", "xyview"]
-OBSERVATION_LABELS = {"3d": "3D", "xyview": "XYView"}
+OBSERVATION_LABELS = {"3d": "3D", "xyview": "XYOrtho"}
 OBSERVATION_COLORS = {"3d": NEUROMECHFLY_COLOR, "xyview": G1_COLOR}
 
 TEXT_NUMBER_FONTSIZE = 8
@@ -265,7 +265,7 @@ def plot_chart(results, errors):
 if __name__ == "__main__":
     results = load_perf_results()
     errors = load_errors()
-    print("=== QuickIK 2D (XYView) vs. 3D -- NeuroMechFly, Rust ===")
+    print("=== QuickIK 2D (XYOrtho) vs. 3D -- NeuroMechFly, Rust ===")
     print_table(results)
     if errors is None:
         print(

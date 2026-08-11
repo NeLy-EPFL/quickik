@@ -97,19 +97,19 @@ def positions_in_keypoints_order(angles):
 
 
 def positions_2d_in_keypoints_order(angles):
-    """XYView counterpart to `positions_in_keypoints_order`: same positions,
-    but with each keypoint's Z coordinate dropped, matching XYView's own
+    """ortho-XY counterpart to `positions_in_keypoints_order`: same positions,
+    but with each keypoint's Z coordinate dropped, matching ortho-XY's own
     (identity, Z-dropping) projection."""
     return positions_in_keypoints_order(angles)[..., :2].clone()
 
 
-def batched_solver(tree, mapper=None, **kwargs):
+def batched_solver(tree, projection=quickik.Projection.new_3d(), **kwargs):
     kwargs.setdefault("n_iterations", 20)
     kwargs.setdefault("neutral_weight", 1e-3)
     kwargs.setdefault("damping", 1e-6)
     kwargs.setdefault("position_tolerance", 0.0)
     kwargs.setdefault("angle_tolerance", 0.0)
-    return quickik.BatchedSolver(tree, KEYPOINTS_ORDER, mapper=mapper, **kwargs)
+    return quickik.BatchedSolver(tree, KEYPOINTS_ORDER, projection=projection, **kwargs)
 
 
 def test_joint_names_and_weight_scalers(weighted_tree):
@@ -117,20 +117,44 @@ def test_joint_names_and_weight_scalers(weighted_tree):
     assert weighted_tree.joint_weight_scalers == pytest.approx([1.0, 2.5, 1.0, 0.3])
 
 
-def test_batched_solver_rejects_camera_mapper(tree):
-    camera = quickik.Camera(
-        fx=500.0,
-        fy=500.0,
-        cx=320.0,
-        cy=240.0,
-        world2cam_pos=[0.0, 0.0, 5.0],
-        world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+# Looking down -Z from 5 units away, so the whole two-link chain stays well
+# inside the frame and far from the z == 0 projection singularity.
+CAMERA_KWARGS = dict(
+    fx=500.0,
+    fy=500.0,
+    cx=320.0,
+    cy=240.0,
+    world2cam_pos=[0.0, 0.0, 5.0],
+    world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+)
+
+
+def camera():
+    return quickik.Projection.new_pinhole_camera(
+        CAMERA_KWARGS["fx"],
+        CAMERA_KWARGS["fy"],
+        CAMERA_KWARGS["cx"],
+        CAMERA_KWARGS["cy"],
+        CAMERA_KWARGS["world2cam_pos"],
+        CAMERA_KWARGS["world2cam_rot_mat"],
     )
-    solver = batched_solver(tree, mapper=camera)
-    positions = torch.zeros(1, 4, 2)
-    weights = torch.ones(1, 4)
-    with pytest.raises(NotImplementedError, match="Camera"):
-        qtorch.SolveIK.apply(solver, positions, weights)
+
+
+def positions_camera_in_keypoints_order(angles):
+    """`pinhole camera` counterpart to `positions_in_keypoints_order`: the same
+    positions, run through the same pinhole projection `CAMERA_KWARGS`
+    describes. Unlike ortho-XY's, this projection depends on the point's depth,
+    which is exactly what makes it a real test of the projection-projected
+    Jacobian."""
+    positions = positions_in_keypoints_order(angles)
+    cam = positions + torch.tensor(CAMERA_KWARGS["world2cam_pos"], dtype=torch.float64)
+    return torch.stack(
+        [
+            CAMERA_KWARGS["fx"] * cam[..., 0] / cam[..., 2] + CAMERA_KWARGS["cx"],
+            CAMERA_KWARGS["fy"] * cam[..., 1] / cam[..., 2] + CAMERA_KWARGS["cy"],
+        ],
+        dim=-1,
+    )
 
 
 def test_forward_recovers_pose_in_keypoints_order(tree):
@@ -183,11 +207,10 @@ def test_gradcheck_positions_with_nonuniform_weights_and_weight_scaler(weighted_
     assert torch.autograd.gradcheck(func, (positions,), eps=1e-3, atol=2e-2, rtol=2e-2)
 
 
-def test_gradcheck_positions_xyview(tree):
-    """Same as test_gradcheck_positions, but through the XYView mapper:
-    regression coverage for slicing the raw 3D Jacobian down to its first
-    two rows in `SolveIK.backward` (see `ctx.n_obs_dims`)."""
-    solver = batched_solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+def test_gradcheck_positions_ortho_xy(tree):
+    """Same as test_gradcheck_positions, but through the ortho-XY projection, whose
+    projected Jacobian is the 3D one's first two rows."""
+    solver = batched_solver(tree, projection=quickik.Projection.new_ortho_xy(), neutral_weight=0.0)
     angles = [(0.3, 0.2), (0.35, 0.15), (0.25, 0.25)]
     positions = positions_2d_in_keypoints_order(angles).clone().requires_grad_(True)
     weights = torch.ones(len(angles), 4, dtype=torch.float64)
@@ -196,6 +219,24 @@ def test_gradcheck_positions_xyview(tree):
         return qtorch.SolveIK.apply(solver, positions, weights)
 
     assert torch.autograd.gradcheck(func, (positions,), eps=1e-3, atol=2e-2, rtol=2e-2)
+
+
+def test_gradcheck_positions_camera(tree):
+    """Same as test_gradcheck_positions_ortho_xy, but through a pinhole camera, whose
+    projection Jacobian genuinely depends on the point's position rather than
+    being a fixed linear map. Only correct because `BatchedSolverResult.jacobian`
+    is the projection-projected residual Jacobian, not the raw 3D one."""
+    solver = batched_solver(tree, projection=camera(), neutral_weight=0.0)
+    angles = [(0.3, 0.2), (0.35, 0.15), (0.25, 0.25)]
+    positions = positions_camera_in_keypoints_order(angles).clone().requires_grad_(True)
+    weights = torch.ones(len(angles), 4, dtype=torch.float64)
+
+    def func(positions):
+        return qtorch.SolveIK.apply(solver, positions, weights)
+
+    # Pixel-space observations are ~O(1e2), so a pixel-sized eps is the
+    # equivalent perturbation of the ~O(1) eps the world-space tests use.
+    assert torch.autograd.gradcheck(func, (positions,), eps=1e-1, atol=2e-2, rtol=2e-2)
 
 
 def test_invalid_item_gets_zero_gradient_not_nan(tree):
@@ -241,8 +282,8 @@ def test_quickiksolve_module_matches_solveik_directly(tree):
         assert torch.equal(a, b)
 
 
-def test_quickiksolve_module_with_xyview_mapper(tree):
-    solver = batched_solver(tree, mapper=quickik.XYView(), neutral_weight=0.0)
+def test_quickiksolve_module_with_ortho_xy_projection(tree):
+    solver = batched_solver(tree, projection=quickik.Projection.new_ortho_xy(), neutral_weight=0.0)
     positions = positions_2d_in_keypoints_order([(0.4, 0.3)])
     weights = torch.ones(1, 4, dtype=torch.float64)
 
@@ -253,18 +294,16 @@ def test_quickiksolve_module_with_xyview_mapper(tree):
     assert joint_angles[0, 1].item() == pytest.approx(0.3, abs=1e-2)
 
 
-def test_quickiksolve_rejects_camera_mapper_at_construction(tree):
-    camera = quickik.Camera(
-        fx=500.0,
-        fy=500.0,
-        cx=320.0,
-        cy=240.0,
-        world2cam_pos=[0.0, 0.0, 5.0],
-        world2cam_rot_mat=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    )
-    solver = batched_solver(tree, mapper=camera)
-    with pytest.raises(NotImplementedError, match="Camera"):
-        qtorch.QuickIKSolve(solver)
+def test_quickiksolve_module_with_camera_projection(tree):
+    solver = batched_solver(tree, projection=camera(), neutral_weight=0.0)
+    positions = positions_camera_in_keypoints_order([(0.4, 0.3)])
+    weights = torch.ones(1, 4, dtype=torch.float64)
+
+    module = qtorch.QuickIKSolve(solver)
+    joint_angles, _, _ = module(positions, weights)
+
+    assert joint_angles[0, 0].item() == pytest.approx(0.4, abs=1e-2)
+    assert joint_angles[0, 1].item() == pytest.approx(0.3, abs=1e-2)
 
 
 def test_torch_py_raises_informative_error_without_pytorch():

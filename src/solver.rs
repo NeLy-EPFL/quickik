@@ -4,8 +4,8 @@ use nalgebra::linalg::Cholesky;
 use nalgebra::{DMatrix, DVector, Dyn, Vector3};
 
 use crate::body_plan::KinematicTree;
-use crate::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use crate::observation::{KeypointObservation, Mapper3Dto2D, NoMapper};
+use crate::forward::{ForwardKinematicsWorkspace, forward_kinematics};
+use crate::observation::{KeypointObservation, Projection};
 use crate::state::State;
 
 /// The converged pose and (optionally) linearization from one [`Solver::solve`]
@@ -15,11 +15,21 @@ pub struct SolverResult {
     /// The converged pose (`dof_angles`, `root_pos`, `root_rot`).
     pub state: State,
     /// World-space keypoint positions, in `KinematicTree`'s joint order.
-    /// `Some` if and only if `solve` was called with `with_fk: true`.
+    /// Always 3D, regardless of the solver's projection. `Some` if and only if
+    /// `solve` was called with `with_fk: true`.
     pub keypoint_pos: Option<Vec<Vector3<f32>>>,
-    /// The keypoint-position Jacobian at (approximately) the converged pose:
-    /// see [`solve`](Solver::solve)'s docs for exactly which pose. `Some` if
-    /// and only if `solve` was called with `with_grad: true`.
+    /// The residual Jacobian at (approximately) the converged pose: see
+    /// [`solve`](Solver::solve)'s docs for exactly which pose. `Some` if and
+    /// only if `solve` was called with `with_grad: true`.
+    ///
+    /// Rows follow whichever space the solver's observations live in, so that
+    /// this is directly the linearization a caller needs to differentiate
+    /// through: `(3 * n_joints, state_dim)` for a 3D projection, or
+    /// `(2 * n_joints, state_dim)` otherwise, already mapped through that
+    /// projection. Every keypoint gets its rows, including ones that were
+    /// [`Missing`] this frame.
+    ///
+    /// [`Missing`]: crate::observation::KeypointObservation::Missing
     pub jacobian: Option<DMatrix<f32>>,
     /// Cholesky factorization of the normal-equations matrix (`jtj`, i.e.
     /// `jacobian^T @ weights @ jacobian` plus damping and the neutral-pose
@@ -32,17 +42,20 @@ pub struct SolverResult {
 
 /// The inverse kinematics solver.
 ///
-/// Generic over the mapper `M` used to project 3D positions and Jacobians to
-/// 2D for [`Position2D`] observations. Set to [`NoMapper`] if observations
-/// are given in 3D (default). `mapper` is fixed once upon construction (no
-/// setter), so each solver can only accept one type of observation.
+/// `projection` says what space this solver's observations live in: with
+/// [`Projection::new_3d`] they're [`Position3D`], otherwise [`Position2D`] in
+/// whatever space the projection maps into. It's fixed once upon construction
+/// (no setter), so each solver only accepts one kind of observation; the other
+/// kind panics.
+///
+/// [`Position3D`]: crate::observation::KeypointObservation::Position3D
 ///
 /// The other configuration fields (`n_iterations`, `neutral_weight`,
 /// `position_tolerance`, `angle_tolerance`, `damping`) are plain public
 /// fields, freely retunable between calls.
 ///
 /// [`Position2D`]: crate::observation::KeypointObservation::Position2D
-pub struct Solver<M: Mapper3Dto2D = NoMapper> {
+pub struct Solver {
     fk_workspace: ForwardKinematicsWorkspace,
     /// Cached from the kinematic tree at construction time: `0` for a
     /// fixed-base tree, [`N_ROOT_DOFS`](crate::body_plan::N_ROOT_DOFS)
@@ -67,10 +80,13 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     /// state_dim), same compact-column convention as `jacobian3d_buf`. Only
     /// written/read for `Position2D` observations.
     jacobian2d_buf: DMatrix<f32>,
-    /// Snapshot of `fk_workspace.kpt_jacobian` from the last iteration run with
-    /// `with_grad: true`, reused (via `copy_from`) across calls to avoid a
-    /// per-call allocation; only meaningful right after such a call, and only
-    /// actually read when building that call's [`SolverResult::jacobian`].
+    /// The residual Jacobian from the last iteration run with `with_grad:
+    /// true`: either a straight snapshot of `fk_workspace.kpt_jacobian` (no
+    /// projection) or that Jacobian mapped through the projection, one
+    /// keypoint's row block at a time (2 rows per keypoint instead of 3).
+    /// Reused across calls to avoid a per-call allocation; only meaningful
+    /// right after such a call, and only actually read when building that
+    /// call's [`SolverResult::jacobian`].
     last_jacobian: DMatrix<f32>,
     /// Raw Cholesky factor L (lower-triangular, `jtj = L L^T`) from the last
     /// iteration run with `with_grad: true`, updated in place via `copy_from`
@@ -80,9 +96,9 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     last_cholesky_l: DMatrix<f32>,
     /// Whether `last_cholesky_l` is from a positive-definite iteration.
     last_cholesky_valid: bool,
-    /// Fixed at construction; see [`mapper`](Self::mapper) for why there's no
+    /// Fixed at construction; see [`projection`](Self::projection) for why there's no
     /// setter.
-    mapper: M,
+    projection: Projection,
     /// Fixed number of Gauss-Newton steps per solve.
     pub n_iterations: usize,
     /// Weight of Tikhonov regularization term pulling every joint angle toward
@@ -109,11 +125,11 @@ pub struct Solver<M: Mapper3Dto2D = NoMapper> {
     pub damping: f32,
 }
 
-impl<M: Mapper3Dto2D> Solver<M> {
+impl Solver {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         kinematic_tree: &KinematicTree,
-        mapper: M,
+        projection: Projection,
         n_iterations: usize,
         neutral_weight: f32,
         position_tolerance: f32,
@@ -128,13 +144,17 @@ impl<M: Mapper3Dto2D> Solver<M> {
         for joint in &kinematic_tree.joints {
             joint_weight_scalers.push(joint.weight_scaler);
             for (i, dof) in joint.dofs.iter().enumerate() {
-                neutral_joint_angles[joint.dof_offset + i] = dof.neutral;
-                dof_weight_scalers[joint.dof_offset + i] = dof.weight_scaler;
+                neutral_joint_angles[joint.dof_startidx + i] = dof.neutral;
+                dof_weight_scalers[joint.dof_startidx + i] = dof.weight_scaler;
             }
         }
 
         // Create workspace and preallocate buffers for normal equations
         let state_dim = kinematic_tree.state_dim();
+        // The residual Jacobian has one row block per keypoint, sized by
+        // whichever space this solver's observations live in; see
+        // `SolverResult::jacobian`.
+        let n_residual_rows_per_keypoint = if projection.is_3d() { 3 } else { 2 };
         Self {
             fk_workspace: ForwardKinematicsWorkspace::new(kinematic_tree),
             n_root_dofs: kinematic_tree.n_root_dofs(),
@@ -146,10 +166,13 @@ impl<M: Mapper3Dto2D> Solver<M> {
             delta: DVector::zeros(state_dim),
             jacobian3d_buf: DMatrix::zeros(3, state_dim),
             jacobian2d_buf: DMatrix::zeros(2, state_dim),
-            last_jacobian: DMatrix::zeros(3 * kinematic_tree.n_joints(), state_dim),
+            last_jacobian: DMatrix::zeros(
+                n_residual_rows_per_keypoint * kinematic_tree.n_joints(),
+                state_dim,
+            ),
             last_cholesky_l: DMatrix::zeros(state_dim, state_dim),
             last_cholesky_valid: false,
-            mapper,
+            projection,
             n_iterations,
             neutral_weight,
             position_tolerance,
@@ -158,10 +181,11 @@ impl<M: Mapper3Dto2D> Solver<M> {
         }
     }
 
-    /// Fixed at construction; there's no setter, mirroring `M` being fixed at
-    /// compile time for this `Solver<M>`.
-    pub fn mapper(&self) -> M {
-        self.mapper
+    /// Fixed at construction; there's no setter, since a solver preallocates
+    /// its buffers against the residual dimension the projection implies.
+    /// Build a new solver to change it.
+    pub fn projection(&self) -> Projection {
+        self.projection
     }
 
     /// Runs up to `self.n_iterations` Gauss-Newton steps in place on `state`,
@@ -207,10 +231,21 @@ impl<M: Mapper3Dto2D> Solver<M> {
             state.kinematic_tree.n_joints(),
             "observations.len() must equal kinematic_tree.n_joints()"
         );
+        // Checked up front rather than from inside the accumulation loop, so a
+        // caller that mixed up its observation kind finds out immediately
+        // instead of partway through a solve. One pass over a short slice, and
+        // only when this solver has no projection at all.
+        assert!(
+            !self.projection.is_3d()
+                || !observations
+                    .iter()
+                    .any(|obs| matches!(obs, KeypointObservation::Position2D { .. })),
+            "a Solver built with Projection::new_3d() was given a Position2D observation"
+        );
 
         let state_dim = state.state_dim();
         for iteration_idx in 0..self.n_iterations {
-            evaluate_fwdkin(&mut self.fk_workspace, state);
+            forward_kinematics(&mut self.fk_workspace, state);
 
             // See the matching comment in forward.rs: `Matrix::fill` is ~60x
             // slower than filling the underlying contiguous storage directly.
@@ -220,7 +255,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 if matches!(obs, KeypointObservation::Missing) {
                     continue;
                 }
-                let relevant_idxs = &self.fk_workspace.relevant_dof_idxs_by_joint[k];
+                let relevant_idxs = &self.fk_workspace.upstream_dof_idxs_by_joint[k];
                 // Gather this keypoint's nonzero Jacobian columns (root's
                 // N_ROOT_DOFS plus its own ancestor DOFs). Everywhere else is 0.
                 for (col, &state_idx) in relevant_idxs.iter().enumerate() {
@@ -231,7 +266,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
                 }
                 accumulate_keypoint_residual(
                     obs,
-                    &self.mapper,
+                    &self.projection,
                     &self.fk_workspace.kpt_positions[k],
                     &self.jacobian3d_buf,
                     &mut self.jacobian2d_buf,
@@ -280,8 +315,7 @@ impl<M: Mapper3Dto2D> Solver<M> {
             let is_converged = self.has_converged(&self.delta);
             let is_last_iteration = is_converged || iteration_idx == self.n_iterations - 1;
             if with_grad && is_last_iteration {
-                self.last_jacobian
-                    .copy_from(&self.fk_workspace.kpt_jacobian);
+                self.snapshot_jacobian(state_dim);
                 self.last_cholesky_valid = chol_valid;
                 if chol_valid {
                     // `self.jtj` is already the L L^T factorization because
@@ -309,7 +343,31 @@ impl<M: Mapper3Dto2D> Solver<M> {
         // otherwise pure waste (see this crate's own measurements: ~3.5-10%
         // of a solve() call, depending on how many iterations actually run).
         if with_fk {
-            evaluate_fwdkin(&mut self.fk_workspace, state);
+            forward_kinematics(&mut self.fk_workspace, state);
+        }
+    }
+
+    /// Snapshots the current iteration's residual Jacobian into
+    /// `last_jacobian`, mapped through the projection if there is one. Every
+    /// keypoint gets a row block, including ones missing this frame, so the
+    /// result's shape never depends on which keypoints happened to be
+    /// observed. Runs at most once per `solve` call, so projecting keypoints
+    /// the accumulation loop itself skipped costs little.
+    fn snapshot_jacobian(&mut self, state_dim: usize) {
+        let Self {
+            projection,
+            fk_workspace,
+            last_jacobian,
+            ..
+        } = self;
+        if projection.is_3d() {
+            last_jacobian.copy_from(&fk_workspace.kpt_jacobian);
+            return;
+        }
+        for (k, pos_world3d) in fk_workspace.kpt_positions.iter().enumerate() {
+            let jacobian_3d = fk_workspace.kpt_jacobian.view((3 * k, 0), (3, state_dim));
+            let mut jacobian_2d = last_jacobian.view_mut((2 * k, 0), (2, state_dim));
+            projection.project_to_2d(pos_world3d, &jacobian_3d, &mut jacobian_2d);
         }
     }
 
@@ -372,9 +430,9 @@ impl<M: Mapper3Dto2D> Solver<M> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
+fn accumulate_keypoint_residual(
     obs: &KeypointObservation,
-    mapper: &M,
+    projection: &Projection,
     fwdkin_pos3d: &Vector3<f32>,
     jacobian_3d: &DMatrix<f32>,
     jacobian_2d_buffer: &mut DMatrix<f32>,
@@ -405,16 +463,17 @@ fn accumulate_keypoint_residual<M: Mapper3Dto2D>(
         KeypointObservation::Position2D { obs_pos, weight } => {
             let weight = weight * joint_weight_scaler;
             // Same sparse accumulation as the Position3D case above: the
-            // mapper writes its projected Jacobian into a view of the
-            // preallocated `jacobian_2d_buffer` (no allocation), and jtj/jtr
-            // are accumulated via direct dot products rather than a full
-            // matrix multiply. `mapper` (e.g. `NoMapper`) panics on its own
-            // if this `Solver` wasn't actually constructed with a real
-            // mapper; see `Mapper3Dto2D`'s docs.
+            // projection writes into a view of the preallocated
+            // `jacobian_2d_buffer` (no allocation), and jtj/jtr are
+            // accumulated via direct dot products rather than a full matrix
+            // multiply. `solve_impl` has already checked that a projection
+            // exists whenever any observation is `Position2D`.
             let jacobian_3d_view = jacobian_3d.columns(0, n_relevant_dofs);
             let mut jacobian_2d_view = jacobian_2d_buffer.columns_mut(0, n_relevant_dofs);
+            // `solve_impl` has already checked that the projection isn't
+            // `new_3d()` whenever any observation is `Position2D`.
             let fwdkin_pos2d =
-                mapper.project_3d_to_2d(fwdkin_pos3d, &jacobian_3d_view, &mut jacobian_2d_view);
+                projection.project_to_2d(fwdkin_pos3d, &jacobian_3d_view, &mut jacobian_2d_view);
             let residual = obs_pos - fwdkin_pos2d;
             for (i, &gi) in relevant_idxs.iter().enumerate() {
                 let col_i = jacobian_2d_view.column(i);
@@ -439,7 +498,7 @@ fn accumulate_neutral_pose_prior(
         return;
     }
     let n_root_dofs = state.kinematic_tree.n_root_dofs();
-    for (i, ((&curr_angle, &neutral_angle), &dof_weight_scaler)) in (state.dof_angles)
+    for (i, ((&curr_angle, &neutral_angle), &dof_weight_scaler)) in (state.dof_values)
         .iter()
         .zip(neutral_joint_angles)
         .zip(dof_weight_scalers)

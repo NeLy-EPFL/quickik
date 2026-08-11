@@ -1,5 +1,5 @@
 """Renders a NeuroMechFly-only comparison video for the 2D-observation
-benchmark (`quickik.XYView`, see `../quickik_rust/src/twod.rs` and
+benchmark (`quickik.ortho-XY projection`, see `../quickik_rust/src/twod.rs` and
 `plot_2d_comparison.py`): the same mocap sequence solved twice with
 `quickik.SequenceSolver`, once from the usual 3D keypoint observations and
 once from only their x/y coordinates (as if seen by a camera looking straight
@@ -10,7 +10,7 @@ Reuses `render_video.py`'s NeuroMechFly setup (body plan, fixtures, warm-
 started sequence solving, from-JSON forward-kinematics replica, chase-cam
 recentering, hidden root-to-coxa bones) rather than duplicating it -- see
 that module's docstring for those details. The only new piece is the second,
-XYView-mapped solve.
+XYOrtho-mapped solve.
 
 One 3D panel, drawn twice per frame: once at each keypoint's real solved
 position, and once flattened onto the axes' own floor grid (z set to
@@ -18,7 +18,7 @@ position, and once flattened onto the axes' own floor grid (z set to
 observed from -- faded so it reads as a shadow rather than a second skeleton.
 The 3D-observation fit is blue
 (`render_video.FIT_COLOR`/`plot_comparison.NEUROMECHFLY_COLOR`, thin bones,
-small dots), the 2D/XYView-observation fit is green
+small dots), the 2D/XYOrtho-observation fit is green
 (`plot_comparison.G1_COLOR`, thick bones) -- the same two colors
 `plot_2d_comparison.py` uses for "3d" vs. "xyview" -- and raw MoCap keypoints
 are gray dots.
@@ -67,7 +67,7 @@ FIT_2D_COLOR = G1_COLOR
 PADDING = 1.01
 
 # 10x Solver's own default neutral_weight (1e-3), same fix and magnitude as
-# render_video.BODIES["g1"]["weight"]'s: XYView leaves every keypoint's depth
+# render_video.BODIES["g1"]["weight"]'s: XYOrtho leaves every keypoint's depth
 # only weakly constrained (through the kinematic chain, not observed
 # directly), so like G1's redundant wrist sub-chain, without a stronger pull
 # toward the neutral pose the solver is free to use that depth as arbitrary
@@ -81,8 +81,8 @@ FLAT_ALPHA = 0.35
 
 
 def solve_sequence_xyview(tree, fixtures):
-    """Warm-started XYView solve, mirroring `render_video.solve_sequence` but
-    with a `quickik.XYView()` mapper, 2D observations, and a stronger
+    """Warm-started XYOrtho solve, mirroring `render_video.solve_sequence` but
+    with a `quickik.Projection.new_ortho_xy()` projection, 2D observations, and a stronger
     neutral-pose prior; see `WEIGHT_2D_XYVIEW`."""
     n_joints = tree.n_joints
     frames = fixtures["native_rate_frames"]
@@ -93,7 +93,7 @@ def solve_sequence_xyview(tree, fixtures):
         for i, (x, y, _z) in enumerate(f["target_ego"]):
             positions[t, i + 1] = [x, y]
     seq = quickik.SequenceSolver(
-        tree, mapper=quickik.XYView(), neutral_weight=WEIGHT_2D_XYVIEW
+        tree, projection=quickik.Projection.new_ortho_xy(), neutral_weight=WEIGHT_2D_XYVIEW
     )
     return seq.solve(positions, weights)
 
@@ -133,7 +133,7 @@ def flatten_bones_z(bones, z_floor):
 
 def prepare_neuromechfly():
     """Loads NeuroMechFly once and solves it twice (3D observations, then
-    XYView), chase-camming each fit on its own solved root every frame so the
+    XYOrtho), chase-camming each fit on its own solved root every frame so the
     two overlaid skeletons compare pose (joint angles), not each solve's own
     independent root-position estimate. MoCap keypoints are recentered on the
     3D fit's root, same reference `render_video.prepare_body` would use for

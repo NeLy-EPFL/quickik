@@ -35,7 +35,7 @@ pub enum KeypointObservation {
 /// Defines the space that a solver's keypoint observations live in, and how
 /// positions solved by forward kinematics are mapped into it. QuickIK supports
 /// three kinds of projection:
-/// 
+///
 /// - Null projection for observations that are already in 3D world coordinates
 ///   ([`KeypointObservation::Position3D`]). This projection is created with
 ///   [`Projection::new_3d`].
@@ -111,6 +111,7 @@ impl Projection {
 
     /// Whether observations are 3D world positions (i.e. this is
     /// [`new_3d`](Self::new_3d)), so nothing needs projecting.
+    #[inline]
     pub fn is_3d(&self) -> bool {
         matches!(self.0, Kind::World3D)
     }
@@ -131,6 +132,19 @@ impl Projection {
     /// If this is [`new_3d`](Self::new_3d), which has nothing to project.
     /// `Solver::solve` checks [`is_3d`](Self::is_3d) up front and never reaches
     /// here in that case.
+    ///
+    /// `#[inline(always)]` is load-bearing, not decoration. This is a
+    /// non-generic method on a concrete type, so at *default* release settings
+    /// (no LTO, `codegen-units = 16`) LLVM's cost model declines to inline it,
+    /// leaving a real call per 2D keypoint per iteration: measured ~7% slower
+    /// on every 2D benchmark, with 3D (which never reaches here) unchanged.
+    ///
+    /// This crate's own `[profile.release]` enables fat LTO, which closes most
+    /// of that gap on its own -- but a downstream crate depending on `quickik`
+    /// builds under *its* profile, not ours, so without this attribute any
+    /// consumer who hasn't enabled LTO silently pays the full 7%. Only two call
+    /// sites in the crate, so the code-size cost is negligible.
+    #[inline(always)]
     pub fn project_to_2d(
         &self,
         pos_3d: &Vector3<f32>,
@@ -188,7 +202,9 @@ impl Projection {
 /// Written as an explicit loop rather than a matrix product because this is the
 /// only step whose width isn't known at compile time: a product would allocate
 /// an intermediate, whereas the `2 x 3` factor each variant supplies is
-/// stack-only.
+/// stack-only, and force-inlined for the same reason
+/// [`Projection::project_to_2d`] is.
+#[inline(always)]
 fn chain_jacobian(
     d_pos2d_d_pos3d: &Matrix2x3<f32>,
     jacobian_3d: &DMatrixView<'_, f32>,

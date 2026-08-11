@@ -1,10 +1,10 @@
 //! cxx bridge for the QuickIK C++ bindings. Mirrors the Rust API where
-//! reasonable; the main departure (as in `python/src/lib.rs`) is the mapper:
-//! Rust's `Solver<M>`/`SequenceSolver<M>`/`BatchedSolver<M>` are generic over
-//! the mapper type at compile time, but there's no C++ equivalent without
-//! templating the whole binding, so every solver here is backed by a single
-//! runtime `Mapper` value (`NoMapper`, `Camera`, or `XYView`) fixed at
-//! construction.
+//! reasonable; the main departure is the projection: the core crate's
+//! `Projection` holds its calibration inline, which cxx can't carry across the
+//! bridge, so C++ uses its own tagged `Projection` POD (`NoProjection`,
+//! `Camera`, or `XYOrtho`) that `to_core_projection` turns into the core type
+//! at construction. Build one with
+//! `projection_3d`/`projection_pinhole_camera`/`projection_ortho_xy`.
 //!
 //! A second departure: sequences of per-frame (or per-batch-item) keypoint
 //! observations are passed as one flat `observations` slice of length
@@ -25,7 +25,6 @@
 use std::sync::Arc;
 
 use nalgebra::DMatrix;
-use quickik_core::observation::Mapper3Dto2D;
 
 #[allow(clippy::too_many_arguments)]
 #[cxx::bridge(namespace = "quickik")]
@@ -64,21 +63,21 @@ mod ffi {
         world2cam_rot_mat: [f32; 9],
     }
 
-    /// Which mapper a `Mapper` value holds: no mapper, a `Camera`, or an
-    /// X-Y view of world coordinates. See `Mapper`'s docs.
+    /// Which projection a `Projection` value holds: no projection, a `Camera`, or an
+    /// X-Y view of world coordinates. See `Projection`'s docs.
     #[derive(Clone, Copy, Debug, PartialEq)]
-    enum MapperKind {
-        NoMapper,
-        CameraMapper,
-        XYViewMapper,
+    enum ProjectionKind {
+        NoProjection,
+        CameraProjection,
+        XYOrthoProjection,
     }
 
-    /// Runtime stand-in for Rust's generic mapper type parameter `M`.
-    /// `camera` is only meaningful when `kind == CameraMapper`. Construct via
-    /// `no_mapper`/`camera_mapper`/`xyview_mapper`.
+    /// Names which built-in projection a solver should use. `camera` is only
+    /// meaningful when `kind == CameraProjection`. Construct via
+    /// `projection_3d`/`projection_pinhole_camera`/`projection_ortho_xy`.
     #[derive(Clone, Copy, Debug)]
-    struct Mapper {
-        kind: MapperKind,
+    struct Projection {
+        kind: ProjectionKind,
         camera: Camera,
     }
 
@@ -98,9 +97,12 @@ mod ffi {
         keypoint_pos: Vec<f32>,
         /// Whether `solve` was called with `with_fk = true`.
         has_keypoint_pos: bool,
-        /// The keypoint-position Jacobian at (approximately) the converged
-        /// pose, flattened row-major (`(3 * n_joints) * state_dim` long; see
-        /// `KinematicTree::state_dim`). Empty unless `has_jacobian`.
+        /// The residual Jacobian at (approximately) the converged pose,
+        /// flattened row-major (see `KinematicTree::state_dim`). Rows follow
+        /// whichever space this solver's observations live in: 3 per keypoint
+        /// with no projection, or 2 per keypoint with one, in which case it's
+        /// already projected through that projection. Empty unless
+        /// `has_jacobian`.
         jacobian: Vec<f32>,
         /// Whether `solve` was called with `with_grad = true`.
         has_jacobian: bool,
@@ -133,9 +135,13 @@ mod ffi {
         keypoint_pos: Vec<f32>,
         /// Whether `solve` was called with `with_fk = true`.
         has_keypoint_pos: bool,
-        /// Flattened `batch_size * (3 * n_joints) * state_dim`, row-major
-        /// per item, in the `KinematicTree`'s internal keypoint/state order
-        /// (*not* `keypoints_order`). Empty unless `has_jacobian`.
+        /// The residual Jacobian, flattened row-major per item, in the
+        /// `KinematicTree`'s internal keypoint/state order (*not*
+        /// `keypoints_order`). 3 rows per keypoint with no projection, or 2 with
+        /// one (already projected through it), so
+        /// `batch_size * (3 * n_joints) * state_dim` or
+        /// `batch_size * (2 * n_joints) * state_dim` long respectively. Empty
+        /// unless `has_jacobian`.
         jacobian: Vec<f32>,
         /// Whether `solve` was called with `with_grad = true`.
         has_jacobian: bool,
@@ -158,17 +164,17 @@ mod ffi {
         /// A 3D world position, e.g. triangulated from multiple calibrated
         /// cameras.
         fn keypoint_position_3d(pos: [f32; 3], weight: f32) -> KeypointObservation;
-        /// A 2D pixel position from the camera (or other mapper) that the
+        /// A 2D pixel position from the camera (or other projection) that the
         /// consuming solver was constructed with.
         fn keypoint_position_2d(pos: [f32; 2], weight: f32) -> KeypointObservation;
 
-        /// A `Mapper` for solvers that receive 3D keypoint observations only.
-        fn no_mapper() -> Mapper;
-        /// A `Mapper` that projects with the given pinhole `camera`.
-        fn camera_mapper(camera: Camera) -> Mapper;
-        /// A `Mapper` that takes a 3D keypoint's world X/Y coordinates as its
+        /// A `Projection` for solvers that receive 3D keypoint observations only.
+        fn projection_3d() -> Projection;
+        /// A `Projection` that projects with the given pinhole `camera`.
+        fn projection_pinhole_camera(camera: Camera) -> Projection;
+        /// A `Projection` that takes a 3D keypoint's world X/Y coordinates as its
         /// 2D projection.
-        fn xyview_mapper() -> Mapper;
+        fn projection_ortho_xy() -> Projection;
 
         /// A kinematic tree, i.e. body plan, or skeleton.
         type KinematicTree;
@@ -208,14 +214,14 @@ mod ffi {
         /// aborting the process) if `i >= len()`.
         fn at(self: &SolverResultList, i: usize) -> Result<SolverResult>;
 
-        /// The inverse kinematics solver, backed by a single `Mapper` fixed
+        /// The inverse kinematics solver, backed by a single `Projection` fixed
         /// at construction (see this module's top-level docs).
         type Solver;
-        /// Constructs a `Solver` for `tree` with the given `mapper` and
+        /// Constructs a `Solver` for `tree` with the given `projection` and
         /// tuning parameters.
         fn new_solver(
             tree: &KinematicTree,
-            mapper: Mapper,
+            projection: Projection,
             n_iterations: usize,
             neutral_weight: f32,
             position_tolerance: f32,
@@ -228,7 +234,7 @@ mod ffi {
         /// `SolverResult::jacobian`/`cholesky_l` and `keypoint_pos`
         /// respectively; each costs a little extra work, so only request
         /// what you'll use. Panics from the underlying solve (e.g. a
-        /// `Position2D` observation given to a mapper-less solver) are
+        /// `Position2D` observation given to a projection-less solver) are
         /// caught and raised as an exception rather than aborting the
         /// process.
         fn solve(
@@ -239,7 +245,7 @@ mod ffi {
             with_fk: bool,
         ) -> Result<SolverResult>;
         /// Fixed at construction; there is no setter.
-        fn mapper(self: &Solver) -> Mapper;
+        fn projection(self: &Solver) -> Projection;
         /// Number of Gauss-Newton steps per `solve` call. Also the cap on
         /// early termination: see `position_tolerance`/`angle_tolerance`.
         fn n_iterations(self: &Solver) -> usize;
@@ -262,7 +268,7 @@ mod ffi {
         fn set_damping(self: &mut Solver, value: f32);
 
         /// Warm-started solving for a continuous sequence of frames, backed
-        /// by a single `Mapper` fixed at construction. `solve` always
+        /// by a single `Projection` fixed at construction. `solve` always
         /// continues from wherever the previous call left off, for this
         /// object's whole lifetime; `solve_segments_parallel` is unrelated
         /// to that continuity (a self-contained bulk operation that never
@@ -270,10 +276,10 @@ mod ffi {
         /// aren't retunable after construction.
         type SequenceSolver;
         /// Starts a new sequence at the neutral pose, for `tree`, with the
-        /// given `mapper` and tuning parameters.
+        /// given `projection` and tuning parameters.
         fn new_sequence_solver(
             tree: &KinematicTree,
-            mapper: Mapper,
+            projection: Projection,
             n_iterations: usize,
             neutral_weight: f32,
             position_tolerance: f32,
@@ -311,11 +317,11 @@ mod ffi {
             with_fk: bool,
         ) -> Result<Box<SolverResultList>>;
         /// Fixed at construction; there is no setter.
-        fn mapper(self: &SequenceSolver) -> Mapper;
+        fn projection(self: &SequenceSolver) -> Projection;
 
         /// Solves a batch of fully independent (never warm-started) sets of
         /// keypoint observations in parallel, for training/inference with
-        /// an autodiff framework, backed by a single `Mapper` fixed at
+        /// an autodiff framework, backed by a single `Projection` fixed at
         /// construction.
         type BatchedSolver;
         /// `tree` must be free-floating (not fixed-base). `keypoints_order[i]`
@@ -327,7 +333,7 @@ mod ffi {
         /// `n_workers` is `0`.
         fn new_batched_solver(
             tree: &KinematicTree,
-            mapper: Mapper,
+            projection: Projection,
             n_iterations: usize,
             neutral_weight: f32,
             position_tolerance: f32,
@@ -351,7 +357,7 @@ mod ffi {
             with_fk: bool,
         ) -> Result<BatchedSolverResult>;
         /// Fixed at construction; there is no setter.
-        fn mapper(self: &BatchedSolver) -> Mapper;
+        fn projection(self: &BatchedSolver) -> Projection;
         /// `keypoint_to_joint_idx()[i]` is the `KinematicTree`'s internal
         /// joint index that `solve`'s keypoint axis position `i` corresponds
         /// to (the resolved inverse of the by-name `keypoints_order` this
@@ -361,7 +367,7 @@ mod ffi {
 }
 
 // =============================================================================
-//  KeypointObservation / Camera / Mapper: construction and conversion to/from
+//  KeypointObservation / Camera / Projection: construction and conversion to/from
 //  the core crate's own types.
 // =============================================================================
 
@@ -410,71 +416,33 @@ fn to_core_observation(
     }
 }
 
-/// Runtime stand-in for Rust's generic mapper type parameter `M`, mirroring
-/// `python/src/observation.rs`'s `Mapper`. Unlike Rust, where "no mapper" is
-/// a distinct compile-time type (`quickik_core::observation::NoMapper`),
-/// every solver here always instantiates the same concrete
-/// `Solver<RuntimeMapper>` (etc.), so `None` has to be one more runtime
-/// variant of this same enum rather than a separate type.
-#[derive(Clone, Copy, Debug)]
-enum RuntimeMapper {
-    None,
-    Camera(quickik_core::observation::Camera),
-    XYView,
+fn to_core_camera(camera: &ffi::Camera) -> quickik_core::observation::Projection {
+    quickik_core::observation::Projection::new_pinhole_camera(
+        camera.fx,
+        camera.fy,
+        camera.cx,
+        camera.cy,
+        nalgebra::Vector3::from(camera.world2cam_pos),
+        nalgebra::Matrix3::from_row_slice(&camera.world2cam_rot_mat),
+    )
 }
 
-impl Mapper3Dto2D for RuntimeMapper {
-    fn project_3d_to_2d<S1, S2>(
-        &self,
-        pos_world3d: &nalgebra::Vector3<f32>,
-        jacobian_world3d: &nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S1>,
-        jacobian_2d_out: &mut nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S2>,
-    ) -> nalgebra::Vector2<f32>
-    where
-        S1: nalgebra::Storage<f32, nalgebra::Dyn, nalgebra::Dyn>,
-        S2: nalgebra::StorageMut<f32, nalgebra::Dyn, nalgebra::Dyn>,
-    {
-        match self {
-            // Mirrors NoMapper::project_3d_to_2d's own panic.
-            RuntimeMapper::None => unreachable!(
-                "a Solver/SequenceSolver/BatchedSolver constructed with no_mapper() was given a \
-                 Position2D observation"
-            ),
-            RuntimeMapper::Camera(camera) => {
-                camera.project_3d_to_2d(pos_world3d, jacobian_world3d, jacobian_2d_out)
-            }
-            RuntimeMapper::XYView => quickik_core::observation::XYView.project_3d_to_2d(
-                pos_world3d,
-                jacobian_world3d,
-                jacobian_2d_out,
-            ),
+/// Resolves the projection a C++ caller named into the core crate's own
+/// `Projection`.
+fn to_core_projection(projection: &ffi::Projection) -> quickik_core::observation::Projection {
+    match projection.kind {
+        ffi::ProjectionKind::NoProjection => quickik_core::observation::Projection::new_3d(),
+        ffi::ProjectionKind::CameraProjection => to_core_camera(&projection.camera),
+        ffi::ProjectionKind::XYOrthoProjection => {
+            quickik_core::observation::Projection::new_ortho_xy()
         }
+        _ => unreachable!("unknown ProjectionKind"),
     }
 }
 
-fn to_core_camera(camera: &ffi::Camera) -> quickik_core::observation::Camera {
-    quickik_core::observation::Camera {
-        fx: camera.fx,
-        fy: camera.fy,
-        cx: camera.cx,
-        cy: camera.cy,
-        world2cam_pos: nalgebra::Vector3::from(camera.world2cam_pos),
-        world2cam_rot_mat: nalgebra::Matrix3::from_row_slice(&camera.world2cam_rot_mat),
-    }
-}
-
-fn to_runtime_mapper(mapper: &ffi::Mapper) -> RuntimeMapper {
-    match mapper.kind {
-        ffi::MapperKind::NoMapper => RuntimeMapper::None,
-        ffi::MapperKind::CameraMapper => RuntimeMapper::Camera(to_core_camera(&mapper.camera)),
-        ffi::MapperKind::XYViewMapper => RuntimeMapper::XYView,
-        _ => unreachable!("unknown MapperKind"),
-    }
-}
-
-fn no_mapper() -> ffi::Mapper {
-    ffi::Mapper {
-        kind: ffi::MapperKind::NoMapper,
+fn projection_3d() -> ffi::Projection {
+    ffi::Projection {
+        kind: ffi::ProjectionKind::NoProjection,
         camera: ffi::Camera {
             fx: 0.0,
             fy: 0.0,
@@ -486,16 +454,16 @@ fn no_mapper() -> ffi::Mapper {
     }
 }
 
-fn camera_mapper(camera: ffi::Camera) -> ffi::Mapper {
-    ffi::Mapper {
-        kind: ffi::MapperKind::CameraMapper,
+fn projection_pinhole_camera(camera: ffi::Camera) -> ffi::Projection {
+    ffi::Projection {
+        kind: ffi::ProjectionKind::CameraProjection,
         camera,
     }
 }
 
-fn xyview_mapper() -> ffi::Mapper {
-    ffi::Mapper {
-        kind: ffi::MapperKind::XYViewMapper,
+fn projection_ortho_xy() -> ffi::Projection {
+    ffi::Projection {
+        kind: ffi::ProjectionKind::XYOrthoProjection,
         camera: ffi::Camera {
             fx: 0.0,
             fy: 0.0,
@@ -504,29 +472,6 @@ fn xyview_mapper() -> ffi::Mapper {
             world2cam_pos: [0.0; 3],
             world2cam_rot_mat: [0.0; 9],
         },
-    }
-}
-
-fn runtime_mapper_to_ffi(mapper: RuntimeMapper) -> ffi::Mapper {
-    match mapper {
-        RuntimeMapper::None => no_mapper(),
-        RuntimeMapper::Camera(camera) => {
-            let p = camera.world2cam_pos;
-            camera_mapper(ffi::Camera {
-                fx: camera.fx,
-                fy: camera.fy,
-                cx: camera.cx,
-                cy: camera.cy,
-                world2cam_pos: [p.x, p.y, p.z],
-                world2cam_rot_mat: camera
-                    .world2cam_rot_mat
-                    .transpose()
-                    .as_slice()
-                    .try_into()
-                    .unwrap(),
-            })
-        }
-        RuntimeMapper::XYView => xyview_mapper(),
     }
 }
 
@@ -537,7 +482,7 @@ fn runtime_mapper_to_ffi(mapper: RuntimeMapper) -> ffi::Mapper {
 struct KinematicTree(Arc<quickik_core::body_plan::KinematicTree>);
 
 /// Runs `f`, converting a panic (e.g. from malformed JSON, or a `Position2D`
-/// observation given to a mapper-less solver) into an `Err`. In a plain
+/// observation given to a projection-less solver) into an `Err`. In a plain
 /// (non-`Result`) bridged function, an unwinding panic would instead abort
 /// the whole process. Every mutation `f` might
 /// have made before panicking is just plain data with no unsafe invariants
@@ -597,14 +542,14 @@ fn state_neutral_pose(tree: &KinematicTree) -> Box<State> {
 
 impl State {
     fn dof_angles(&self) -> Vec<f32> {
-        self.0.dof_angles.clone()
+        self.0.dof_values.clone()
     }
     fn root_pos(&self) -> [f32; 3] {
         let p = self.0.root_pos;
         [p.x, p.y, p.z]
     }
     fn root_rot(&self) -> [f32; 4] {
-        let q = self.0.root_rot.quaternion();
+        let q = self.0.root_quat.quaternion();
         [q.w, q.i, q.j, q.k]
     }
 }
@@ -649,9 +594,9 @@ fn flatten_matrix_row_major(mat: &DMatrix<f32>) -> Vec<f32> {
 /// `ffi::SolverResult`.
 fn core_result_to_ffi(result: &quickik_core::solver::SolverResult) -> ffi::SolverResult {
     let root_pos = result.state.root_pos;
-    let root_rot = result.state.root_rot.quaternion();
+    let root_rot = result.state.root_quat.quaternion();
     ffi::SolverResult {
-        dof_angles: result.state.dof_angles.clone(),
+        dof_angles: result.state.dof_values.clone(),
         root_pos: [root_pos.x, root_pos.y, root_pos.z],
         root_rot: [root_rot.w, root_rot.i, root_rot.j, root_rot.k],
         keypoint_pos: result
@@ -696,32 +641,33 @@ impl SolverResultList {
 // =============================================================================
 
 struct Solver {
-    inner: quickik_core::solver::Solver<RuntimeMapper>,
-    mapper: RuntimeMapper,
+    inner: quickik_core::solver::Solver,
+    /// Kept verbatim so the `projection` getter can hand back exactly what
+    /// this solver was constructed with.
+    projection: ffi::Projection,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn new_solver(
     tree: &KinematicTree,
-    mapper: ffi::Mapper,
+    projection: ffi::Projection,
     n_iterations: usize,
     neutral_weight: f32,
     position_tolerance: f32,
     angle_tolerance: f32,
     damping: f32,
 ) -> Box<Solver> {
-    let mapper = to_runtime_mapper(&mapper);
     Box::new(Solver {
         inner: quickik_core::solver::Solver::new(
             &tree.0,
-            mapper,
+            to_core_projection(&projection),
             n_iterations,
             neutral_weight,
             position_tolerance,
             angle_tolerance,
             damping,
         ),
-        mapper,
+        projection,
     })
 }
 
@@ -740,8 +686,8 @@ impl Solver {
             core_result_to_ffi(&inner.solve(state, &observations, with_grad, with_fk))
         })
     }
-    fn mapper(&self) -> ffi::Mapper {
-        runtime_mapper_to_ffi(self.mapper)
+    fn projection(&self) -> ffi::Projection {
+        self.projection
     }
     fn n_iterations(&self) -> usize {
         self.inner.n_iterations
@@ -780,32 +726,33 @@ impl Solver {
 // =============================================================================
 
 struct SequenceSolver {
-    inner: quickik_core::sequential_solver::SequenceSolver<RuntimeMapper>,
-    mapper: RuntimeMapper,
+    inner: quickik_core::sequential_solver::SequenceSolver,
+    /// Kept verbatim so the `projection` getter can hand back exactly what
+    /// this solver was constructed with.
+    projection: ffi::Projection,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn new_sequence_solver(
     tree: &KinematicTree,
-    mapper: ffi::Mapper,
+    projection: ffi::Projection,
     n_iterations: usize,
     neutral_weight: f32,
     position_tolerance: f32,
     angle_tolerance: f32,
     damping: f32,
 ) -> Box<SequenceSolver> {
-    let mapper = to_runtime_mapper(&mapper);
     Box::new(SequenceSolver {
         inner: quickik_core::sequential_solver::SequenceSolver::new(
             &tree.0,
-            mapper,
+            to_core_projection(&projection),
             n_iterations,
             neutral_weight,
             position_tolerance,
             angle_tolerance,
             damping,
         ),
-        mapper,
+        projection,
     })
 }
 
@@ -839,8 +786,8 @@ impl SequenceSolver {
             )))
         })
     }
-    fn mapper(&self) -> ffi::Mapper {
-        runtime_mapper_to_ffi(self.mapper)
+    fn projection(&self) -> ffi::Projection {
+        self.projection
     }
 }
 
@@ -849,14 +796,16 @@ impl SequenceSolver {
 // =============================================================================
 
 struct BatchedSolver {
-    inner: quickik_core::batched_solver::BatchedSolver<RuntimeMapper>,
-    mapper: RuntimeMapper,
+    inner: quickik_core::batched_solver::BatchedSolver,
+    /// Kept verbatim so the `projection` getter can hand back exactly what
+    /// this solver was constructed with.
+    projection: ffi::Projection,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn new_batched_solver(
     tree: &KinematicTree,
-    mapper: ffi::Mapper,
+    projection: ffi::Projection,
     n_iterations: usize,
     neutral_weight: f32,
     position_tolerance: f32,
@@ -865,12 +814,11 @@ fn new_batched_solver(
     keypoints_order: Vec<String>,
     n_workers: isize,
 ) -> Result<Box<BatchedSolver>, String> {
-    let mapper = to_runtime_mapper(&mapper);
     catch_panic(move || {
         Box::new(BatchedSolver {
             inner: quickik_core::batched_solver::BatchedSolver::new(
                 &tree.0,
-                mapper,
+                to_core_projection(&projection),
                 n_iterations,
                 neutral_weight,
                 position_tolerance,
@@ -879,7 +827,7 @@ fn new_batched_solver(
                 keypoints_order,
                 n_workers,
             ),
-            mapper,
+            projection,
         })
     })
 }
@@ -981,8 +929,8 @@ impl BatchedSolver {
             batched_result_to_ffi(&inner.solve(&observations_array, with_grad, with_fk))
         })
     }
-    fn mapper(&self) -> ffi::Mapper {
-        runtime_mapper_to_ffi(self.mapper)
+    fn projection(&self) -> ffi::Projection {
+        self.projection
     }
     fn keypoint_to_joint_idx(&self) -> Vec<usize> {
         self.inner.keypoint_to_joint_idx().to_vec()

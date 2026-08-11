@@ -3,75 +3,14 @@ use numpy::{IntoPyArray, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-/// Runtime stand-in for Rust's generic mapper type parameter `M`. Unlike
-/// Rust, where "no mapper" is a distinct compile-time type
-/// ([`NoMapper`](quickik_core::observation::NoMapper)), Python's `Solver`
-/// (etc.) always instantiates the same concrete `Solver<Mapper>`, so `None`
-/// has to be one more runtime variant of this same enum rather than a
-/// separate type.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Mapper {
-    None,
-    Camera(quickik_core::observation::Camera),
-    XYView,
-}
-
-impl Mapper {
-    pub(crate) fn is_set(&self) -> bool {
-        !matches!(self, Mapper::None)
-    }
-}
-
-impl quickik_core::observation::Mapper3Dto2D for Mapper {
-    fn project_3d_to_2d<S1, S2>(
-        &self,
-        pos_world3d: &nalgebra::Vector3<f32>,
-        jacobian_world3d: &nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S1>,
-        jacobian_2d_out: &mut nalgebra::Matrix<f32, nalgebra::Dyn, nalgebra::Dyn, S2>,
-    ) -> nalgebra::Vector2<f32>
-    where
-        S1: nalgebra::Storage<f32, nalgebra::Dyn, nalgebra::Dyn>,
-        S2: nalgebra::StorageMut<f32, nalgebra::Dyn, nalgebra::Dyn>,
-    {
-        match self {
-            // Mirrors NoMapper::project_3d_to_2d's own panic.
-            Mapper::None => unreachable!(
-                "a Solver/SequenceSolver/BatchedSolver constructed with mapper=None was given a \
-                 Position2D observation"
-            ),
-            Mapper::Camera(camera) => {
-                camera.project_3d_to_2d(pos_world3d, jacobian_world3d, jacobian_2d_out)
-            }
-            Mapper::XYView => quickik_core::observation::XYView.project_3d_to_2d(
-                pos_world3d,
-                jacobian_world3d,
-                jacobian_2d_out,
-            ),
-        }
-    }
-}
-
-pub(crate) fn extract_mapper(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Mapper> {
-    let Some(obj) = obj else {
-        return Ok(Mapper::None);
-    };
-    if let Ok(camera) = obj.extract::<Camera>() {
-        Ok(Mapper::Camera(camera.as_rust()))
-    } else if obj.extract::<XYView>().is_ok() {
-        Ok(Mapper::XYView)
-    } else {
-        Err(PyValueError::new_err(
-            "mapper must be a Camera, an XYView, or None",
-        ))
-    }
-}
-
-pub(crate) fn mapper_to_py(py: Python<'_>, mapper: Mapper) -> PyResult<Py<PyAny>> {
-    match mapper {
-        Mapper::None => Ok(py.None()),
-        Mapper::Camera(inner) => Ok(Py::new(py, Camera::from_rust(inner))?.into_any()),
-        Mapper::XYView => Ok(Py::new(py, XYView)?.into_any()),
-    }
+/// Views a column-major nalgebra matrix as a row-major `ndarray`, without
+/// copying. Both `numpy` and this crate's outputs are row-major, so every
+/// matrix crossing into Python goes through here rather than an element-by-
+/// element loop.
+pub(crate) fn as_row_major(mat: &nalgebra::DMatrix<f32>) -> ArrayView2<'_, f32> {
+    ArrayView2::from_shape((mat.ncols(), mat.nrows()), mat.as_slice())
+        .expect("nalgebra matrices are contiguous")
+        .reversed_axes()
 }
 
 fn vec_to_array<const N: usize>(v: &[f32], name: &str) -> PyResult<[f32; N]> {
@@ -79,63 +18,48 @@ fn vec_to_array<const N: usize>(v: &[f32], name: &str) -> PyResult<[f32; N]> {
         .map_err(|_| PyValueError::new_err(format!("{name} must have exactly {N} elements")))
 }
 
-/// A pinhole camera mapper for 2D keypoint observations.
-#[pyclass(module = "quickik", from_py_object)]
+/// What space a solver's keypoint observations live in. Build one with
+/// `new_3d()`, `new_ortho_xy()`, or `new_pinhole_camera(...)`; a solver takes
+/// it as its `projection` argument and holds it for its lifetime.
+#[pyclass(module = "quickik", from_py_object, frozen)]
 #[derive(Clone, Copy)]
-pub(crate) struct Camera {
-    /// Focal length in pixels (x).
-    #[pyo3(get, set)]
-    fx: f32,
-    /// Focal length in pixels (y).
-    #[pyo3(get, set)]
-    fy: f32,
-    /// Principal point (x).
-    #[pyo3(get, set)]
-    cx: f32,
-    /// Principal point (y).
-    #[pyo3(get, set)]
-    cy: f32,
-    world2cam_pos: [f32; 3],
-    /// Row-major 3x3.
-    world2cam_rot_mat: [f32; 9],
+pub(crate) struct Projection {
+    pub(crate) inner: quickik_core::observation::Projection,
 }
 
-impl Camera {
-    fn as_rust(&self) -> quickik_core::observation::Camera {
-        quickik_core::observation::Camera {
-            fx: self.fx,
-            fy: self.fy,
-            cx: self.cx,
-            cy: self.cy,
-            world2cam_pos: nalgebra::Vector3::from(self.world2cam_pos),
-            world2cam_rot_mat: nalgebra::Matrix3::from_row_slice(&self.world2cam_rot_mat),
-        }
-    }
-
-    fn from_rust(camera: quickik_core::observation::Camera) -> Self {
-        let p = camera.world2cam_pos;
-        Camera {
-            fx: camera.fx,
-            fy: camera.fy,
-            cx: camera.cx,
-            cy: camera.cy,
-            world2cam_pos: [p.x, p.y, p.z],
-            world2cam_rot_mat: camera
-                .world2cam_rot_mat
-                .transpose()
-                .as_slice()
-                .try_into()
-                .unwrap(),
+impl Default for Projection {
+    fn default() -> Self {
+        Projection {
+            inner: quickik_core::observation::Projection::new_3d(),
         }
     }
 }
 
 #[pymethods]
-impl Camera {
-    /// `world2cam_pos` must have exactly 3 elements and `world2cam_rot_mat`
-    /// exactly 9 (row-major 3x3); raises `ValueError` otherwise.
-    #[new]
-    fn new(
+impl Projection {
+    /// Observations are 3D world positions; nothing is projected.
+    #[staticmethod]
+    fn new_3d() -> Self {
+        Projection::default()
+    }
+
+    /// Observations are world X-Y coordinates with Z dropped.
+    #[staticmethod]
+    fn new_ortho_xy() -> Self {
+        Projection {
+            inner: quickik_core::observation::Projection::new_ortho_xy(),
+        }
+    }
+
+    /// Observations are pixel coordinates from a calibrated pinhole camera.
+    ///
+    /// `fx`/`fy` are focal lengths in pixels and `cx`/`cy` the principal
+    /// point. `world2cam_pos` must have exactly 3 elements and
+    /// `world2cam_rot_mat` exactly 9 (row-major 3x3), giving the extrinsics as
+    /// `p_cam = world2cam_rot_mat @ p_world + world2cam_pos`; raises
+    /// `ValueError` otherwise.
+    #[staticmethod]
+    fn new_pinhole_camera(
         fx: f32,
         fy: f32,
         cx: f32,
@@ -143,53 +67,28 @@ impl Camera {
         world2cam_pos: Vec<f32>,
         world2cam_rot_mat: Vec<f32>,
     ) -> PyResult<Self> {
-        Ok(Camera {
-            fx,
-            fy,
-            cx,
-            cy,
-            world2cam_pos: vec_to_array(&world2cam_pos, "world2cam_pos")?,
-            world2cam_rot_mat: vec_to_array(&world2cam_rot_mat, "world2cam_rot_mat")?,
+        let pos = vec_to_array::<3>(&world2cam_pos, "world2cam_pos")?;
+        let rot = vec_to_array::<9>(&world2cam_rot_mat, "world2cam_rot_mat")?;
+        Ok(Projection {
+            inner: quickik_core::observation::Projection::new_pinhole_camera(
+                fx,
+                fy,
+                cx,
+                cy,
+                nalgebra::Vector3::from(pos),
+                nalgebra::Matrix3::from_row_slice(&rot),
+            ),
         })
     }
 
-    /// World-to-camera translation, as `(x, y, z)`.
+    /// Whether this is `new_3d()`, i.e. observations need no projecting.
     #[getter]
-    fn world2cam_pos(&self) -> [f32; 3] {
-        self.world2cam_pos
-    }
-    #[setter]
-    fn set_world2cam_pos(&mut self, value: Vec<f32>) -> PyResult<()> {
-        self.world2cam_pos = vec_to_array(&value, "world2cam_pos")?;
-        Ok(())
-    }
-
-    /// Row-major 3x3, as 9 values.
-    #[getter]
-    fn world2cam_rot_mat(&self) -> Vec<f32> {
-        self.world2cam_rot_mat.to_vec()
-    }
-    #[setter]
-    fn set_world2cam_rot_mat(&mut self, value: Vec<f32>) -> PyResult<()> {
-        self.world2cam_rot_mat = vec_to_array(&value, "world2cam_rot_mat")?;
-        Ok(())
+    fn is_3d(&self) -> bool {
+        self.inner.is_3d()
     }
 
     fn __repr__(&self) -> String {
-        format!("{:?}", self.as_rust())
-    }
-}
-
-/// A mapper for 2D keypoints already reprojected to physical X-Y coordinates.
-#[pyclass(module = "quickik", from_py_object, frozen)]
-#[derive(Clone, Copy)]
-pub(crate) struct XYView;
-
-#[pymethods]
-impl XYView {
-    #[new]
-    fn new() -> Self {
-        XYView
+        format!("{:?}", self.inner)
     }
 }
 
@@ -224,7 +123,7 @@ impl KeypointObservation {
         })
     }
 
-    /// A 2D position in whatever space the consuming `Solver`'s `mapper`
+    /// A 2D position in whatever space the consuming `Solver`'s `projection`
     /// expects (e.g. camera pixel coordinates). Raises `ValueError` if `pos`
     /// doesn't have exactly 2 elements.
     #[staticmethod]
@@ -255,14 +154,13 @@ pub(crate) fn extract_observations(
 /// [`KeypointObservation::missing`]), without ever constructing a Python
 /// `KeypointObservation` object, unlike [`extract_observations`], which
 /// unwraps objects a caller already built one per keypoint. Used by
-/// array-based entry points (e.g.
-/// [`solve_sequence_segmented_parallel`](crate::high_level::solve_sequence_segmented_parallel))
+/// array-based entry points (`SequenceSolver.solve`, `BatchedSolver.solve`)
 /// for callers that already have their data in numpy arrays, to avoid that
 /// per-keypoint Python object construction and unwrapping.
 ///
 /// `positions`'s last dimension selects the observation kind: 3 builds
 /// `Position3D`, 2 builds `Position2D`. Call [`validate_position_weight_shapes`]
-/// first to ensure this matches whether a mapper is set. Used by
+/// first to ensure this matches whether a projection is set. Used by
 /// [`SequenceSolver`](crate::sequential_solver::SequenceSolver) and
 /// [`BatchedSolver`](crate::batched_solver::BatchedSolver)'s array-based
 /// `solve` methods.
@@ -308,34 +206,28 @@ pub(crate) fn positions_to_pyarray<'py>(
     py: Python<'py>,
     positions: &[nalgebra::Vector3<f32>],
 ) -> Bound<'py, PyArray2<f32>> {
-    let mut arr = Array2::<f32>::zeros((positions.len(), 3));
-    for (mut row, pos) in arr.rows_mut().into_iter().zip(positions) {
-        row[0] = pos.x;
-        row[1] = pos.y;
-        row[2] = pos.z;
-    }
-    arr.into_pyarray(py)
+    Array2::from_shape_fn((positions.len(), 3), |(i, axis)| positions[i][axis]).into_pyarray(py)
 }
 
 /// Checks that `positions`/`weights` have the shapes
 /// [`observations_from_arrays`] expects: `(n_frames, n_joints)` for
-/// `weights`, and for `positions`, `(n_frames, n_joints, 3)` if `has_mapper`
+/// `weights`, and for `positions`, `(n_frames, n_joints, 3)` if `is_2d`
 /// is `false` (3D observations), or `(n_frames, n_joints, 2)` if `true` (2D
-/// observations, projected by whichever mapper the solver was constructed
+/// observations, projected by whichever projection the solver was constructed
 /// with).
 pub(crate) fn validate_position_weight_shapes(
     positions: &ArrayView3<'_, f32>,
     weights: &ArrayView2<'_, f32>,
     n_joints: usize,
-    has_mapper: bool,
+    is_2d: bool,
 ) -> PyResult<()> {
     let (n_frames, n_keypoints, dim) = positions.dim();
-    let expected_dim = if has_mapper { 2 } else { 3 };
+    let expected_dim = if is_2d { 2 } else { 3 };
     if dim != expected_dim {
         return Err(PyValueError::new_err(format!(
-            "positions must have shape (n_frames, n_keypoints, {expected_dim}) since mapper is \
-             {}, got last dimension {dim}",
-            if has_mapper { "set" } else { "None" }
+            "positions must have shape (n_frames, n_keypoints, {expected_dim}) since this \
+             solver's projection is {}, got last dimension {dim}",
+            if is_2d { "2D" } else { "3D" }
         )));
     }
     if n_keypoints != n_joints {

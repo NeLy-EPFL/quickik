@@ -6,18 +6,17 @@ via implicit differentiation of the fixed point (adjoint solve against the
 solve's own Cholesky factor), rather than unrolling the solver's iterations.
 `QuickIKSolve` is a thin `nn.Module` wrapper around it.
 
+Any `batched_solver.projection` works, including a pinhole camera:
+`BatchedSolver.solve` returns the *residual* Jacobian, already mapped through
+whatever projection the solver holds, so the adjoint solve below never needs to
+know which one that was.
+
 Constraints inherited from `BatchedSolver`:
-- `batched_solver.mapper` must be `None` (3D observations) or an `XYView`
-  (2D); a `Camera` isn't supported. The returned Jacobian is always the raw
-  3D keypoint-position Jacobian; for `XYView`, whose 2D projection is exactly
-  that Jacobian's first two rows (a fixed, position-independent linear map),
-  that's enough to differentiate correctly. A `Camera`'s projection Jacobian
-  genuinely depends on position and isn't retained, so gradients through one
-  would be wrong.
 - `batched_solver.kinematic_tree` must be free-floating (not fixed-base);
   `BatchedSolver.__init__` already enforces this.
 - Gradients are only computed for `positions`, not `weights` (that would
-  need the solve's residual vector, which isn't currently exposed).
+  need the solve's residual vector, which isn't currently exposed) and not a
+  camera's own calibration.
 - Items whose last Gauss-Newton iteration wasn't positive-definite get a
   zeroed gradient (their forward values are still meaningful; there just
   isn't a usable linearization to differentiate through).
@@ -36,17 +35,6 @@ import quickik
 __all__ = ["QuickIKSolve", "SolveIK"]
 
 
-def _check_supports_grad(batched_solver):
-    if isinstance(batched_solver.mapper, quickik.Camera):
-        raise NotImplementedError(
-            "SolveIK/QuickIKSolve don't support a BatchedSolver built with a Camera "
-            "mapper: its returned Jacobian is always the raw 3D keypoint-position "
-            "Jacobian, and unlike XYView's, Camera's own projection Jacobian depends "
-            "on position and isn't retained. Use mapper=None (3D) or mapper=XYView "
-            "(2D) instead."
-        )
-
-
 class SolveIK(torch.autograd.Function):
     """Differentiable batched inverse-kinematics solve.
 
@@ -57,8 +45,8 @@ class SolveIK(torch.autograd.Function):
     - `base_pos`: `(batch_size, 3)`.
     - `base_quat`: `(batch_size, 4)`, `(w, x, y, z)`.
 
-    `positions` is `(batch_size, n_joints, 3)` if `batched_solver.mapper` is
-    `None`, or `(batch_size, n_joints, 2)` if it's an `XYView`; `weights` is
+    `positions` is `(batch_size, n_joints, 3)` for a 3D projection, or
+    `(batch_size, n_joints, 2)` otherwise; `weights` is
     `(batch_size, n_joints)`; both are in `batched_solver`'s own
     `keypoints_order`. `batched_solver` is treated as a constant (no
     gradient); only `positions` gets one back.
@@ -66,7 +54,6 @@ class SolveIK(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, batched_solver, positions, weights):
-        _check_supports_grad(batched_solver)
         if weights.requires_grad:
             raise ValueError(
                 "SolveIK doesn't support gradients w.r.t. weights (only positions): "
@@ -107,12 +94,6 @@ class SolveIK(torch.autograd.Function):
 
         base_quat_tensor = to_tensor(result.base_quat)
 
-        # `result.jacobian` is always the raw 3D Jacobian regardless of
-        # `mapper` (see `BatchedSolver.solve`'s docs); for `XYView`, its 2D
-        # projected Jacobian is exactly that Jacobian's first two rows, so
-        # `backward` just needs to know how many rows to keep per keypoint.
-        ctx.n_obs_dims = 2 if isinstance(batched_solver.mapper, quickik.XYView) else 3
-
         ctx.keypoint_to_joint_idx = keypoint_to_joint_idx
         ctx.effective_weights_internal = effective_weights_internal
         ctx.jacobian = to_tensor(result.jacobian)
@@ -129,13 +110,16 @@ class SolveIK(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_joint_angles, grad_base_pos, grad_base_quat):
         weights = ctx.effective_weights_internal  # (batch, n_joints), internal order
-        jacobian = ctx.jacobian  # (batch, 3 * n_joints, state_dim), internal order
+        # (batch, n_obs_dims * n_joints, state_dim), internal order, already
+        # projected through the solver's projection if it has one.
+        jacobian = ctx.jacobian
         cholesky_l = ctx.cholesky_l  # (batch, state_dim, state_dim)
         valid = ctx.valid  # (batch,) bool
         base_quat = ctx.base_quat  # (batch, 4), (w, x, y, z)
 
-        batch_size, n_joints_times_3, state_dim = jacobian.shape
-        n_joints = n_joints_times_3 // 3
+        batch_size, n_residual_rows, state_dim = jacobian.shape
+        n_joints = weights.shape[1]
+        n_obs_dims = n_residual_rows // n_joints
 
         # base_quat's incoming gradient is w.r.t. the quaternion (w, x, y,
         # z) itself, but the linear system operates in the root's 3-dim
@@ -177,12 +161,8 @@ class SolveIK(torch.autograd.Function):
         mu = mu * valid.unsqueeze(-1).to(mu.dtype)
 
         # d(Loss)/d(obs_pos_k) = weight_k * J_k @ mu, per keypoint, in the
-        # tree's internal keypoint order. `J_k` is the raw 3D Jacobian's
-        # first `ctx.n_obs_dims` rows (all 3, or `XYView`'s first 2, see
-        # `forward`).
-        jac_per_keypoint = jacobian.view(batch_size, n_joints, 3, state_dim)[
-            ..., : ctx.n_obs_dims, :
-        ]
+        # tree's internal keypoint order.
+        jac_per_keypoint = jacobian.view(batch_size, n_joints, n_obs_dims, state_dim)
         grad_positions_internal = weights.unsqueeze(-1) * torch.einsum(
             "bnij,bj->bni", jac_per_keypoint, mu
         )
@@ -202,13 +182,11 @@ class QuickIKSolve(torch.nn.Module):
     Holds `batched_solver` (fixed for this module's lifetime);
     `forward(positions, weights)` returns `(joint_angles, base_pos,
     base_quat)`. See `SolveIK` for the actual differentiable op and its
-    constraints (`batched_solver.mapper` must be `None` or an `XYView`; no
-    gradient w.r.t. weights).
+    constraints (no gradient w.r.t. weights or the projection's parameters).
     """
 
     def __init__(self, batched_solver):
         super().__init__()
-        _check_supports_grad(batched_solver)
         self.batched_solver = batched_solver
 
     def forward(self, positions, weights):

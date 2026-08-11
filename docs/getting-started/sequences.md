@@ -46,7 +46,7 @@ Assuming you already have the whole recording upfront, the example below solves 
     Any dtype is accepted for `positions`/`weights` (e.g. the common case of a `float64` array) and cast to `float32`, following NumPy's own casting rules.
 
     !!! note "2D keypoints"
-        `positions`'s last dimension follows `mapper` (see ["From 2D keypoint positions"](2d-keypoints.md)): shape `(n_frames, n_joints, 3)` if `mapper` is `None` (the default), or `(n_frames, n_joints, 2)` if a `Camera`/`XYView` mapper was passed to `SequenceSolver`. A mismatch between the two raises `ValueError`.
+        `positions`'s last dimension follows `projection` (see ["From 2D keypoint positions"](2d-keypoints.md)): shape `(n_frames, n_joints, 3)` if `projection` is `None` (the default), or `(n_frames, n_joints, 2)` if a `Camera`/`ortho-XY projection` projection was passed to `SequenceSolver`. A mismatch between the two raises `ValueError`.
 
 === "C++"
 
@@ -55,7 +55,7 @@ Assuming you already have the whole recording upfront, the example below solves 
 
     auto tree = quickik::kinematic_tree_from_json_file("body_plan.json");
     auto seq_solver = quickik::new_sequence_solver(
-        *tree, quickik::default_solver_config(), quickik::no_mapper()
+        *tree, quickik::default_solver_config(), quickik::projection_3d()
     );
 
     // flattened_recording is every frame's observations concatenated back to
@@ -153,7 +153,7 @@ The example below splits a long recording into segments explicitly:
     )
     ```
 
-    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`; `long_positions`'s last dimension is 2 instead of 3 if `mapper` is a `Camera`/`XYView` (see the note above).
+    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`; `long_positions`'s last dimension is 2 instead of 3 if `projection` is a `Camera`/`ortho-XY projection` (see the note above).
 
 === "C++"
 
@@ -174,7 +174,7 @@ The example below splits a long recording into segments explicitly:
         observations,
         tree->n_joints(),
         parallel_config,
-        quickik::no_mapper()
+        quickik::projection_3d()
     );
 
     // poses is a StateList, not a std::vector<State>. Read it out with .len()/.at(i).

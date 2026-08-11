@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use nalgebra::Vector3;
 use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, evaluate_fwdkin};
-use quickik::observation::{KeypointObservation, NoMapper};
+use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
+use quickik::observation::{KeypointObservation, Projection};
 use quickik::sequential_solver::SequenceSolver;
 use quickik::state::State;
 
@@ -17,9 +17,9 @@ const DAMPING: f32 = 1e-6;
 
 fn keypoints_at(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<Vector3<f32>> {
     let mut state = State::neutral_pose(tree.clone());
-    state.dof_angles.copy_from_slice(angles);
+    state.dof_values.copy_from_slice(angles);
     let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    evaluate_fwdkin(&mut workspace, &state);
+    forward_kinematics(&mut workspace, &state);
     workspace.kpt_positions.clone()
 }
 
@@ -40,7 +40,7 @@ fn new_seq_solver(
 ) -> SequenceSolver {
     SequenceSolver::new(
         tree,
-        NoMapper,
+        Projection::new_3d(),
         n_iterations,
         neutral_weight,
         POSITION_TOLERANCE,
@@ -57,7 +57,7 @@ fn solve_always_warm_starts_across_separate_calls() {
     // Cold start: a single Gauss-Newton iteration from the neutral pose.
     let mut cold = new_seq_solver(&tree, 1, 0.0);
     let cold_result = cold.solve(std::slice::from_ref(&target), false, false);
-    let cold_error = (cold_result[0].state.dof_angles[0] - 0.4).abs();
+    let cold_error = (cold_result[0].state.dof_values[0] - 0.4).abs();
 
     // Warm start: two separate `.solve()` calls with the same (static)
     // target; the second call continues from the first call's near-answer
@@ -67,7 +67,7 @@ fn solve_always_warm_starts_across_separate_calls() {
     let mut warm = new_seq_solver(&tree, 1, 0.0);
     warm.solve(std::slice::from_ref(&target), false, false);
     let warm_results = warm.solve(std::slice::from_ref(&target), false, false);
-    let warm_error = (warm_results[0].state.dof_angles[0] - 0.4).abs();
+    let warm_error = (warm_results[0].state.dof_values[0] - 0.4).abs();
 
     assert!(
         warm_error < cold_error,
@@ -89,8 +89,8 @@ fn solve_returns_one_result_per_frame() {
     let results = seq_solver.solve(&sequence, false, false);
 
     assert_eq!(results.len(), 3);
-    assert!((results[2].state.dof_angles[0] - 0.3).abs() < 1e-2);
-    assert!((results[2].state.dof_angles[1] - 0.15).abs() < 1e-2);
+    assert!((results[2].state.dof_values[0] - 0.3).abs() < 1e-2);
+    assert!((results[2].state.dof_values[1] - 0.15).abs() < 1e-2);
 }
 
 #[test]
@@ -103,12 +103,12 @@ fn keypoint_pos_matches_the_converged_state() {
 
     let mut expected_state = State::neutral_pose(tree.clone());
     expected_state
-        .dof_angles
-        .copy_from_slice(&result.state.dof_angles);
+        .dof_values
+        .copy_from_slice(&result.state.dof_values);
     expected_state.root_pos = result.state.root_pos;
-    expected_state.root_rot = result.state.root_rot;
+    expected_state.root_quat = result.state.root_quat;
     let mut expected_workspace = ForwardKinematicsWorkspace::new(&tree);
-    evaluate_fwdkin(&mut expected_workspace, &expected_state);
+    forward_kinematics(&mut expected_workspace, &expected_state);
 
     let actual = result.keypoint_pos.as_ref().unwrap();
     assert_eq!(actual.len(), expected_workspace.kpt_positions.len());
@@ -134,7 +134,7 @@ fn with_fk_true_does_not_change_the_converged_trajectory() {
 
     assert_eq!(fk_results.len(), plain_results.len());
     for (fk_result, plain_result) in fk_results.iter().zip(&plain_results) {
-        assert_eq!(fk_result.state.dof_angles, plain_result.state.dof_angles);
+        assert_eq!(fk_result.state.dof_values, plain_result.state.dof_values);
         assert!(fk_result.keypoint_pos.is_some());
         assert!(plain_result.keypoint_pos.is_none());
     }
@@ -174,15 +174,15 @@ fn solve_segments_parallel_reconstructs_smooth_trajectory() {
     assert_eq!(results.len(), n_frames);
     for (result, angles) in results.iter().zip(&true_angles) {
         assert!(
-            (result.state.dof_angles[0] - angles[0]).abs() < 1e-2,
+            (result.state.dof_values[0] - angles[0]).abs() < 1e-2,
             "dof0 mismatch: got {}, want {}",
-            result.state.dof_angles[0],
+            result.state.dof_values[0],
             angles[0]
         );
         assert!(
-            (result.state.dof_angles[1] - angles[1]).abs() < 1e-2,
+            (result.state.dof_values[1] - angles[1]).abs() < 1e-2,
             "dof1 mismatch: got {}, want {}",
-            result.state.dof_angles[1],
+            result.state.dof_values[1],
             angles[1]
         );
     }
@@ -206,11 +206,14 @@ fn solve_segments_parallel_with_one_worker_matches_plain_solve_exactly() {
     assert_eq!(parallel_results.len(), plain_results.len());
     for (parallel_result, plain_result) in parallel_results.iter().zip(&plain_results) {
         assert_eq!(
-            parallel_result.state.dof_angles,
-            plain_result.state.dof_angles
+            parallel_result.state.dof_values,
+            plain_result.state.dof_values
         );
         assert_eq!(parallel_result.state.root_pos, plain_result.state.root_pos);
-        assert_eq!(parallel_result.state.root_rot, plain_result.state.root_rot);
+        assert_eq!(
+            parallel_result.state.root_quat,
+            plain_result.state.root_quat
+        );
     }
 }
 
@@ -244,5 +247,5 @@ fn solve_segments_parallel_does_not_affect_the_solver_s_own_running_state() {
     let expected = reference_solver.solve(std::slice::from_ref(&target_b), false, false);
     let actual = seq_solver.solve(std::slice::from_ref(&target_b), false, false);
 
-    assert_eq!(actual[0].state.dof_angles, expected[0].state.dof_angles);
+    assert_eq!(actual[0].state.dof_values, expected[0].state.dof_values);
 }
