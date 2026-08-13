@@ -2,26 +2,25 @@
 
 Not every tracking source gives 3D positions directly: a single camera view only gives 2D pixel coordinates, and recovering the underlying 3D pose is itself part of what the solve needs to do. `Position2D` observations cover this:
 
-- **`Camera`:** a pinhole projection model (focal lengths, principal point, and the camera's own pose relative to the body plan's world frame). QuickIK projects each candidate 3D keypoint position through it before comparing to the observed pixel coordinates, rather than comparing 3D positions directly.
-- **`ortho-XY projection`:** keypoints already reprojected onto a physical X-Y plane (e.g., an overhead tracking setup). No camera intrinsics/extrinsics involved, just the identity projection dropping Z.
+- **Pinhole camera:** a pinhole projection model (focal lengths, principal point, and the camera's own pose relative to the body plan's world frame). QuickIK projects each candidate 3D keypoint position through it before comparing to the observed pixel coordinates, rather than comparing 3D positions directly.
+- **Orthographic X-Y projection:** keypoints already reprojected onto a physical X-Y plane (e.g., an overhead tracking setup). No camera intrinsics/extrinsics involved, just the identity projection dropping Z.
 
-Set `SolverConfig`'s projection to either one to switch a solver from 3D to 2D observations:
+Pass a solver's `projection` argument as one or the other to switch it from 3D to 2D observations:
 
 === "Rust"
 
     ```rust
-    use quickik::observation::ortho-XY projection;
+    use quickik::observation::Projection;
 
-    let ortho_xy = Some(ortho-XY projection);
-    let config = SolverConfig { projection: ortho_xy, ..SolverConfig::default() };
-    let mut solver: Solver<ortho-XY projection> = Solver::new(&kinematic_tree, config);
+    let projection = Projection::new_ortho_xy();
+    let mut solver = Solver::new(&kinematic_tree, projection, 10, 1e-3, 1e-3, 1e-3, 1e-6);
     ```
 
 === "Python"
 
     ```python
-    ortho_xy = quickik.ortho-XY projection()
-    solver = quickik.Solver(kinematic_tree, quickik.SolverConfig(), projection=ortho_xy)
+    ortho_xy = quickik.Projection.new_ortho_xy()
+    solver = quickik.Solver(kinematic_tree, projection=ortho_xy)
     ```
 
     !!! note "Handling of `projection` in Python"

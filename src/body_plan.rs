@@ -37,10 +37,10 @@ pub struct Dof {
     /// Optional angle limits in [min, max]. Unbounded if `None`.
     pub limits: Option<[f32; 2]>,
     /// Scales this DOF's contribution to the deviation-from-neutral penalty,
-    /// multiplied together with [`SolverConfig::neutral_weight`] (same pattern
+    /// multiplied together with [`Solver::neutral_weight`] (same pattern
     /// as [`Joint::weight_scaler`]).
     ///
-    /// [`SolverConfig::neutral_weight`]: crate::solver::SolverConfig::neutral_weight
+    /// [`Solver::neutral_weight`]: crate::solver::Solver::neutral_weight
     pub weight_scaler: f32,
 }
 

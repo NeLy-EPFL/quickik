@@ -1,9 +1,10 @@
 # Python API reference
 
 `quickik`'s Python bindings mirror the Rust crate's layout: a `KinematicTree`
-loaded once, `State`/`KeypointObservation` values fed in per frame, and a
-`Solver` (or `SequenceSolver`/`solve_sequence_segmented_parallel` for whole
-sequences) that ties them together.
+loaded once, `State`/`KeypointObservation`/`Projection` values fed in per
+frame, and one of three solvers that tie them together: `Solver` for a single
+frame, `SequenceSolver` for a warm-started sequence, or `BatchedSolver` for a
+batch of independent frames (e.g. training with `quickik.torch`).
 
 ::: quickik
     options:
@@ -16,10 +17,9 @@ sequences) that ties them together.
         - KinematicTree
         - State
         - KeypointObservation
-        - Camera
-        - XYView
-        - SolverConfig
+        - Projection
+        - SolverResult
         - Solver
         - SequenceSolver
-        - ParallelSolveConfig
-        - solve_sequence_segmented_parallel
+        - BatchedSolverResult
+        - BatchedSolver

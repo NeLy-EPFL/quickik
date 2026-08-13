@@ -1,6 +1,6 @@
 """Griffe extension recovering PyO3 constructor signatures.
 
-PyO3 classes (e.g. `quickik.SolverConfig`) expose their constructor via
+PyO3 classes (e.g. `quickik.Solver`) expose their constructor via
 `__new__`, not `__init__` -- the real signature only shows up on the class
 object itself (what `inspect.signature(cls)` reads from `__text_signature__`).
 Griffe's dynamic inspector only ever looks for `__init__` when building a

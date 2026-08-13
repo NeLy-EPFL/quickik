@@ -19,8 +19,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 /// Runs `f`, converting a panic (e.g. from malformed body-plan JSON, an
-/// invalid `ParallelSolveConfig`, or a mismatched observation count) into a
-/// `PyValueError` instead of an uncaught `pyo3_runtime.PanicException`.
+/// invalid `keypoints_order`/`n_workers`, or a mismatched observation count)
+/// into a `PyValueError` instead of an uncaught `pyo3_runtime.PanicException`.
 /// Mirrors the C++ bindings' own `catch_panic` (`cpp/src/lib.rs`). Every
 /// mutation `f` might have made before panicking is just plain data with no
 /// unsafe invariants to uphold, so asserting unwind-safety here is fine.

@@ -11,42 +11,43 @@ Assuming you already have the whole recording upfront, the example below solves 
     ```rust
     use std::sync::Arc;
     use quickik::body_plan::KinematicTree;
-    use quickik::solver::SolverConfig;
-    use quickik::observation::KeypointObservation;
-    use quickik::high_level::SequenceSolver;
+    use quickik::observation::{KeypointObservation, Projection};
+    use quickik::sequential_solver::SequenceSolver;
 
     let kinematic_tree = Arc::new(KinematicTree::from_json_file("body_plan.json"));
-    let mut seq_solver = SequenceSolver::new(kinematic_tree.clone(), SolverConfig::default());
+    let mut seq_solver = SequenceSolver::new(
+        &kinematic_tree, Projection::new_3d(), 10, 1e-3, 1e-3, 1e-3, 1e-6,
+    );
 
     // recording: Vec<Vec<KeypointObservation>>. One inner Vec per frame, each n_joints long.
     let recording = ...;
 
-    let poses = seq_solver.solve_sequence(&recording);
+    let results = seq_solver.solve(&recording, false, false);
     ```
 
 === "Python"
 
     ```python
-    from quickik import KinematicTree, SequenceSolver, SolverConfig
+    from quickik import KinematicTree, SequenceSolver
 
     kinematic_tree = KinematicTree.from_json_file("body_plan.json")
-    seq_solver = SequenceSolver(kinematic_tree, SolverConfig())
+    seq_solver = SequenceSolver(kinematic_tree)
 
     # positions: NDArray of shape (n_frames, n_joints, 3), in kinematic_tree.joints order
     positions = ...
     # weights: NDArray of shape (n_frames, n_joints); 0, below, or NaN indicates keypoint is missing
     weights = ...
 
-    poses = seq_solver.solve_sequence(positions, weights)
+    results = seq_solver.solve(positions, weights)
     ```
 
     !!! note "Bigger practical performance win in Python"
-        Python's `solve_sequence` takes `positions`/`weights` NumPy arrays instead of a list of per-frame `KeypointObservation` lists, so it never constructs one Python object per keypoint per frame. That construction is what actually dominates call overhead for a long recording.
+        Python's `solve` takes `positions`/`weights` NumPy arrays instead of a list of per-frame `KeypointObservation` lists, so it never constructs one Python object per keypoint per frame. That construction is what actually dominates call overhead for a long recording.
 
     Any dtype is accepted for `positions`/`weights` (e.g. the common case of a `float64` array) and cast to `float32`, following NumPy's own casting rules.
 
     !!! note "2D keypoints"
-        `positions`'s last dimension follows `projection` (see ["From 2D keypoint positions"](2d-keypoints.md)): shape `(n_frames, n_joints, 3)` if `projection` is `None` (the default), or `(n_frames, n_joints, 2)` if a `Camera`/`ortho-XY projection` projection was passed to `SequenceSolver`. A mismatch between the two raises `ValueError`.
+        `positions`'s last dimension follows `SequenceSolver`'s `projection` (see ["From 2D keypoint positions"](2d-keypoints.md)): shape `(n_frames, n_joints, 3)` for the default 3D projection, or `(n_frames, n_joints, 2)` for a `Camera`/orthographic X-Y projection. A mismatch between the two raises `ValueError`.
 
 === "C++"
 
@@ -73,22 +74,22 @@ Assuming you already have the whole recording upfront, the example below solves 
 
 ### Checking fit quality
 
-Like a plain `Solver` (see ["Checking fit quality"](single-frame.md#checking-fit-quality)), `SequenceSolver` keeps the most recently converged frame's world-space keypoint positions around as `last_fk_positions`. To get every frame's fitted positions from a whole-sequence call, use `solve_sequence_with_fk` instead of `solve_sequence`: same inputs, but it additionally returns each frame's keypoint positions alongside its converged pose.
+Like a plain `Solver` (see ["Checking fit quality"](single-frame.md#checking-fit-quality)), pass `with_fk` to get each frame's converged world-space keypoint positions alongside its pose, as that frame's own `SolverResult.keypoint_pos`.
 
 === "Rust"
 
     ```rust
-    let results = seq_solver.solve_sequence_with_fk(&recording);
-    for (pose, fk_positions) in &results {
-        println!("{:?}", fk_positions);
+    let results = seq_solver.solve(&recording, false, true);
+    for result in &results {
+        println!("{:?}", result.keypoint_pos.as_ref().unwrap());
     }
     ```
 
 === "Python"
 
     ```python
-    poses, fk_positions = seq_solver.solve_sequence_with_fk(positions, weights)
-    print(fk_positions.shape)  # (n_frames, n_joints, 3)
+    results = seq_solver.solve(positions, weights, with_fk=True)
+    print(results[0].keypoint_pos.shape)  # (n_joints, 3)
     ```
 
 === "C++"
@@ -97,63 +98,35 @@ Like a plain `Solver` (see ["Checking fit quality"](single-frame.md#checking-fit
 
 ## Solving long sequences in parallel
 
-A plain `SequenceSolver` only ever uses one thread, and each frame has to finish before the next can start, since every frame warm-starts from the last. For a single long recording, `solve_sequence_segmented_parallel` gets around that: it splits the recording into segments with small overlaps, solves each on its own worker thread (cold-started at the segment's first frame, then warm-started within it), and stitches the results back into one continuous sequence. The overlap does double duty: it gives every segment after the first a running start, since its own copy of the shared frames gets to warm up before it reaches genuinely new ones, and it doubles as a consistency check, since two independent solves of the same frames should agree closely. When they don't, by more than `overlap_tolerance`, a warning is logged and the earlier segment's version is kept.
+A plain `SequenceSolver` only ever uses one thread, and each frame has to finish before the next can start, since every frame warm-starts from the last. For a single long recording, `solve_segments_parallel` gets around that: it splits the recording into exactly `n_workers` contiguous, non-overlapping segments (one per worker, as evenly sized as possible), and solves each on its own thread, cold-started at the neutral pose and then warm-started within itself, same as `solve` above. Segments aren't cross-checked against each other: better load distribution is worth more than that consistency check, since segments are independent either way. This never reads or writes the `SequenceSolver`'s own continuous `solve` state from the section above, so it's safe to call on an object you're also feeding frames into one at a time.
 
-The parallel configuration bundles the segment length and overlap, a consistency-check tolerance, and the worker count:
-
-- **`segment_len`/`overlap_len`:** length of each segment and of the overlap between consecutive segments, in frames.
-- **`overlap_tolerance`:** the per-DOF angle disagreement (radians) allowed between overlapping frames before logging the warning described above.
 - **`n_workers`:** a positive value is used directly, clipped down (with a warning) if it exceeds the available core count. A negative value counts backward from all available cores: `-1` uses all, `-2` uses all but one, etc. `0` is invalid.
 
-The example below splits a long recording into segments explicitly:
+The example below solves a long recording, split across 4 worker threads:
 
 === "Rust"
 
     ```rust
-    use quickik::high_level::{ParallelSolveConfig, solve_sequence_segmented_parallel};
-
-    let parallel_config = ParallelSolveConfig {
-        segment_len: 200,
-        overlap_len: 10,
-        overlap_tolerance: 0.05,
-        n_workers: -1, // -1 = all available threads, -2 = all but one, etc.
-    };
-
     // long_recording: Vec<Vec<KeypointObservation>>. One inner Vec per frame, each n_joints long.
     let long_recording = ...;
 
-    let poses = solve_sequence_segmented_parallel(
-        &kinematic_tree,
-        SolverConfig::default(),
-        &long_recording,
-        parallel_config,
-    );
+    let results = seq_solver.solve_segments_parallel(&long_recording, 4, false, false);
     ```
 
 === "Python"
 
     ```python
     import numpy as np
-    from quickik import ParallelSolveConfig, solve_sequence_segmented_parallel
-
-    parallel_config = ParallelSolveConfig(
-        segment_len=200,
-        overlap_len=10,
-        overlap_tolerance=0.05,
-        n_workers=-1,  # -1 = all available threads, -2 = all but one, etc.
-    )
 
     # long_positions: NDArray of shape (n_frames, n_joints, 3), in kinematic_tree.joints order
     long_positions = ...
     # long_weights: NDArray of shape (n_frames, n_joints); 0, below, or NaN indicates keypoint is missing
     long_weights = ...
 
-    poses = solve_sequence_segmented_parallel(
-        kinematic_tree, SolverConfig(), long_positions, long_weights, parallel_config
-    )
+    results = seq_solver.solve_segments_parallel(long_positions, long_weights, n_workers=4)
     ```
 
-    Like `solve_sequence` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`; `long_positions`'s last dimension is 2 instead of 3 if `projection` is a `Camera`/`ortho-XY projection` (see the note above).
+    Like `solve` above, `long_positions`/`long_weights` accept any dtype and are cast to `float32`; `long_positions`'s last dimension is 2 instead of 3 for a `Camera`/orthographic X-Y projection (see the note above).
 
 === "C++"
 
@@ -183,8 +156,46 @@ The example below splits a long recording into segments explicitly:
     }
     ```
 
-If you'd rather not tune `segment_len`/`overlap_len` yourself, a `for_recording` constructor (C++: the free function `parallel_solve_config_for_recording`) builds a `ParallelSolveConfig` that spreads `total_len` frames evenly across every available core – one segment per core, sized by simple division plus a fixed default overlap. Build a `ParallelSolveConfig` directly, as above, for finer control over cold-start frequency.
-
 In C++, this takes the same flattened-slice-plus-`n_joints` layout as `solve_sequence` above (there's no way to pass a list of per-frame observation lists directly across the FFI). The results come back as a `StateList` rather than a plain vector, as shown above.
 
 Independent sequences (e.g. one per subject or one per camera) don't need this machinery. Just solve each with its own `SequenceSolver` and parallelize however you like (a thread pool, Rust's [Rayon](https://docs.rs/rayon/latest/rayon/), Python's [multiprocessing](https://docs.python.org/3/library/multiprocessing.html) or [Joblib](https://joblib.readthedocs.io/), etc.).
+
+## Solving independent batches (no warm start)
+
+Some workloads solve many *independent* frames rather than a continuous stream, e.g. shuffled minibatches when training a pose model with an autodiff framework. `BatchedSolver` covers this: every `solve` call starts each item fresh at the neutral pose (no warm-starting) and solves the whole batch in parallel on its own thread pool.
+
+Unlike `Solver`/`SequenceSolver`, its keypoint axis is given by an explicit `keypoints_order` (a list of joint names) rather than the kinematic tree's own internal order, since callers (e.g. a pretrained detector) rarely already produce keypoints in that order; and it requires a free-floating-base tree, since its result always reports the root's `base_pos`/`base_quat`.
+
+=== "Rust"
+
+    ```rust
+    use quickik::batched_solver::BatchedSolver;
+
+    let keypoints_order = vec!["root".into(), "joint1".into(), "joint2".into(), "tip".into()];
+    let batched_solver = BatchedSolver::new(
+        &kinematic_tree, Projection::new_3d(), 10, 1e-3, 1e-3, 1e-3, 1e-6, keypoints_order, -1,
+    );
+
+    // observations_array: Vec<Vec<KeypointObservation>>, one inner Vec per batch item,
+    // each n_joints long, in keypoints_order.
+    let observations_array = ...;
+    let result = batched_solver.solve(&observations_array, true, false); // with_grad=true
+    ```
+
+=== "Python"
+
+    ```python
+    from quickik import KinematicTree, BatchedSolver
+
+    keypoints_order = ["root", "joint1", "joint2", "tip"]
+    batched_solver = BatchedSolver(kinematic_tree, keypoints_order)
+
+    # positions: NDArray (batch_size, n_joints, 3); weights: NDArray (batch_size, n_joints),
+    # both in keypoints_order
+    result = batched_solver.solve(positions, weights, with_grad=True)
+    print(result.joint_angles.shape)  # (batch_size, n_dofs)
+    ```
+
+    `with_grad=True` additionally returns each item's Jacobian and Cholesky factor, which `quickik.torch.SolveIK` uses to differentiate through the solve (via implicit differentiation) when training a model with PyTorch.
+
+See the [Python API reference](../api/python.md) for `BatchedSolver`'s full constructor options (tolerances, `n_workers`, etc.), same as `Solver`/`SequenceSolver`.

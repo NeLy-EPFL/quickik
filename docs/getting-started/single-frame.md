@@ -2,9 +2,9 @@
 
 ## Setting up a solver
 
-A solver is built once from a kinematic tree (loaded from a [body plan](body-plan.md)) and a solver configuration object, then reused across every frame you solve.
+A solver is built once from a kinematic tree (loaded from a [body plan](body-plan.md)) and its tuning parameters, then reused across every frame you solve.
 
-The solver configuration bundles the iteration count, regularization weight, convergence tolerance, and damping:
+Those tuning parameters are the iteration count, regularization weight, convergence tolerance, and damping:
 
 - **`n_iterations`:** how many Gauss-Newton steps to run per solve call, and the cap early stopping can cut short.
 - **`neutral_weight`:** how strongly every joint angle is pulled toward its neutral pose, multiplied with each DOF's own `weight_scaler` from the body plan. This is what keeps `Missing` keypoints, and under-constrained DOFs generally, from drifting to an arbitrary angle, at the cost of some bias where that DOF *is* observed.
@@ -12,24 +12,31 @@ The solver configuration bundles the iteration count, regularization weight, con
 - **`damping`:** Levenberg-Marquardt damping added to the normal equations' diagonal, for numerical stability only. Keep it very small (default `1e-6`).
 - **`projection`:** used for keypoint positions given in 2D projections (see ["From 2D keypoint positions"](2d-keypoints.md)). By default there is no projection, meaning keypoint positions are given in 3D (as is the case here).
 
-It stays mutable for retuning between calls: in Rust and Python it's a live handle attached to the solver, so changing a field takes effect on the next solve. C++'s configuration is a plain value struct instead, with no shared live handle: mutate a copy and pass it back to the solver to apply it.
+`n_iterations`, `neutral_weight`, `position_tolerance`, `angle_tolerance`, and `damping` are plain, freely retunable fields on the solver (Python: attributes with getters/setters) -- change one and it takes effect on the next `solve` call. `projection` is fixed at construction instead, with no setter: a solver preallocates its buffers against the residual dimension the projection implies, so changing it means building a new solver.
 
-The example below loads a body plan, then creates a solver with the default configuration and a state initialized to the neutral pose:
+The example below loads a body plan, then creates a solver with the default tuning and a state initialized to the neutral pose:
 
 === "Rust"
 
     ```rust
     use std::sync::Arc;
     use quickik::body_plan::KinematicTree;
-    use quickik::solver::{Solver, SolverConfig};
+    use quickik::solver::Solver;
     use quickik::state::State;
-    use quickik::observation::KeypointObservation;
+    use quickik::observation::{KeypointObservation, Projection};
     use nalgebra::Vector3;
 
     let kinematic_tree = Arc::new(KinematicTree::from_json_file("body_plan.json"));
-    let mut solver_config = SolverConfig::default();
-    let mut solver: Solver = Solver::new(&kinematic_tree, solver_config);
-    
+    let mut solver = Solver::new(
+        &kinematic_tree,
+        Projection::new_3d(),
+        10,    // n_iterations
+        1e-3,  // neutral_weight
+        1e-3,  // position_tolerance
+        1e-3,  // angle_tolerance
+        1e-6,  // damping
+    );
+
     // Construct a mutable state once, reuse across many solves (to be used later)
     let mut state = State::neutral_pose(kinematic_tree.clone());
     ```
@@ -37,11 +44,10 @@ The example below loads a body plan, then creates a solver with the default conf
 === "Python"
 
     ```python
-    from quickik import KinematicTree, State, Solver, SolverConfig, KeypointObservation
+    from quickik import KinematicTree, State, Solver, KeypointObservation
 
     kinematic_tree = KinematicTree.from_json_file("body_plan.json")
-    solver_config = SolverConfig()
-    solver = Solver(kinematic_tree, solver_config)
+    solver = Solver(kinematic_tree)  # every tuning parameter above has a default
 
     # Initiate a state object once, reuse across many solves (to be used later)
     state = State.neutral_pose(kinematic_tree)
@@ -85,8 +91,8 @@ Continuing the example above with three observed keypoint positions:
         KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 0.0, 0.0), weight: 1.0 },
         KeypointObservation::Position3D { obs_pos: Vector3::new(1.0, 1.0, 0.0), weight: 1.0 },
     ];
-    solver.solve(&mut state, &observations);
-    println!("{:?}", state.dof_angles);
+    let result = solver.solve(&mut state, &observations, false, false);
+    println!("{:?}", result.state.dof_values);
     ```
 
 === "Python"
@@ -97,8 +103,8 @@ Continuing the example above with three observed keypoint positions:
         KeypointObservation.position_3d((1.0, 0.0, 0.0), 1.0),
         KeypointObservation.position_3d((1.0, 1.0, 0.0), 1.0),
     ]
-    solver.solve(state, observations)
-    print(state.dof_angles)
+    result = solver.solve(state, observations)
+    print(result.dof_angles)
     ```
 
 === "C++"
@@ -122,18 +128,24 @@ Continuing the example above with three observed keypoint positions:
     std::cout << std::endl;
     ```
 
-The `solve` method updates the `State` object in place, so the fitted joint angles and root pose are read back off the same state object afterward.
+`solve` updates the `State` object passed in place, so the fitted joint angles and root pose are read back off the same state object afterward; the returned `SolverResult` carries the same pose too (`dof_angles`/`root_pos`/`root_rot`, or the full `state`), which is often more convenient since it's a self-contained snapshot rather than a handle you have to keep mutating.
 
-`Missing` keypoints don't just drop out of the fit: with nothing pulling them away, the solve falls back on the solver configuration's neutral-pose prior for any DOF only those keypoints could otherwise constrain. A body with everything missing settles at its neutral pose rather than an arbitrary one.
+`with_grad`/`with_fk` (both `false` above) each gate extra output that costs a little more work per solve, so only turn on what you'll actually use:
+
+- **`with_fk`:** returns the converged pose's world-space keypoint positions; see ["Checking fit quality"](#checking-fit-quality) below.
+- **`with_grad`:** returns the residual Jacobian and its Cholesky factor at (approximately) the converged pose, as `SolverResult`'s `jacobian`/`cholesky_l`. Most one-off solves don't need this; it exists for differentiating through the solve, as [`BatchedSolver`](../api/python.md) does for training with an autodiff framework.
+
+`Missing` keypoints don't just drop out of the fit: with nothing pulling them away, the solve falls back on the neutral-pose prior for any DOF only those keypoints could otherwise constrain. A body with everything missing settles at its neutral pose rather than an arbitrary one.
 
 ## Checking fit quality
 
-Forward kinematics itself isn't exposed as a standalone call, but every solver keeps the world-space keypoint positions from its most recent `solve` call around, in the same joint order as the observations you passed in. This is the easiest way to check fit quality (e.g. residual error against your original observations) without recomputing forward kinematics yourself.
+Forward kinematics itself isn't exposed as a standalone call, but `solve` can return the world-space keypoint positions it converged to, in the same joint order as the observations you passed in, by passing `with_fk`. This is the easiest way to check fit quality (e.g. residual error against your original observations) without recomputing forward kinematics yourself.
 
 === "Rust"
 
     ```rust
-    for pos in solver.last_fk_positions() {
+    let result = solver.solve(&mut state, &observations, false, true);
+    for pos in result.keypoint_pos.unwrap() {
         println!("{:?}", pos);
     }
     ```
@@ -141,7 +153,8 @@ Forward kinematics itself isn't exposed as a standalone call, but every solver k
 === "Python"
 
     ```python
-    print(solver.last_fk_positions)  # (n_joints, 3) NumPy array
+    result = solver.solve(state, observations, with_fk=True)
+    print(result.keypoint_pos)  # (n_joints, 3) NumPy array
     ```
 
 === "C++"
