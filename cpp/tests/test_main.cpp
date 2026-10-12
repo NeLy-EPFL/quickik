@@ -1,846 +1,450 @@
-// Tests for the QuickIK C++ bindings, mirroring tests/solver_test.rs,
-// tests/sequential_solver_test.rs, and tests/batched_solver_test.rs. Uses the
-// same "two-joint chain" fixture as those (see tests/common/mod.rs): a root,
-// joint1 and joint2 (each with one Z-axis DOF, joint2 limited to
-// [-0.5, 0.5]), and a trailing fixed tip.
+// Tests for QuickIK's C++ bindings. The solver itself is tested in Rust
+// (tests/), so these focus on what the bindings add: conversions, array
+// layouts, error translation, and list types. Most use a "two-joint chain": a
+// root, joint1 and joint2 (each with one Z-axis hinge, joint2's limited to
+// [-0.5, 0.5]) and a tip, each 1 unit along X from its parent.
 //
-// Forward kinematics isn't exposed to C++ (same as Python; see
-// benchmark/scripts/bench_python.py's own from-scratch FK replica), so
-// `two_link_positions` below computes the four keypoints' world positions
-// directly from the chain's known geometry, in `[root, joint1, joint2, tip]`
-// order, to build observations for a target pose.
-//
-// No external test framework: each `test_*` function returns true on success,
-// printing a message and returning false on the first failed CHECK.
+// No test framework: each test is a function that CHECKs conditions, and
+// main() runs them all and reports failures.
 
-#include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <stdexcept>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "quickik.h"
+#include "quickik.hpp"
 
 namespace {
 
-// Defaults matching the old `SolverConfig::default()`.
-constexpr size_t kNIterations = 10;
-constexpr float kNeutralWeight = 1e-3f;
-constexpr float kPositionTolerance = 1e-3f;
-constexpr float kAngleTolerance = 1e-3f;
-constexpr float kDamping = 1e-6f;
+int n_failures = 0;
 
-const char *kTwoJointChainJson = R"JSON(
-{
-    "joints": [
-        {"name": "root", "parent": null, "offset_pos": [0.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []},
-        {"name": "joint1", "parent": "root", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": null}]},
-        {"name": "joint2", "parent": "joint1", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": [-0.5, 0.5]}]},
-        {"name": "tip", "parent": "joint2", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []}
-    ]
-}
-)JSON";
+#define CHECK(cond)                                                      \
+  do {                                                                   \
+    if (!(cond)) {                                                       \
+      std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); \
+      n_failures++;                                                      \
+    }                                                                    \
+  } while (0)
 
-const char *kFixedBaseTwoJointChainJson = R"JSON(
-{
-    "fixed_base": true,
-    "joints": [
-        {"name": "root", "parent": null, "offset_pos": [0.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []},
-        {"name": "joint1", "parent": "root", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": null}]},
-        {"name": "joint2", "parent": "joint1", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0],
-         "dofs": [{"axis": [0.0, 0.0, 1.0], "type": "hinge", "neutral": 0.0, "limits": [-0.5, 0.5]}]},
-        {"name": "tip", "parent": "joint2", "offset_pos": [1.0, 0.0, 0.0], "offset_quat": [1.0, 0.0, 0.0, 0.0], "dofs": []}
-    ]
-}
-)JSON";
+#define CHECK_THROWS(expr, expected_kind)                                  \
+  do {                                                                     \
+    try {                                                                  \
+      expr;                                                                \
+      std::fprintf(stderr, "  FAILED: %s didn't throw (line %d)\n", #expr, \
+                   __LINE__);                                              \
+      n_failures++;                                                        \
+    } catch (const quickik::Exception& e) {                                \
+      CHECK(e.kind() == quickik::ErrorKind::expected_kind);                \
+    }                                                                      \
+  } while (0)
 
-rust::Box<quickik::KinematicTree> two_joint_chain() {
-  return quickik::kinematic_tree_from_json_str(kTwoJointChainJson);
+bool near(float a, float b, float tol = 1e-3f) {
+  return std::abs(a - b) <= tol;
 }
 
-rust::Box<quickik::KinematicTree> fixed_base_two_joint_chain() {
-  return quickik::kinematic_tree_from_json_str(kFixedBaseTwoJointChainJson);
+std::string two_joint_chain_json(bool fixed_base = false) {
+  const char* joints = R"JSON([
+    {"name": "root", "parent": null, "offset_pos": [0, 0, 0], "offset_quat": [1, 0, 0, 0], "dofs": []},
+    {"name": "joint1", "parent": "root", "offset_pos": [1, 0, 0], "offset_quat": [1, 0, 0, 0],
+     "dofs": [{"axis": [0, 0, 1], "type": "hinge", "neutral": 0, "limits": null}]},
+    {"name": "joint2", "parent": "joint1", "offset_pos": [1, 0, 0], "offset_quat": [1, 0, 0, 0],
+     "dofs": [{"axis": [0, 0, 1], "type": "hinge", "neutral": 0, "limits": [-0.5, 0.5]}]},
+    {"name": "tip", "parent": "joint2", "offset_pos": [1, 0, 0], "offset_quat": [1, 0, 0, 0], "dofs": []}
+  ])JSON";
+  return std::string("{\"fixed_base\": ") + (fixed_base ? "true" : "false") +
+         ", \"joints\": " + joints + "}";
 }
 
-// Positions of [root, joint1, joint2, tip] when joint1/joint2 are at angles
-// (a1, a2) about the shared Z axis. See tests/common/mod.rs's doc comment
-// for why joint1's own keypoint never moves with a1.
-std::array<std::array<float, 3>, 4> two_link_positions(float a1, float a2) {
-  return {{
-      {0.0f, 0.0f, 0.0f},
-      {1.0f, 0.0f, 0.0f},
-      {1.0f + std::cos(a1), std::sin(a1), 0.0f},
-      {1.0f + std::cos(a1) + std::cos(a1 + a2), std::sin(a1) + std::sin(a1 + a2), 0.0f},
-  }};
+std::unique_ptr<quickik::KinematicTree> two_joint_chain(
+    bool fixed_base = false) {
+  return quickik::unwrap(
+      quickik::KinematicTree::from_json_str(two_joint_chain_json(fixed_base)));
 }
 
-std::vector<quickik::KeypointObservation> observations_for(float a1, float a2) {
-  std::vector<quickik::KeypointObservation> obs;
-  for (auto &pos : two_link_positions(a1, a2)) {
-    obs.push_back(quickik::keypoint_position_3d(pos, 1.0f));
-  }
-  return obs;
-}
-
-rust::Slice<const quickik::KeypointObservation> slice_of(const std::vector<quickik::KeypointObservation> &v) {
-  return rust::Slice<const quickik::KeypointObservation>(v.data(), v.size());
-}
-
-rust::Vec<rust::String> joint_names(std::initializer_list<const char *> names) {
-  rust::Vec<rust::String> out;
-  for (auto *name : names) out.push_back(rust::String(name));
-  return out;
-}
-
-bool test_malformed_json_throws() {
-  bool ok = true;
-  try {
-    quickik::kinematic_tree_from_json_str("not valid json");
-    std::fprintf(stderr, "  FAILED: expected an exception for malformed JSON\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
-  }
-  return ok;
-}
-
-bool test_recovers_pose_from_3d_observations() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto observations = observations_for(0.4f, 0.3f);
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(std::abs(result.dof_angles[0] - 0.4f) < 1e-3f);
-  CHECK(std::abs(result.dof_angles[1] - 0.3f) < 1e-3f);
-#undef CHECK
-  return ok;
-}
-
-bool test_solve_with_fk_reports_keypoint_positions_matching_recovered_pose() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto observations = observations_for(0.4f, 0.3f);
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, true);
-
-  auto expected = two_link_positions(0.4f, 0.3f);
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.has_keypoint_pos);
-  CHECK(result.keypoint_pos.size() == tree->n_joints() * 3);
-  for (size_t k = 0; k < tree->n_joints(); k++) {
-    for (size_t d = 0; d < 3; d++) {
-      CHECK(std::abs(result.keypoint_pos[k * 3 + d] - expected[k][d]) < 1e-2f);
-    }
-  }
-#undef CHECK
-  return ok;
-}
-
-bool test_solve_without_with_fk_or_with_grad_leaves_optional_fields_empty() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  std::vector<quickik::KeypointObservation> observations;
-  for (size_t i = 0; i < tree->n_joints(); i++) observations.push_back(quickik::keypoint_missing());
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(!result.has_keypoint_pos && result.keypoint_pos.empty());
-  CHECK(!result.has_jacobian && result.jacobian.empty());
-  CHECK(!result.has_cholesky_l && result.cholesky_l.empty());
-#undef CHECK
-  return ok;
-}
-
-bool test_solve_with_grad_reports_jacobian_and_cholesky_l() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto observations = observations_for(0.4f, 0.3f);
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), true, false);
-
-  size_t state_dim = tree->state_dim();
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.has_jacobian);
-  CHECK(result.jacobian.size() == 3 * tree->n_joints() * state_dim);
-  CHECK(result.has_cholesky_l);
-  CHECK(result.cholesky_l.size() == state_dim * state_dim);
-#undef CHECK
-  return ok;
-}
-
-bool test_position2d_observation_on_3d_projection_solver_throws() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto state = quickik::state_neutral_pose(*tree);
-  std::vector<quickik::KeypointObservation> observations;
-  for (size_t i = 0; i < tree->n_joints(); i++) observations.push_back(quickik::keypoint_missing());
-  observations[1] = quickik::keypoint_position_2d({1.0f, 0.0f}, 1.0f);
-
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  try {
-    solver->solve(*state, slice_of(observations), false, false);
-    std::fprintf(stderr, "  FAILED: expected an exception for a Position2D observation with no projection set\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected: the underlying panic is caught and rethrown as a C++
-    // exception rather than aborting the process.
-  }
-  return ok;
-}
-
-// All three solvers report back the projection they were built with, so a
-// caller can tell which observation kind a given solver expects.
-bool test_every_solver_reports_the_projection_it_was_built_with() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto solver = quickik::new_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f,
-                                    kPositionTolerance, kAngleTolerance, kDamping);
-  auto solver_3d = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
-                                       kPositionTolerance, kAngleTolerance, kDamping);
-  auto seq = quickik::new_sequence_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f,
-                                          kPositionTolerance, kAngleTolerance, kDamping);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(solver->projection().kind == quickik::ProjectionKind::XYOrthoProjection);
-  CHECK(solver_3d->projection().kind == quickik::ProjectionKind::NoProjection);
-  CHECK(seq->projection().kind == quickik::ProjectionKind::XYOrthoProjection);
-#undef CHECK
-  return ok;
-}
-
-bool test_recovers_pose_from_ortho_xy_observations() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto positions = two_link_positions(0.35f, -0.25f);
-
-  std::vector<quickik::KeypointObservation> observations;
-  for (auto &pos : positions) {
-    observations.push_back(quickik::keypoint_position_2d({pos[0], pos[1]}, 1.0f));
-  }
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_ortho_xy(), kNIterations, 0.0f, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(std::abs(result.dof_angles[0] - 0.35f) < 1e-3f);
-  CHECK(std::abs(result.dof_angles[1] - (-0.25f)) < 1e-3f);
-#undef CHECK
-  return ok;
-}
-
-bool test_recovers_pose_from_camera_observations() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto positions = two_link_positions(0.2f, 0.15f);
-
-  quickik::Camera camera{};
-  camera.fx = 500.0f;
-  camera.fy = 500.0f;
-  camera.cx = 320.0f;
-  camera.cy = 240.0f;
-  camera.world2cam_pos = {0.0f, 0.0f, 5.0f};
-  camera.world2cam_rot_mat = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-
-  std::vector<quickik::KeypointObservation> observations;
-  for (auto &pos : positions) {
-    // Pinhole projection with world2cam_rot_mat = identity: cam == world.
-    float cam_z = pos[2] + camera.world2cam_pos[2];
-    float u = camera.fx * pos[0] / cam_z + camera.cx;
-    float v = camera.fy * pos[1] / cam_z + camera.cy;
-    observations.push_back(quickik::keypoint_position_2d({u, v}, 1.0f));
-  }
-
-  auto state = quickik::state_neutral_pose(*tree);
-  auto solver = quickik::new_solver(*tree, quickik::projection_pinhole_camera(camera), kNIterations, 0.0f, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(std::abs(result.dof_angles[0] - 0.2f) < 1e-3f);
-  CHECK(std::abs(result.dof_angles[1] - 0.15f) < 1e-3f);
-#undef CHECK
-  return ok;
-}
-
-// Sanity check, not a benchmark (see benchmark/ for real numbers): XYOrtho's
-// per-keypoint sparse-accumulation path (solver.rs's Position2D branch)
-// shouldn't be dramatically slower than the Position3D path it mirrors. A
-// generous factor: this only needs to catch a gross regression (e.g. an
-// accidental per-call allocation creeping back in), not assert precise
-// parity, since single-frame timing on this tiny fixture is dominated by
-// FFI call overhead common to both paths.
-double mean_solve_seconds(rust::Box<quickik::KinematicTree> &tree,
-                           const std::vector<quickik::KeypointObservation> &observations, quickik::Projection projection) {
-  auto solver = quickik::new_solver(*tree, projection, kNIterations, kNeutralWeight, kPositionTolerance, kAngleTolerance,
-                                     kDamping);
-  auto warm_state = quickik::state_neutral_pose(*tree);
-  solver->solve(*warm_state, slice_of(observations), false, false);  // warm up
-
-  constexpr int kNCalls = 2000;
-  auto t0 = std::chrono::steady_clock::now();
-  for (int i = 0; i < kNCalls; i++) {
-    auto state = quickik::state_neutral_pose(*tree);
-    solver->solve(*state, slice_of(observations), false, false);
-  }
-  auto elapsed = std::chrono::steady_clock::now() - t0;
-  return std::chrono::duration<double>(elapsed).count() / kNCalls;
-}
-
-bool test_ortho_xy_latency_not_much_worse_than_3d() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto positions = two_link_positions(0.4f, 0.3f);
-
-  auto observations_3d = observations_for(0.4f, 0.3f);
-  std::vector<quickik::KeypointObservation> observations_2d;
-  for (auto &pos : positions) observations_2d.push_back(quickik::keypoint_position_2d({pos[0], pos[1]}, 1.0f));
-
-  double t_3d = mean_solve_seconds(tree, observations_3d, quickik::projection_3d());
-  double t_2d = mean_solve_seconds(tree, observations_2d, quickik::projection_ortho_xy());
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(t_2d < t_3d * 5);
-#undef CHECK
-  return ok;
-}
-
-bool test_missing_observations_leave_state_at_neutral_prior() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto state = quickik::state_neutral_pose(*tree);
-
-  std::vector<quickik::KeypointObservation> observations;
-  for (size_t i = 0; i < tree->n_joints(); i++) {
-    observations.push_back(quickik::keypoint_missing());
-  }
-
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-  for (float angle : result.dof_angles) {
-#define CHECK(cond) \
-    if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-    CHECK(std::abs(angle) < 1e-6f);
-#undef CHECK
-  }
-  return ok;
-}
-
-bool test_solver_fields_can_be_tuned_between_solve_calls() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto state = quickik::state_neutral_pose(*tree);
-  std::vector<quickik::KeypointObservation> observations;
-  for (size_t i = 0; i < tree->n_joints(); i++) {
-    observations.push_back(quickik::keypoint_missing());
-  }
-
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  solver->solve(*state, slice_of(observations), false, false);
-
-  solver->set_n_iterations(3);
-  solver->solve(*state, slice_of(observations), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(solver->n_iterations() == 3);
-#undef CHECK
-  return ok;
-}
-
-bool test_solve_respects_joint_limits() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto state = quickik::state_neutral_pose(*tree);
-
-  // Same unreachable target as tests/solver_test.rs's
-  // solve_respects_joint_limits: joint2 would need ~1.2 rad, past its 0.5 cap.
-  std::vector<quickik::KeypointObservation> observations = {
-      quickik::keypoint_missing(),
-      quickik::keypoint_position_3d({1.0f, 0.0f, 0.0f}, 1.0f),
-      quickik::keypoint_position_3d({2.0f, 0.0f, 0.0f}, 1.0f),
-      quickik::keypoint_position_3d({2.3624f, 0.9320f, 0.0f}, 1.0f),
+// Keypoint positions of the chain with DOF values (a1, a2). A joint's own DOFs
+// only move its descendants, so joint1 stays put.
+std::vector<quickik::Vec3> chain_positions(float a1, float a2) {
+  return {
+      {0, 0, 0},
+      {1, 0, 0},
+      {1 + std::cos(a1), std::sin(a1), 0},
+      {1 + std::cos(a1) + std::cos(a1 + a2), std::sin(a1) + std::sin(a1 + a2),
+       0},
   };
-
-  auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                     kAngleTolerance, kDamping);
-  auto result = solver->solve(*state, slice_of(observations), false, false);
-
-  float joint2_angle = result.dof_angles[1];
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(joint2_angle >= -0.5f - 1e-6f && joint2_angle <= 0.5f + 1e-6f);
-  CHECK(joint2_angle > 0.45f);
-#undef CHECK
-  return ok;
 }
 
-bool test_sequence_solver_warm_starts_across_separate_calls() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto target = observations_for(0.4f, 0.3f);
-
-  auto cold = quickik::new_sequence_solver(*tree, quickik::projection_3d(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
-                                            kDamping);
-  auto cold_results = cold->solve(slice_of(target), tree->n_joints(), false, false);
-  float cold_error = std::abs(cold_results->at(0).dof_angles[0] - 0.4f);
-
-  auto warm = quickik::new_sequence_solver(*tree, quickik::projection_3d(), 1, 0.0f, kPositionTolerance, kAngleTolerance,
-                                            kDamping);
-  warm->solve(slice_of(target), tree->n_joints(), false, false);
-  auto warm_results = warm->solve(slice_of(target), tree->n_joints(), false, false);
-  float warm_error = std::abs(warm_results->at(0).dof_angles[0] - 0.4f);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(warm_error < cold_error);
-#undef CHECK
-  return ok;
-}
-
-bool test_sequence_solver_solve_returns_one_result_per_frame() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-
-  std::vector<quickik::KeypointObservation> flat;
-  for (auto [a1, a2] : {std::pair{0.1f, 0.05f}, std::pair{0.2f, 0.1f}, std::pair{0.3f, 0.15f}}) {
-    for (auto &obs : observations_for(a1, a2)) flat.push_back(obs);
+std::unique_ptr<quickik::KeypointObservationList> observations_3d(float a1,
+                                                                  float a2) {
+  auto observations = quickik::KeypointObservationList::create();
+  auto positions = chain_positions(a1, a2);
+  for (size_t joint = 0; joint < positions.size(); joint++) {
+    observations->add_position_3d(joint, positions[joint], 1.0f);
   }
-
-  auto results = solver->solve(slice_of(flat), tree->n_joints(), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(results->len() == 3);
-  auto last = results->at(2);
-  CHECK(std::abs(last.dof_angles[0] - 0.3f) < 1e-2f);
-  CHECK(std::abs(last.dof_angles[1] - 0.15f) < 1e-2f);
-#undef CHECK
-  return ok;
+  return observations;
 }
 
-bool test_sequence_solver_solve_with_fk_matches_recovered_pose() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
-                                              kAngleTolerance, kDamping);
-  auto target = observations_for(0.4f, 0.3f);
-  auto results = solver->solve(slice_of(target), tree->n_joints(), false, true);
-  auto result = results->at(0);
-
-  auto expected = two_link_positions(0.4f, 0.3f);
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.has_keypoint_pos);
-  CHECK(result.keypoint_pos.size() == tree->n_joints() * 3);
-  for (size_t k = 0; k < tree->n_joints(); k++) {
-    for (size_t d = 0; d < 3; d++) {
-      CHECK(std::abs(result.keypoint_pos[k * 3 + d] - expected[k][d]) < 1e-2f);
-    }
-  }
-#undef CHECK
-  return ok;
+// No priors and no early stopping, so solves converge to an exact fit.
+std::unique_ptr<quickik::SolverConfig> exact_config() {
+  return quickik::SolverConfig::create(20, 0, 0);
 }
 
-bool test_solver_result_list_at_out_of_range_throws() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-
-  auto flat = observations_for(0.1f, 0.05f);
-  auto results = solver->solve(slice_of(flat), tree->n_joints(), false, false);
-
-  try {
-    results->at(results->len());
-    std::fprintf(stderr, "  FAILED: expected an exception for an out-of-range SolverResultList index\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected: caught and rethrown as a C++ exception rather than aborting
-    // the process.
-  }
-  return ok;
+// A pinhole camera 5 units above the chain, looking down.
+std::unique_ptr<quickik::Projection> camera(float x_offset) {
+  quickik::Mat3 rot{{1, 0, 0}, {0, -1, 0}, {0, 0, -1}};
+  return quickik::Projection::from_pinhole_camera(
+      {500, 500, 320, 240, {-x_offset, 0, 5}, rot});
 }
 
-bool test_sequence_solver_solve_rejects_length_not_a_multiple_of_n_joints() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-
-  // One fewer than a whole frame's worth of observations.
-  auto flat = observations_for(0.1f, 0.05f);
-  flat.pop_back();
-
-  try {
-    solver->solve(slice_of(flat), tree->n_joints(), false, false);
-    std::fprintf(stderr, "  FAILED: expected an exception for a misaligned observations length\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected: caught and rethrown as a C++ exception rather than aborting
-    // the process (regression test for the validation running outside the
-    // catch_panic boundary).
-  }
-  return ok;
+// DOF values (a1, a2) of frame t of a smooth trajectory.
+std::pair<float, float> sine_dof_values(size_t t) {
+  float s = std::sin(0.15f * static_cast<float>(t));
+  return {0.3f * s, 0.15f * s};
 }
 
-std::pair<std::vector<quickik::KeypointObservation>, std::vector<std::array<float, 2>>> sine_trajectory(
-    size_t n_frames) {
-  std::vector<std::array<float, 2>> true_angles;
-  std::vector<quickik::KeypointObservation> flat;
+// A sequence of `n_frames` frames of the sine trajectory, observed in 3D.
+std::unique_ptr<quickik::ObservationSequence> sine_sequence(size_t n_frames) {
+  auto observations = quickik::KeypointObservationList::create();
+  std::vector<size_t> frame_lengths;
   for (size_t t = 0; t < n_frames; t++) {
-    float a = 0.3f * std::sin(t * 0.15f);
-    true_angles.push_back({a, a * 0.5f});
-    for (auto &obs : observations_for(a, a * 0.5f)) flat.push_back(obs);
+    auto [a1, a2] = sine_dof_values(t);
+    auto positions = chain_positions(a1, a2);
+    for (size_t joint = 0; joint < positions.size(); joint++) {
+      observations->add_position_3d(joint, positions[joint], 1.0f);
+    }
+    frame_lengths.push_back(positions.size());
   }
-  return {flat, true_angles};
+  return quickik::unwrap(
+      quickik::ObservationSequence::from_flat(*observations, frame_lengths));
 }
 
-bool test_solve_segments_parallel_reconstructs_smooth_trajectory() {
-  bool ok = true;
+// =============================================================================
+//  Body plan, state and forward kinematics
+// =============================================================================
+
+void test_tree_queries() {
   auto tree = two_joint_chain();
-  const size_t n_frames = 40;
-  auto [flat, true_angles] = sine_trajectory(n_frames);
-
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-  auto results = solver->solve_segments_parallel(slice_of(flat), tree->n_joints(), 4, false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(results->len() == n_frames);
-  for (size_t i = 0; i < n_frames; i++) {
-    auto result = results->at(i);
-    CHECK(std::abs(result.dof_angles[0] - true_angles[i][0]) < 1e-2f);
-    CHECK(std::abs(result.dof_angles[1] - true_angles[i][1]) < 1e-2f);
-  }
-#undef CHECK
-  return ok;
+  CHECK(tree->n_joints() == 4);
+  CHECK(tree->n_dofs() == 2);
+  CHECK(tree->state_dim() == 8);
+  CHECK(tree->joint_index("tip") == 3u);
+  CHECK(!tree->joint_index("nonexistent").has_value());
+  CHECK(two_joint_chain(true)->state_dim() == 2);
 }
 
-bool test_solve_segments_parallel_honors_explicit_n_workers() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  const size_t n_frames = 40;
-  auto [flat, true_angles] = sine_trajectory(n_frames);
+void test_errors_become_exceptions() {
+  CHECK_THROWS(
+      quickik::unwrap(quickik::KinematicTree::from_json_str("not valid json")),
+      Json);
+  CHECK_THROWS(quickik::unwrap(
+                   quickik::KinematicTree::from_json_file("/nonexistent.json")),
+               Io);
 
-  // n_workers=1 forces the whole sequence through a single segment,
-  // exercising a different code path than the >1 case used above.
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-  auto results = solver->solve_segments_parallel(slice_of(flat), tree->n_joints(), 1, false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(results->len() == n_frames);
-  for (size_t i = 0; i < n_frames; i++) {
-    auto result = results->at(i);
-    CHECK(std::abs(result.dof_angles[0] - true_angles[i][0]) < 1e-2f);
-    CHECK(std::abs(result.dof_angles[1] - true_angles[i][1]) < 1e-2f);
-  }
-#undef CHECK
-  return ok;
-}
-
-bool test_solve_segments_parallel_rejects_zero_workers() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto [flat, true_angles] = sine_trajectory(5);
-  auto solver = quickik::new_sequence_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                              kPositionTolerance, kAngleTolerance, kDamping);
-
+  // The message is the core error's.
   try {
-    solver->solve_segments_parallel(slice_of(flat), tree->n_joints(), 0, false, false);
-    std::fprintf(stderr, "  FAILED: expected an exception for n_workers = 0\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
+    auto config = quickik::SolverConfig::create();
+    quickik::unwrap(config->add_dof_neutral_prior(1.0f));
+    quickik::unwrap(config->add_dof_neutral_prior(1.0f));
+    CHECK(false);
+  } catch (const quickik::Exception& e) {
+    CHECK(std::string(e.what()).find("already added") != std::string::npos);
   }
-  return ok;
 }
 
-bool test_batched_solver_matches_sequential_solve() {
-  bool ok = true;
+void test_state_accessors() {
   auto tree = two_joint_chain();
-  // A permutation of the tree's own joint order, so this actually exercises
-  // name-based remapping rather than happening to pass only for the
-  // identity order.
-  auto keypoints_order = joint_names({"tip", "root", "joint2", "joint1"});
-  const size_t order_joint_indices[] = {3, 0, 2, 1};
-  std::vector<std::array<float, 2>> targets = {{0.4f, 0.3f}, {-0.2f, 0.1f}, {0.3f, -0.4f}, {0.15f, 0.25f}};
+  auto state = quickik::State::neutral_pose(*tree);
+  state->set_root_pos({1, 2, 3});
+  CHECK(state->root_pos().z == 3);
+  // Normalized: a 90 degree rotation about Z.
+  state->set_root_quat({2, 0, 0, 2});
+  CHECK(near(state->root_quat().w, std::sqrt(0.5f), 1e-6f));
+  CHECK(near(state->root_quat().z, std::sqrt(0.5f), 1e-6f));
 
-  std::vector<std::vector<float>> expected_dof_angles;
-  for (auto &angles : targets) {
-    auto state = quickik::state_neutral_pose(*tree);
-    auto solver = quickik::new_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f, kPositionTolerance,
-                                       kAngleTolerance, kDamping);
-    auto result = solver->solve(*state, slice_of(observations_for(angles[0], angles[1])), false, false);
-    expected_dof_angles.emplace_back(result.dof_angles.begin(), result.dof_angles.end());
+  std::vector<float> dof_values{0.4f, 0.3f};
+  quickik::unwrap(state->set_dof_values(dof_values));
+  CHECK(state->dof_values()[1] == 0.3f);
+  CHECK_THROWS(quickik::unwrap(state->set_dof_values(std::vector<float>{1.0f})),
+               InvalidInput);
+
+  // Clones are independent.
+  auto copy = state->clone();
+  state->set_root_pos({0, 0, 0});
+  CHECK(copy->root_pos().z == 3);
+}
+
+void test_forward_kinematics() {
+  auto tree = two_joint_chain();
+  auto state = quickik::State::neutral_pose(*tree);
+  quickik::unwrap(state->set_dof_values(std::vector<float>{0.4f, 0.3f}));
+  auto workspace = quickik::ForwardKinematicsWorkspace::create(*tree);
+  quickik::unwrap(quickik::forward_kinematics(*workspace, *state));
+
+  auto positions = workspace->keypoint_positions();
+  auto expected = chain_positions(0.4f, 0.3f);
+  CHECK(positions.size() == 12);
+  for (size_t joint = 0; joint < expected.size(); joint++) {
+    CHECK(near(positions[3 * joint], expected[joint].x, 1e-5f));
+    CHECK(near(positions[3 * joint + 1], expected[joint].y, 1e-5f));
   }
 
-  std::vector<quickik::KeypointObservation> flat;
-  for (auto &angles : targets) {
-    auto internal_order = observations_for(angles[0], angles[1]);
-    for (size_t idx : order_joint_indices) flat.push_back(internal_order[idx]);
-  }
+  // A state of a tree with a different number of DOFs.
+  auto other_tree =
+      quickik::unwrap(quickik::KinematicTree::from_json_str(R"JSON({"joints": [
+    {"name": "root", "parent": null, "offset_pos": [0, 0, 0], "offset_quat": [1, 0, 0, 0], "dofs": []}
+  ]})JSON"));
+  auto other_state = quickik::State::neutral_pose(*other_tree);
+  CHECK_THROWS(
+      quickik::unwrap(quickik::forward_kinematics(*workspace, *other_state)),
+      InvalidInput);
+}
 
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
-                                                      kPositionTolerance, kAngleTolerance, kDamping,
-                                                      keypoints_order, -1);
-  auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, false);
+// =============================================================================
+//  Observations
+// =============================================================================
 
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.joint_angles.size() == targets.size() * tree->n_dofs());
-  for (size_t i = 0; i < targets.size(); i++) {
-    for (size_t d = 0; d < tree->n_dofs(); d++) {
-      CHECK(std::abs(result.joint_angles[i * tree->n_dofs() + d] - expected_dof_angles[i][d]) < 1e-4f);
+void test_projections() {
+  auto ortho = quickik::Projection::from_orthographic_view_xy({2, {10, 20}});
+  auto uv = ortho->project({1, 2, 3});
+  CHECK(uv.x == 12 && uv.y == 24);
+  CHECK(!ortho->as_pinhole_camera().has_value());
+  CHECK(ortho->as_orthographic_view_xy()->offset.y == 20);
+
+  // A camera at the origin looking along +Z, rotated 90 degrees about Z, so a
+  // wrong row/column order of the rotation matrix would flip the result.
+  quickik::Mat3 rot{{0, 1, 0}, {-1, 0, 0}, {0, 0, 1}};
+  auto cam = quickik::Projection::from_pinhole_camera(
+      {100, 100, 0, 0, {0, 0, 0}, rot});
+  uv = cam->project({1, 0, 1});
+  CHECK(near(uv.x, 0) && near(uv.y, -100));
+  auto params = cam->as_pinhole_camera();
+  CHECK(params.has_value() && params->world2cam_rot_mat.row1.x == -1);
+  CHECK(!cam->as_orthographic_view_xy().has_value());
+}
+
+void test_sequence_construction_checks_lengths() {
+  auto observations = observations_3d(0, 0);
+  auto sequence = quickik::unwrap(quickik::ObservationSequence::from_flat(
+      *observations, std::vector<size_t>{1, 3}));
+  CHECK(sequence->len() == 2);
+  CHECK_THROWS(quickik::unwrap(quickik::ObservationSequence::from_flat(
+                   *observations, std::vector<size_t>{1, 2})),
+               InvalidInput);
+
+  std::vector<float> pos_3d(5 * 4 * 3), weights_3d(5 * 4, 1.0f);
+  std::vector<const quickik::Projection*> no_projections;
+  sequence = quickik::unwrap(quickik::ObservationSequence::from_arrays(
+      5, 4, pos_3d, weights_3d, no_projections, std::nullopt, std::nullopt));
+  CHECK(sequence->len() == 5);
+  weights_3d.pop_back();
+  CHECK_THROWS(quickik::unwrap(quickik::ObservationSequence::from_arrays(
+                   5, 4, pos_3d, weights_3d, no_projections, std::nullopt,
+                   std::nullopt)),
+               InvalidInput);
+}
+
+// =============================================================================
+//  Solvers
+// =============================================================================
+
+void test_single_frame_solver_from_3d() {
+  auto tree = two_joint_chain();
+  auto solver = quickik::unwrap(
+      quickik::SingleFrameSolver::create(*tree, *exact_config()));
+  auto state = quickik::State::neutral_pose(*tree);
+  auto result = quickik::unwrap(
+      solver->solve(*state, *observations_3d(0.4f, 0.3f), false, true));
+
+  auto dof_values = result->state().dof_values();
+  CHECK(near(dof_values[0], 0.4f) && near(dof_values[1], 0.3f));
+  // The state is updated in place.
+  CHECK(near(state->dof_values()[0], 0.4f));
+  auto keypoint_pos = result->keypoint_pos();
+  CHECK(keypoint_pos.has_value() && keypoint_pos->size() == 12);
+  CHECK(near((*keypoint_pos)[3 * 3], chain_positions(0.4f, 0.3f)[3].x));
+  CHECK(!result->jacobian().has_value() && !result->cholesky_l().has_value());
+}
+
+void test_single_frame_solver_gradients_are_row_major() {
+  auto tree = two_joint_chain();
+  auto solver = quickik::unwrap(
+      quickik::SingleFrameSolver::create(*tree, *exact_config()));
+  auto state = quickik::State::neutral_pose(*tree);
+  auto result = quickik::unwrap(
+      solver->solve(*state, *observations_3d(0.4f, 0.3f), true, false));
+  const size_t n_rows = 12, dim = tree->state_dim();
+  auto jacobian = *result->jacobian();
+  auto l = *result->cholesky_l();
+  CHECK(jacobian.size() == n_rows * dim && l.size() == dim * dim);
+
+  // The root keypoint's rows: its position moves 1:1 with the root position
+  // (columns 0 to 2) and not with the root rotation (columns 3 to 5).
+  CHECK(near(jacobian[0 * dim + 0], 1) && near(jacobian[1 * dim + 1], 1));
+  CHECK(near(jacobian[0 * dim + 1], 0) && near(jacobian[1 * dim + 3], 0));
+  // L is lower-triangular, and L L^T = J^T J (no priors or weights, up to the
+  // tiny damping).
+  CHECK(l[0 * dim + 1] == 0);
+  float max_error = 0;
+  for (size_t i = 0; i < dim; i++) {
+    for (size_t j = 0; j < dim; j++) {
+      float llt = 0, jtj = 0;
+      for (size_t k = 0; k < dim; k++) llt += l[i * dim + k] * l[j * dim + k];
+      for (size_t r = 0; r < n_rows; r++)
+        jtj += jacobian[r * dim + i] * jacobian[r * dim + j];
+      max_error = std::max(max_error, std::abs(llt - jtj));
     }
   }
-#undef CHECK
-  return ok;
+  CHECK(max_error < 1e-2f);
 }
 
-bool test_batched_solver_with_grad_reports_jacobian_and_valid() {
-  bool ok = true;
+void test_single_frame_solver_from_two_cameras() {
+  // 2D observations from two projections mixed in one frame.
   auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
-  auto flat = observations_for(0.4f, 0.3f);
-
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, 0.0f,
-                                                      kPositionTolerance, kAngleTolerance, kDamping,
-                                                      keypoints_order, -1);
-  auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), true, false);
-
-  size_t state_dim = tree->state_dim();
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.has_jacobian);
-  CHECK(result.jacobian.size() == 3 * tree->n_joints() * state_dim);
-  CHECK(result.has_cholesky_l);
-  CHECK(result.cholesky_l.size() == state_dim * state_dim);
-  CHECK(result.valid.size() == 1);
-  CHECK(result.valid[0]);
-#undef CHECK
-  return ok;
-}
-
-bool test_batched_solver_without_with_grad_or_with_fk_leaves_optional_fields_empty() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
-
-  std::vector<quickik::KeypointObservation> flat;
-  for (auto &obs : observations_for(0.4f, 0.3f)) flat.push_back(obs);
-  for (auto &obs : observations_for(-0.1f, 0.2f)) flat.push_back(obs);
-
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                                      kPositionTolerance, kAngleTolerance, kDamping,
-                                                      keypoints_order, -1);
-  auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, false);
-
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.joint_angles.size() == 2 * tree->n_dofs());
-  CHECK(!result.has_keypoint_pos && result.keypoint_pos.empty());
-  CHECK(!result.has_jacobian && result.jacobian.empty());
-  CHECK(!result.has_cholesky_l && result.cholesky_l.empty() && result.valid.empty());
-#undef CHECK
-  return ok;
-}
-
-bool test_batched_solver_with_fk_reports_keypoint_positions() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
-  auto flat = observations_for(0.4f, 0.3f);
-
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                                      kPositionTolerance, kAngleTolerance, kDamping,
-                                                      keypoints_order, -1);
-  auto result = batched_solver->solve(slice_of(flat), tree->n_joints(), false, true);
-
-  auto expected = two_link_positions(0.4f, 0.3f);
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(result.has_keypoint_pos);
-  CHECK(result.keypoint_pos.size() == tree->n_joints() * 3);
-  for (size_t k = 0; k < tree->n_joints(); k++) {
-    for (size_t d = 0; d < 3; d++) {
-      CHECK(std::abs(result.keypoint_pos[k * 3 + d] - expected[k][d]) < 1e-2f);
+  std::vector<std::unique_ptr<quickik::Projection>> cameras;
+  cameras.push_back(camera(-1));
+  cameras.push_back(camera(1));
+  auto observations = quickik::KeypointObservationList::create();
+  auto positions = chain_positions(0.2f, -0.3f);
+  for (const auto& cam : cameras) {
+    for (size_t joint = 0; joint < positions.size(); joint++) {
+      observations->add_position_2d(joint, cam->project(positions[joint]), *cam,
+                                    1.0f);
     }
   }
-#undef CHECK
-  return ok;
+  CHECK(observations->len() == 8);
+
+  auto solver = quickik::unwrap(
+      quickik::SingleFrameSolver::create(*tree, *exact_config()));
+  auto state = quickik::State::neutral_pose(*tree);
+  auto result =
+      quickik::unwrap(solver->solve(*state, *observations, true, false));
+  CHECK(near(state->dof_values()[0], 0.2f) &&
+        near(state->dof_values()[1], -0.3f));
+  // 2 rows per 2D observation.
+  CHECK(result->jacobian()->size() == 16 * tree->state_dim());
 }
 
-bool test_batched_solver_keypoint_to_joint_idx_matches_keypoints_order() {
-  bool ok = true;
+void test_solver_creation_errors() {
   auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"tip", "root", "joint2", "joint1"});
-  auto batched_solver = quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight,
-                                                      kPositionTolerance, kAngleTolerance, kDamping,
-                                                      keypoints_order, -1);
-  auto idx = batched_solver->keypoint_to_joint_idx();
+  auto config = quickik::SolverConfig::create();
+  quickik::unwrap(config->add_dof_smoothness_prior(1.0f));
+  CHECK_THROWS(
+      quickik::unwrap(quickik::SingleFrameSolver::create(*tree, *config)),
+      InvalidInput);
 
-#define CHECK(cond) \
-  if (!(cond)) { std::fprintf(stderr, "  FAILED: %s (line %d)\n", #cond, __LINE__); ok = false; }
-  CHECK(idx.size() == 4);
-  CHECK(idx[0] == 3 && idx[1] == 0 && idx[2] == 2 && idx[3] == 1);
-#undef CHECK
-  return ok;
+  auto root_prior_config = quickik::SolverConfig::create();
+  quickik::unwrap(root_prior_config->add_root_smoothness_prior(1.0f, 1.0f));
+  CHECK_THROWS(quickik::unwrap(quickik::SequentialSolver::create(
+                   *two_joint_chain(true), *root_prior_config, nullptr)),
+               InvalidInput);
 }
 
-bool test_batched_solver_rejects_unknown_joint_name() {
-  bool ok = true;
+void test_sequential_solver_step_solve_and_solve_parallel_agree() {
+  const size_t n_frames = 40;
   auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "nonexistent"});
-  try {
-    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                 kAngleTolerance, kDamping, keypoints_order, -1);
-    std::fprintf(stderr, "  FAILED: expected an exception for an unknown joint name\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
+  auto config = quickik::SolverConfig::create();
+  quickik::unwrap(config->add_dof_smoothness_prior(1e-3f));
+  auto sequence = sine_sequence(n_frames);
+
+  auto solver = quickik::unwrap(
+      quickik::SequentialSolver::create(*tree, *config, nullptr));
+  auto solved = quickik::unwrap(solver->solve(*sequence, false, false));
+  CHECK(solved->len() == n_frames);
+  // The running state ends at the last frame.
+  CHECK(solver->state()->dof_values()[0] ==
+        (*solved)[n_frames - 1]->state().dof_values()[0]);
+  CHECK((*solved)[n_frames] == nullptr);
+
+  // The same frames from arrays solve identically.
+  std::vector<float> pos_3d, weights_3d(n_frames * 4, 1.0f);
+  for (size_t t = 0; t < n_frames; t++) {
+    auto [a1, a2] = sine_dof_values(t);
+    for (const auto& p : chain_positions(a1, a2)) {
+      pos_3d.insert(pos_3d.end(), {p.x, p.y, p.z});
+    }
   }
-  return ok;
+  std::vector<const quickik::Projection*> no_projections;
+  auto from_arrays = quickik::unwrap(quickik::ObservationSequence::from_arrays(
+      n_frames, 4, pos_3d, weights_3d, no_projections, std::nullopt,
+      std::nullopt));
+  quickik::unwrap(solver->reset(nullptr));
+  auto solved_from_arrays =
+      quickik::unwrap(solver->solve(*from_arrays, false, false));
+  CHECK((*solved_from_arrays)[n_frames - 1]->state().dof_values()[1] ==
+        (*solved)[n_frames - 1]->state().dof_values()[1]);
+
+  quickik::unwrap(solver->reset(nullptr));
+  std::vector<float> stepped;
+  for (size_t t = 0; t < n_frames; t++) {
+    auto [a1, a2] = sine_dof_values(t);
+    auto result =
+        quickik::unwrap(solver->step(*observations_3d(a1, a2), false, false));
+    stepped.push_back(result->state().dof_values()[0]);
+  }
+
+  auto parallel =
+      quickik::unwrap(solver->solve_parallel(*sequence, 4, 5, false, false));
+  size_t t = 0;
+  for (const auto& result : *parallel) {
+    float expected = sine_dof_values(t).first;
+    CHECK(near(result.state().dof_values()[0], expected, 1e-2f));
+    CHECK(near(stepped[t], (*solved)[t]->state().dof_values()[0], 1e-6f));
+    t++;
+  }
+  CHECK(t == n_frames);
+  CHECK_THROWS(
+      quickik::unwrap(solver->solve_parallel(*sequence, 0, 0, false, false)),
+      InvalidInput);
 }
 
-bool test_batched_solver_rejects_duplicate_joint_name() {
-  bool ok = true;
+void test_sequential_solver_initial_state() {
   auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint1", "tip"});
-  try {
-    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                 kAngleTolerance, kDamping, keypoints_order, -1);
-    std::fprintf(stderr, "  FAILED: expected an exception for a duplicate joint name\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
-  }
-  return ok;
+  auto initial_state = quickik::State::neutral_pose(*tree);
+  initial_state->set_root_pos({0, 0, 7});
+  auto config = quickik::SolverConfig::create();
+  auto solver = quickik::unwrap(
+      quickik::SequentialSolver::create(*tree, *config, initial_state.get()));
+  CHECK(solver->state()->root_pos().z == 7);
+  // A copy: changing the original afterwards doesn't affect the solver.
+  initial_state->set_root_pos({0, 0, 0});
+  CHECK(solver->state()->root_pos().z == 7);
 }
-
-bool test_batched_solver_rejects_fixed_base_tree() {
-  bool ok = true;
-  auto tree = fixed_base_two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
-  try {
-    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                 kAngleTolerance, kDamping, keypoints_order, -1);
-    std::fprintf(stderr, "  FAILED: expected an exception for a fixed-base tree\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
-  }
-  return ok;
-}
-
-bool test_batched_solver_rejects_zero_workers() {
-  bool ok = true;
-  auto tree = two_joint_chain();
-  auto keypoints_order = joint_names({"root", "joint1", "joint2", "tip"});
-  try {
-    quickik::new_batched_solver(*tree, quickik::projection_3d(), kNIterations, kNeutralWeight, kPositionTolerance,
-                                 kAngleTolerance, kDamping, keypoints_order, 0);
-    std::fprintf(stderr, "  FAILED: expected an exception for n_workers = 0\n");
-    ok = false;
-  } catch (const std::exception &) {
-    // expected
-  }
-  return ok;
-}
-
-struct NamedTest {
-  const char *name;
-  bool (*run)();
-};
 
 }  // namespace
 
 int main() {
-  const std::vector<NamedTest> tests = {
-      {"malformed_json_throws", test_malformed_json_throws},
-      {"recovers_pose_from_3d_observations", test_recovers_pose_from_3d_observations},
-      {"solve_with_fk_reports_keypoint_positions_matching_recovered_pose",
-       test_solve_with_fk_reports_keypoint_positions_matching_recovered_pose},
-      {"solve_without_with_fk_or_with_grad_leaves_optional_fields_empty",
-       test_solve_without_with_fk_or_with_grad_leaves_optional_fields_empty},
-      {"solve_with_grad_reports_jacobian_and_cholesky_l", test_solve_with_grad_reports_jacobian_and_cholesky_l},
-      {"position2d_observation_on_3d_projection_solver_throws", test_position2d_observation_on_3d_projection_solver_throws},
-      {"every_solver_reports_the_projection_it_was_built_with",
-       test_every_solver_reports_the_projection_it_was_built_with},
-      {"recovers_pose_from_ortho_xy_observations", test_recovers_pose_from_ortho_xy_observations},
-      {"recovers_pose_from_camera_observations", test_recovers_pose_from_camera_observations},
-      {"ortho_xy_latency_not_much_worse_than_3d", test_ortho_xy_latency_not_much_worse_than_3d},
-      {"missing_observations_leave_state_at_neutral_prior", test_missing_observations_leave_state_at_neutral_prior},
-      {"solver_fields_can_be_tuned_between_solve_calls", test_solver_fields_can_be_tuned_between_solve_calls},
-      {"solve_respects_joint_limits", test_solve_respects_joint_limits},
-      {"sequence_solver_warm_starts_across_separate_calls", test_sequence_solver_warm_starts_across_separate_calls},
-      {"sequence_solver_solve_returns_one_result_per_frame", test_sequence_solver_solve_returns_one_result_per_frame},
-      {"sequence_solver_solve_with_fk_matches_recovered_pose",
-       test_sequence_solver_solve_with_fk_matches_recovered_pose},
-      {"solver_result_list_at_out_of_range_throws", test_solver_result_list_at_out_of_range_throws},
-      {"sequence_solver_solve_rejects_length_not_a_multiple_of_n_joints",
-       test_sequence_solver_solve_rejects_length_not_a_multiple_of_n_joints},
-      {"solve_segments_parallel_reconstructs_smooth_trajectory",
-       test_solve_segments_parallel_reconstructs_smooth_trajectory},
-      {"solve_segments_parallel_honors_explicit_n_workers", test_solve_segments_parallel_honors_explicit_n_workers},
-      {"solve_segments_parallel_rejects_zero_workers", test_solve_segments_parallel_rejects_zero_workers},
-      {"batched_solver_matches_sequential_solve", test_batched_solver_matches_sequential_solve},
-      {"batched_solver_with_grad_reports_jacobian_and_valid", test_batched_solver_with_grad_reports_jacobian_and_valid},
-      {"batched_solver_without_with_grad_or_with_fk_leaves_optional_fields_empty",
-       test_batched_solver_without_with_grad_or_with_fk_leaves_optional_fields_empty},
-      {"batched_solver_with_fk_reports_keypoint_positions", test_batched_solver_with_fk_reports_keypoint_positions},
-      {"batched_solver_keypoint_to_joint_idx_matches_keypoints_order",
-       test_batched_solver_keypoint_to_joint_idx_matches_keypoints_order},
-      {"batched_solver_rejects_unknown_joint_name", test_batched_solver_rejects_unknown_joint_name},
-      {"batched_solver_rejects_duplicate_joint_name", test_batched_solver_rejects_duplicate_joint_name},
-      {"batched_solver_rejects_fixed_base_tree", test_batched_solver_rejects_fixed_base_tree},
-      {"batched_solver_rejects_zero_workers", test_batched_solver_rejects_zero_workers},
+  const std::vector<std::pair<const char*, std::function<void()>>> tests = {
+      {"tree_queries", test_tree_queries},
+      {"errors_become_exceptions", test_errors_become_exceptions},
+      {"state_accessors", test_state_accessors},
+      {"forward_kinematics", test_forward_kinematics},
+      {"projections", test_projections},
+      {"sequence_construction_checks_lengths",
+       test_sequence_construction_checks_lengths},
+      {"single_frame_solver_from_3d", test_single_frame_solver_from_3d},
+      {"single_frame_solver_gradients_are_row_major",
+       test_single_frame_solver_gradients_are_row_major},
+      {"single_frame_solver_from_two_cameras",
+       test_single_frame_solver_from_two_cameras},
+      {"solver_creation_errors", test_solver_creation_errors},
+      {"sequential_solver_step_solve_and_solve_parallel_agree",
+       test_sequential_solver_step_solve_and_solve_parallel_agree},
+      {"sequential_solver_initial_state", test_sequential_solver_initial_state},
   };
-
-  int n_failed = 0;
-  for (const auto &t : tests) {
-    bool passed = t.run();
-    std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", t.name);
-    if (!passed) n_failed++;
+  int n_failed_tests = 0;
+  for (const auto& [name, test] : tests) {
+    int failures_before = n_failures;
+    try {
+      test();
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "  FAILED: unexpected exception: %s\n", e.what());
+      n_failures++;
+    }
+    bool passed = n_failures == failures_before;
+    n_failed_tests += !passed;
+    std::printf("%s %s\n", passed ? "PASS" : "FAIL", name);
   }
-  std::printf("%zu/%zu tests passed\n", tests.size() - n_failed, tests.size());
-  return n_failed == 0 ? 0 : 1;
+  std::printf("\n%zu tests, %d failed\n", tests.size(), n_failed_tests);
+  return n_failed_tests == 0 ? 0 : 1;
 }

@@ -1,40 +1,27 @@
-//! Compiles the `#[cxx::bridge]` module in `src/lib.rs`, then copies the
-//! generated header and the bridge's compiled glue code out of Cargo's
-//! internal (hashed, per-build) `OUT_DIR` into stable, documented paths --
-//! `include/` and `lib/` -- so external, non-Cargo C++ builds (CMake, plain
-//! g++) have a fixed location to point at. See `README.md` for the full
-//! build instructions.
+//! Generates the C++ headers for the Diplomat bridge modules in `src/`
+//! (including Diplomat's runtime header) into `include/quickik/`, next to the
+//! hand-written umbrella header `include/quickik.hpp`. They're written into the
+//! source tree rather than `OUT_DIR` so that C++ builds have a fixed include
+//! path.
 
-use std::{env, fs, path::PathBuf};
+use std::path::Path;
 
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let generated_dir = manifest_dir.join("include/quickik");
+    // Start from scratch so headers of removed types don't linger.
+    if generated_dir.exists() {
+        std::fs::remove_dir_all(&generated_dir).unwrap();
+    }
 
-    cxx_build::bridge("src/lib.rs")
-        .flag_if_supported("-std=c++17")
-        .compile("quickik-cpp-bridge");
+    let mut config = diplomat_tool::config::Config::default();
+    // Puts every type in namespace `quickik`, including Diplomat's runtime
+    // types (as `quickik::diplomat`), so they can't clash with another
+    // Diplomat-generated library.
+    config.shared_config.lib_name = Some("quickik".to_string());
+    let entry = manifest_dir.join("src/lib.rs");
+    let docs_urls = Default::default();
+    diplomat_tool::r#gen(&entry, "cpp", &generated_dir, &docs_urls, config, true).unwrap();
 
-    let include_dir = manifest_dir.join("include");
-    fs::create_dir_all(include_dir.join("rust")).unwrap();
-    fs::copy(
-        out_dir.join("cxxbridge/include/quickik-cpp/src/lib.rs.h"),
-        include_dir.join("quickik.h"),
-    )
-    .unwrap();
-    fs::copy(
-        out_dir.join("cxxbridge/include/rust/cxx.h"),
-        include_dir.join("rust/cxx.h"),
-    )
-    .unwrap();
-
-    let lib_dir = manifest_dir.join("lib");
-    fs::create_dir_all(&lib_dir).unwrap();
-    fs::copy(
-        out_dir.join("libquickik-cpp-bridge.a"),
-        lib_dir.join("libquickik-cpp-bridge.a"),
-    )
-    .unwrap();
-
-    println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=src");
 }

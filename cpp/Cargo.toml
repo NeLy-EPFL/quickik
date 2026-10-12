@@ -10,9 +10,11 @@ name = "quickik_cpp"
 crate-type = ["staticlib"]
 
 [dependencies]
-cxx = "1"
-quickik_core = { package = "quickik_old", path = "../quickik_old" }
-nalgebra = "0.35"
+bytemuck = "1"
+diplomat = "0.16"
+diplomat-runtime = "0.16"
+nalgebra = { version = "0.35", features = ["convert-bytemuck"] }
+quickik_core = { package = "quickik", path = ".." }
 
 [build-dependencies]
-cxx-build = "1"
+diplomat-tool = "0.16"

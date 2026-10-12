@@ -1,8 +1,8 @@
 // An independent forward-kinematics replica, computed directly from the JSON
 // body plan (not calling into quickik at all), mirroring
-// scripts/bench_python.py's own `forward_kinematics()` -- used to cross-check
-// the C++ bindings' solved `State`, since FK isn't exposed to C++ (same as
-// Python; see cpp/src/lib.rs's module docs).
+// ../quickik_python/bench.py's own `forward_kinematics()`. Used to cross-check
+// the C++ bindings' solved `State` independently of quickik's own forward
+// kinematics.
 
 #pragma once
 

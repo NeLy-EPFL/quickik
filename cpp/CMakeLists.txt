@@ -1,78 +1,56 @@
-# Builds the QuickIK C++ bindings' test suite. This is also the reference
-# integration example for consuming QuickIK from an external CMake project --
-# see the top-level README's "C++" section.
+# Builds QuickIK's C++ bindings as the CMake target `quickik` (a static library
+# plus headers), and, if this is the top-level project, their tests and the
+# benchmark in ../benchmark/quickik_cpp/. To use
+# QuickIK from another CMake project, add this directory with
+# `add_subdirectory` and link `quickik`, as examples/cpp/CMakeLists.txt does.
 #
-# The Rust side (the core crate + the cxx bridge glue) is built via `cargo`,
-# invoked as a custom target; `cargo build -p quickik-cpp` also copies the
-# generated header and the bridge's compiled glue code into `include/` and
-# `lib/` (see `build.rs`), which is what this file points at.
+# The library itself is built by cargo (`cargo build -p quickik-cpp`), which
+# also generates the headers in include/quickik/ (see build.rs).
 
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.21)
 project(quickik_cpp LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 option(QUICKIK_CPP_RELEASE "Build the Rust side in release mode" ON)
+option(QUICKIK_CPP_BUILD_TESTS "Build the C++ bindings' tests and benchmark" ${PROJECT_IS_TOP_LEVEL})
+
 if(QUICKIK_CPP_RELEASE)
   set(QUICKIK_CARGO_ARGS --release)
-  set(QUICKIK_TARGET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../target/release)
+  set(QUICKIK_CARGO_PROFILE release)
 else()
   set(QUICKIK_CARGO_ARGS "")
-  set(QUICKIK_TARGET_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../target/debug)
+  set(QUICKIK_CARGO_PROFILE debug)
 endif()
+set(QUICKIK_REPO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set(QUICKIK_LIBRARY ${QUICKIK_REPO_DIR}/target/${QUICKIK_CARGO_PROFILE}/libquickik_cpp.a)
 
+# Always runs, leaving it to cargo to decide whether anything needs rebuilding.
 add_custom_target(
-  quickik_cargo_build ALL
+  quickik_cargo_build
   COMMAND cargo build -p quickik-cpp ${QUICKIK_CARGO_ARGS}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
-  BYPRODUCTS
-    ${QUICKIK_TARGET_DIR}/libquickik_cpp.a
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/libquickik-cpp-bridge.a
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/quickik.h
-  COMMENT "cargo build -p quickik-cpp (Rust core + cxx bridge glue)"
+  WORKING_DIRECTORY ${QUICKIK_REPO_DIR}
+  BYPRODUCTS ${QUICKIK_LIBRARY}
+  USES_TERMINAL
 )
 
-# Two static libs come out of the Rust side: the crate's own compiled code
-# (libquickik_cpp.a) and the cxx-bridge-generated C++ glue (compiled by
-# cxx_build/cc, libquickik-cpp-bridge.a). Listing both below looks like it
-# should need circular-dependency handling (Rust calls into cxx's C++
-# runtime helpers; C++ calls the exported `extern "Rust"` functions) -- but
-# quickik_cpp is a Rust `staticlib`, and rustc bundles libquickik-cpp-bridge.a's
-# object files directly into libquickik_cpp.a's own archive at build time.
-# So the two archives' contents actually overlap: whichever is scanned first
-# during linking satisfies every symbol, and the identical duplicate content
-# in the other is simply never extracted. That means plain archive linking
-# (no `--start-group`/`--end-group`, a GNU ld feature Apple's linker doesn't
-# understand at all) works the same on every platform.
-add_library(quickik_cpp STATIC IMPORTED GLOBAL)
-set_target_properties(quickik_cpp PROPERTIES IMPORTED_LOCATION ${QUICKIK_TARGET_DIR}/libquickik_cpp.a)
-add_dependencies(quickik_cpp quickik_cargo_build)
-
-add_library(quickik_cpp_bridge STATIC IMPORTED GLOBAL)
-set_target_properties(quickik_cpp_bridge PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libquickik-cpp-bridge.a)
-add_dependencies(quickik_cpp_bridge quickik_cargo_build)
-
-set(QUICKIK_RUST_LINK_LIBS quickik_cpp_bridge quickik_cpp)
-
-add_executable(quickik_cpp_tests tests/test_main.cpp)
-target_include_directories(quickik_cpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-add_dependencies(quickik_cpp_tests quickik_cargo_build)
-target_link_libraries(
-  quickik_cpp_tests PRIVATE
-  ${QUICKIK_RUST_LINK_LIBS}
-  pthread dl m
+# The Rust standard library needs threads, dynamic loading and libm.
+find_package(Threads REQUIRED)
+add_library(quickik STATIC IMPORTED GLOBAL)
+set_target_properties(
+  quickik PROPERTIES
+  IMPORTED_LOCATION ${QUICKIK_LIBRARY}
+  INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/include
+  INTERFACE_LINK_LIBRARIES "Threads::Threads;${CMAKE_DL_LIBS};m"
+  INTERFACE_COMPILE_FEATURES cxx_std_20
 )
+add_dependencies(quickik quickik_cargo_build)
 
-# Correctness cross-check and throughput/latency benchmark against
-# flygym.ik -- see ../benchmark/README.md.
-add_executable(quickik_cpp_benchmark ../benchmark/quickik_cpp/bench_cpp.cpp)
-target_include_directories(quickik_cpp_benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_definitions(quickik_cpp_benchmark PRIVATE QUICKIK_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/assets")
-target_compile_options(quickik_cpp_benchmark PRIVATE -O3)
-add_dependencies(quickik_cpp_benchmark quickik_cargo_build)
-target_link_libraries(
-  quickik_cpp_benchmark PRIVATE
-  ${QUICKIK_RUST_LINK_LIBS}
-  pthread dl m
-)
+if(QUICKIK_CPP_BUILD_TESTS)
+  add_executable(quickik_cpp_tests tests/test_main.cpp)
+  target_link_libraries(quickik_cpp_tests PRIVATE quickik)
+
+  set(QUICKIK_BENCHMARK_DIR ${QUICKIK_REPO_DIR}/benchmark)
+  add_executable(quickik_cpp_benchmark ${QUICKIK_BENCHMARK_DIR}/quickik_cpp/bench_cpp.cpp)
+  target_link_libraries(quickik_cpp_benchmark PRIVATE quickik)
+  target_compile_definitions(quickik_cpp_benchmark PRIVATE QUICKIK_ASSETS_DIR="${QUICKIK_BENCHMARK_DIR}/assets")
+  target_compile_options(quickik_cpp_benchmark PRIVATE -O3)
+endif()
