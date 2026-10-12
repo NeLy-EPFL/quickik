@@ -22,8 +22,23 @@ serde_json = "1.0"
 thiserror = "2"
 
 [dev-dependencies]
+# Lets the examples (de)serialize vectors as JSON `[x, y, z]` arrays.
+nalgebra = { version = "0.35", features = ["serde-serialize"] }
 # Only for cross-checking results against the pre-redesign version.
 quickik_old = { path = "quickik_old" }
+
+# Examples live in per-language subfolders of examples/, so they're listed here.
+[[example]]
+name = "from_3d"
+path = "examples/rust/from_3d.rs"
+
+[[example]]
+name = "ortho2d"
+path = "examples/rust/ortho2d.rs"
+
+[[example]]
+name = "from_cameras"
+path = "examples/rust/from_cameras.rs"
 
 # Release builds trade compile time for run time without reservation. Both
 # settings exist to let the optimizer see across boundaries it otherwise can't:

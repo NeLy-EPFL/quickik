@@ -395,3 +395,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,c++,python,linux,macos,windows,git,vim,visualstudiocode
+
+# Outputs of demos in examples/
+examples/*/output/
