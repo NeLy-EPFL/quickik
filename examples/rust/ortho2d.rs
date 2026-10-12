@@ -81,7 +81,7 @@ fn run_ik_from_ortho2d_obs(
     let mut config = SolverConfig::default();
     config.add_dof_neutral_prior(2.0 * prior_weight)?; // favor natural poses
     config.add_dof_smoothness_prior(prior_weight)?; // favor smooth motion
-    // The body's absolute height can't be recovered, so it stays at the initial pose's height.
+    // The body's absolute height can't be recovered, so it stays at the initial height
     let initial_state = if on_ground {
         neutral_pose_on_ground(&tree)?
     } else {

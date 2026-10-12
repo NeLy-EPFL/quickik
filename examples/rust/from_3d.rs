@@ -43,8 +43,8 @@ fn run_ik_from_3d_obs(
     // to load the trajectory, quantify errors, and save results are provided in the util module.
     let trajectory = Trajectory::load(trajectory_path)?;
     let joint_indices = trajectory.joint_indices(&tree);
-    // Make a vector of frames, where each frame is a vector of KeypointObservations. Because
-    // keypoint positions are given in 3D, we use KeypointObservation::position_3d.
+    // Make a vector of frames, where each frame is a vector of KeypointObservations.
+    // Keypoint positions are given in 3D, so we use KeypointObservation::position_3d.
     let frames: Vec<Vec<KeypointObservation>> = trajectory
         .positions
         .iter()
