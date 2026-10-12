@@ -45,10 +45,10 @@ ASSETS_DIR = BENCHMARK_DIR / "assets"
 BODIES = [
     {
         "name": "neuromechfly",
-        "body_plan": "neuromechfly_ypr_legs.json",
+        "body_plan": "../../examples/assets/neuromechfly/body_plan.json",
         "fixtures": "fixtures.json",
     },
-    {"name": "g1", "body_plan": "g1_body_plan.json", "fixtures": "fixtures_g1.json"},
+    {"name": "g1", "body_plan": "../../examples/assets/g1/body_plan.json", "fixtures": "fixtures_g1.json"},
 ]
 
 # Gauss-Newton/LM config, matching QuickIK's SolverConfig::default() exactly

@@ -1,355 +1,115 @@
-//! Shared test fixtures: a minimal 3-joint kinematic chain.
+//! Shared test fixtures.
 //!
-//! root (free joint, no local DOFs)
-//!   -> joint1: offset (1,0,0), 1 DOF about local Z, unbounded
-//!     -> joint2: offset (1,0,0), 1 DOF about local Z, limited to [-0.5, 0.5]
-//!       -> tip: offset (1,0,0), no DOFs
-//!
-//! A joint's own DOF never moves its own keypoint (only its descendants'), so
-//! every DOF needs a keypoint downstream of it to be observable/recoverable --
-//! hence the trailing fixed `tip` joint past `joint2`.
+//! A joint's own DOFs never move its own keypoint (only its descendants'), so
+//! every DOF needs a keypoint downstream of it to be observable, hence the
+//! trailing DOF-less tip joints below.
 
+#![allow(dead_code)] // not every test binary uses every helper
+
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use nalgebra::{UnitQuaternion, Vector3};
 use quickik::body_plan::{Dof, DofType, Joint, KinematicTree};
+use quickik::observation::KeypointObservation;
+use quickik::state::State;
 
-pub fn two_joint_chain() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
+pub fn joint(name: &str, parent: Option<usize>, offset: [f32; 3], dofs: Vec<Dof>) -> Joint {
+    Joint {
+        name: name.to_string(),
+        parent,
+        offset_pos: Vector3::from(offset),
         offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint1 = Joint {
-        name: "joint1".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint2 = Joint {
-        name: "joint2".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(
-            DofType::Hinge,
-            Vector3::z(),
-            0.0,
-            Some([-0.5, 0.5]),
-            1.0,
-        )],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    let tip = Joint {
-        name: "tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(2),
-        children: Vec::new(),
-        dof_startidx: 2,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(
-        vec![root, joint1, joint2, tip],
-        0,
-        false,
-    ))
+        dofs,
+        weight_multiplier: 1.0,
+    }
 }
 
-/// A root with two independent single-DOF branches (each a joint + a fixed
-/// tip keypoint downstream of it), sharing no keypoints between them, so
-/// each DOF's contribution to the Gauss-Newton normal equations is entirely
-/// decoupled from the other, unlike `two_joint_chain`'s single serial chain.
-///
-/// root (free joint, no local DOFs)
-///   -> branch_a_joint: 1 DOF about local Z, unbounded
-///     -> branch_a_tip
-///   -> branch_b_joint: 1 DOF about local Z, unbounded
-///     -> branch_b_tip
-///
-/// Joint order (and therefore keypoint/observation order) is: root (0),
-/// branch_a_joint (1), branch_a_tip (2), branch_b_joint (3), branch_b_tip
-/// (4). `branch_a_joint`'s DOF is flattened index 0, `branch_b_joint`'s is 1.
-#[allow(dead_code)] // only used by tests/solver_test.rs, not every binary sharing this module
-pub fn two_independent_single_dof_branches() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let branch_a_joint = Joint {
-        name: "branch_a_joint".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let branch_a_tip = Joint {
-        name: "branch_a_tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    let branch_b_joint = Joint {
-        name: "branch_b_joint".to_string(),
-        offset_pos: Vector3::new(-1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    let branch_b_tip = Joint {
-        name: "branch_b_tip".to_string(),
-        offset_pos: Vector3::new(-1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(3),
-        children: Vec::new(),
-        dof_startidx: 2,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(
-        vec![
-            root,
-            branch_a_joint,
-            branch_a_tip,
-            branch_b_joint,
-            branch_b_tip,
-        ],
-        0,
-        false,
-    ))
+pub fn hinge(axis: Vector3<f32>) -> Dof {
+    Dof::new(DofType::Hinge, axis, 0.0, None, 1.0)
 }
 
-/// A chain with a single slide DOF.
-///
-/// root (free joint, no local DOFs)
-///   -> joint1: offset (1,0,0), 1 slide DOF along local X, unbounded
-///     -> tip: offset (1,0,0), no DOFs
-///
-/// Like a hinge DOF, joint1's own slide never moves joint1's own keypoint,
-/// only `tip`'s, which is why `tip` is here at all (see this module's doc
-/// comment).
-#[allow(dead_code)] // only used by tests/forward_test.rs, not every binary sharing this module
-pub fn slide_joint_chain() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint1 = Joint {
-        name: "joint1".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let tip = Joint {
-        name: "tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0, false))
+pub fn slide(axis: Vector3<f32>) -> Dof {
+    Dof::new(DofType::Slide, axis, 0.0, None, 1.0)
 }
 
-/// A chain combining a hinge and a slide DOF on separate joints, so the
-/// slide's world-frame axis is rotated by the upstream hinge: this is what
-/// exercises the cross-term where perturbing the hinge angle also perturbs a
-/// downstream slide's direction (and therefore the position it produces).
+/// A branching tree exercising hinges about non-aligned axes, slides, a joint
+/// with several DOFs, and non-identity offset rotations:
 ///
-/// root (free joint, no local DOFs)
-///   -> hinge_joint: offset (1,0,0), 1 hinge DOF about local Z, unbounded
-///     -> slide_joint: offset (1,0,0), 1 slide DOF along local X, unbounded
-///       -> tip: offset (1,0,0), no DOFs
-#[allow(dead_code)] // only used by tests/forward_test.rs, not every binary sharing this module
-pub fn hinge_then_slide_chain() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let hinge_joint = Joint {
-        name: "hinge_joint".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let slide_joint = Joint {
-        name: "slide_joint".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0)],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    let tip = Joint {
-        name: "tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(2),
-        children: Vec::new(),
-        dof_startidx: 2,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(
-        vec![root, hinge_joint, slide_joint, tip],
-        0,
-        false,
-    ))
+/// root
+///   -> hip: [hinge z, hinge y]
+///     -> knee: [hinge x, slide x]
+///       -> foot
+///   -> arm: [hinge (1, 1, 0)], offset rotated 30 deg about x
+///     -> hand
+pub fn branching_tree(fixed_base: bool) -> Arc<KinematicTree> {
+    let mut arm = joint(
+        "arm",
+        Some(0),
+        [0.0, 0.5, 0.3],
+        vec![hinge(Vector3::new(1.0, 1.0, 0.0))],
+    );
+    arm.offset_quat = UnitQuaternion::from_euler_angles(0.5, 0.0, 0.0);
+    let joints = vec![
+        joint("root", None, [0.0, 0.0, 0.0], vec![]),
+        joint(
+            "hip",
+            Some(0),
+            [0.2, 0.0, 0.0],
+            vec![hinge(Vector3::z()), hinge(Vector3::y())],
+        ),
+        joint(
+            "knee",
+            Some(1),
+            [1.0, 0.0, 0.0],
+            vec![hinge(Vector3::x()), slide(Vector3::x())],
+        ),
+        joint("foot", Some(2), [0.0, 1.0, 0.0], vec![]),
+        arm,
+        joint("hand", Some(4), [0.0, 0.0, 1.0], vec![]),
+    ];
+    Arc::new(KinematicTree::new(joints, fixed_base).unwrap())
 }
 
-/// Same joints as [`two_joint_chain`], but with a fixed (not free-floating)
-/// root, used to test [`KinematicTree::fixed_base`].
-///
-/// root (fixed, no local DOFs)
-///   -> joint1: offset (1,0,0), 1 DOF about local Z, unbounded
-///     -> joint2: offset (1,0,0), 1 DOF about local Z, limited to [-0.5, 0.5]
-///       -> tip: offset (1,0,0), no DOFs
-#[allow(dead_code)] // only used by tests exercising fixed_base, not every binary sharing this module
-pub fn fixed_base_two_joint_chain() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint1 = Joint {
-        name: "joint1".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0)],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint2 = Joint {
-        name: "joint2".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![Dof::new(
-            DofType::Hinge,
-            Vector3::z(),
-            0.0,
-            Some([-0.5, 0.5]),
-            1.0,
-        )],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 1,
-        weight_scaler: 1.0,
-    };
-    let tip = Joint {
-        name: "tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(2),
-        children: Vec::new(),
-        dof_startidx: 2,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(vec![root, joint1, joint2, tip], 0, true))
+/// A non-neutral pose for `branching_tree`.
+pub fn some_pose(tree: &Arc<KinematicTree>) -> State {
+    let mut state = State::neutral_pose(Arc::clone(tree));
+    state.dof_values = vec![0.3, -0.4, 0.5, 0.2, -0.6];
+    if !tree.fixed_base() {
+        state.root_pos = Vector3::new(0.1, -0.2, 0.3);
+        state.root_quat = UnitQuaternion::from_euler_angles(0.2, -0.1, 0.4);
+    }
+    state
 }
 
-/// A single joint carrying both a hinge DOF (applied first) and a slide DOF,
-/// so the slide's own translation is expressed along an axis that the same
-/// joint's own hinge has already rotated: the tightest version of the
-/// hinge/slide cross-term, entirely within one joint's own DOF list.
-///
-/// root (free joint, no local DOFs)
-///   -> joint1: offset (1,0,0), dofs = [hinge about local Z, slide along
-///     local X], unbounded
-///     -> tip: offset (1,0,0), no DOFs
-#[allow(dead_code)] // only used by tests/forward_test.rs, not every binary sharing this module
-pub fn joint_with_hinge_and_slide() -> Arc<KinematicTree> {
-    let root = Joint {
-        name: "root".to_string(),
-        offset_pos: Vector3::zeros(),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: None,
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let joint1 = Joint {
-        name: "joint1".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![
-            Dof::new(DofType::Hinge, Vector3::z(), 0.0, None, 1.0),
-            Dof::new(DofType::Slide, Vector3::x(), 0.0, None, 1.0),
-        ],
-        parent: Some(0),
-        children: Vec::new(),
-        dof_startidx: 0,
-        weight_scaler: 1.0,
-    };
-    let tip = Joint {
-        name: "tip".to_string(),
-        offset_pos: Vector3::new(1.0, 0.0, 0.0),
-        offset_quat: UnitQuaternion::identity(),
-        dofs: vec![],
-        parent: Some(1),
-        children: Vec::new(),
-        dof_startidx: 2,
-        weight_scaler: 1.0,
-    };
-    Arc::new(KinematicTree::new(vec![root, joint1, tip], 0, false))
+/// Exact 3D observations of every keypoint at `state`.
+pub fn observations_3d(state: &State) -> Vec<KeypointObservation> {
+    keypoint_positions(state)
+        .into_iter()
+        .enumerate()
+        .map(|(j, pos)| KeypointObservation::position_3d(j, pos, 1.0))
+        .collect()
+}
+
+pub fn keypoint_positions(state: &State) -> Vec<Vector3<f32>> {
+    let mut workspace = quickik::forward::ForwardKinematicsWorkspace::new(&state.kinematic_tree);
+    quickik::forward::forward_kinematics(&mut workspace, state).unwrap();
+    workspace.keypoint_positions().to_vec()
+}
+
+/// Benchmark fixtures (`fixtures.json`, `fixtures_g1.json`).
+pub fn assets_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmark/assets")
+}
+
+/// Path to an example body's `body_plan.json`, e.g. `"neuromechfly"`.
+pub fn body_plan_path(body: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("examples/assets/{body}/body_plan.json"))
+}
+
+pub fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    a.iter()
+        .zip(b)
+        .fold(0.0, |acc, (x, y)| acc.max((x - y).abs()))
 }

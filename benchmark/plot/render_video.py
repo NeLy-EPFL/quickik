@@ -64,7 +64,7 @@ DPI = 112.5
 # past the tightest bounding box that still holds every frame).
 BODIES = {
     "neuromechfly": {
-        "body_plan": "neuromechfly_ypr_legs.json",
+        "body_plan": "../../examples/assets/neuromechfly/body_plan.json",
         "fixtures": "fixtures.json",
         "title": "NeuroMechFly",
         "fps": 330.0,
@@ -84,7 +84,7 @@ BODIES = {
         "hide_root_bones": True,
     },
     "g1": {
-        "body_plan": "g1_body_plan.json",
+        "body_plan": "../../examples/assets/g1/body_plan.json",
         "fixtures": "fixtures_g1.json",
         "title": "G1 humanoid robot",
         "fps": 30.0,

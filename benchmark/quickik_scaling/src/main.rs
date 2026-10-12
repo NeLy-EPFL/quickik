@@ -34,7 +34,7 @@ fn write_results_json(points: &[serde_json::Value]) {
 fn main() {
     let assets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets");
     let tree = Arc::new(KinematicTree::from_json_file(
-        assets_dir.join("neuromechfly_ypr_legs.json"),
+        assets_dir.join("../../examples/assets/neuromechfly/body_plan.json"),
     ));
     let fixtures = fixtures::load(assets_dir.join("fixtures.json"));
 

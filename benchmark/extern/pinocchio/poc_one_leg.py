@@ -12,7 +12,7 @@ import numpy as np
 import pinocchio as pin
 
 MODEL_JSON = (
-    "/home/sibwang/Projects/quickik/benchmark/assets/neuromechfly_ypr_legs.json"
+    "/home/sibwang/Projects/quickik/examples/assets/neuromechfly/body_plan.json"
 )
 
 AXIS_MAP = {

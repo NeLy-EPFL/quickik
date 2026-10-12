@@ -1,5 +1,5 @@
 use nalgebra::{DMatrix, Matrix3, Vector2, Vector3};
-use quickik::observation::Projection;
+use quickik_old::observation::Projection;
 
 fn test_camera() -> Projection {
     Projection::new_pinhole_camera(

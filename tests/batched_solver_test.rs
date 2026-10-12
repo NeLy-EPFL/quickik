@@ -2,302 +2,55 @@ mod common;
 
 use std::sync::Arc;
 
-use nalgebra::Vector3;
 use quickik::batched_solver::BatchedSolver;
-use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
-use quickik::observation::{KeypointObservation, Projection};
-use quickik::solver::Solver;
+use quickik::observation::ObservationSequence;
+use quickik::solver::{SingleFrameSolver, SolverConfig};
 use quickik::state::State;
 
-const N_ITERATIONS: usize = 10;
-const POSITION_TOLERANCE: f32 = 1e-3;
-const ANGLE_TOLERANCE: f32 = 1e-3;
-const DAMPING: f32 = 1e-6;
-
-fn keypoints_at(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<Vector3<f32>> {
-    let mut state = State::neutral_pose(tree.clone());
-    state.dof_values.copy_from_slice(angles);
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    forward_kinematics(&mut workspace, &state);
-    workspace.kpt_positions.clone()
-}
-
-fn observations_for(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<KeypointObservation> {
-    keypoints_at(tree, angles)
-        .into_iter()
-        .map(|obs_pos| KeypointObservation::Position3D {
-            obs_pos,
-            weight: 1.0,
-        })
-        .collect()
-}
-
-fn joint_names(names: &[&str]) -> Vec<String> {
-    names.iter().map(|s| s.to_string()).collect()
-}
+use common::{branching_tree, observations_3d, some_pose};
 
 #[test]
-fn solve_matches_sequential_solve_with_grad() {
-    let tree = common::two_joint_chain();
-
-    // A permutation of the tree's own joint order ("root", "joint1",
-    // "joint2", "tip"), so this test actually exercises name-based
-    // remapping rather than happening to pass only for the identity order.
-    let keypoints_order = joint_names(&["tip", "root", "joint2", "joint1"]);
-    // external position i <- internal joint index order_joint_indices[i].
-    let order_joint_indices = [3usize, 0, 2, 1];
-
-    let targets: Vec<[f32; 2]> = vec![[0.4, 0.3], [-0.2, 0.1], [0.3, -0.4], [0.15, 0.25]];
-
-    // Ground truth: solve each item sequentially, from the neutral pose,
-    // with its own `Solver` and tree-order observations directly.
-    let mut expected_dof_angles = Vec::new();
-    let mut expected_root_pos = Vec::new();
-    let mut expected_root_rot = Vec::new();
-    let mut expected_ok = Vec::new();
-    let mut expected_jacobians = Vec::new();
-    for angles in &targets {
-        let mut state = State::neutral_pose(tree.clone());
-        let mut solver: Solver = Solver::new(
-            &tree,
-            Projection::new_3d(),
-            N_ITERATIONS,
-            0.0,
-            POSITION_TOLERANCE,
-            ANGLE_TOLERANCE,
-            DAMPING,
-        );
-        let result = solver.solve(&mut state, &observations_for(&tree, angles), true, false);
-        expected_ok.push(result.cholesky_l.is_some());
-        expected_jacobians.push(result.jacobian.unwrap());
-        expected_dof_angles.push(result.state.dof_values);
-        expected_root_pos.push(result.state.root_pos);
-        expected_root_rot.push(result.state.root_quat);
-    }
-
-    // Same observations, but permuted into `keypoints_order`: this is what
-    // BatchedSolver::solve actually receives.
-    let observations_array: Vec<Vec<KeypointObservation>> = targets
-        .iter()
-        .map(|angles| {
-            let internal_order = observations_for(&tree, angles);
-            order_joint_indices
-                .iter()
-                .map(|&joint_idx| internal_order[joint_idx])
-                .collect()
+fn matches_independent_single_frame_solves() {
+    let tree = branching_tree(false);
+    let items: Vec<_> = (0..20)
+        .map(|i| {
+            let mut state = some_pose(&tree);
+            state
+                .dof_values
+                .iter_mut()
+                .for_each(|v| *v *= 0.1 * i as f32);
+            observations_3d(&state)
         })
         .collect();
+    let mut config = SolverConfig::default();
+    config.add_dof_neutral_prior(1e-3).unwrap();
 
-    let batched_solver = BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        0.0,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-    let result = batched_solver.solve(&observations_array, true, false);
+    let batched = BatchedSolver::new(&tree, &config, 4).unwrap();
+    let result = batched
+        .solve(&ObservationSequence::from_lists(items.clone()), true, true)
+        .unwrap();
+    assert_eq!(result.dof_values.len(), items.len());
+    assert_eq!(result.jacobian.as_ref().unwrap().len(), items.len());
 
-    assert_eq!(result.joint_angles.len(), expected_dof_angles.len());
-    let cholesky_l = result.cholesky_l.unwrap();
-    let jacobian = result.jacobian.unwrap();
-    assert!(result.keypoint_pos.is_none(), "with_fk was false");
-    for i in 0..expected_dof_angles.len() {
+    let mut single = SingleFrameSolver::new(&tree, &config).unwrap();
+    for (i, observations) in items.iter().enumerate() {
+        let mut state = State::neutral_pose(Arc::clone(&tree));
+        let expected = single.solve(&mut state, observations, true, true).unwrap();
+        assert_eq!(result.dof_values[i], expected.state.dof_values);
+        assert_eq!(result.root_quat[i], expected.state.root_quat);
         assert_eq!(
-            cholesky_l[i].is_some(),
-            expected_ok[i],
-            "item {i}: PD-ness should match the sequential solve"
-        );
-        assert_eq!(
-            result.joint_angles[i], expected_dof_angles[i],
-            "item {i}: converged joint angles should match the sequential solve exactly"
-        );
-        assert_eq!(
-            result.base_pos[i], expected_root_pos[i],
-            "item {i}: converged base_pos should match the sequential solve exactly"
-        );
-        assert_eq!(
-            result.base_quat[i], expected_root_rot[i],
-            "item {i}: converged base_quat should match the sequential solve exactly"
-        );
-        assert_eq!(
-            jacobian[i], expected_jacobians[i],
-            "item {i}: jacobian should match the sequential solve exactly"
+            &result.jacobian.as_ref().unwrap()[i],
+            expected.jacobian.as_ref().unwrap()
         );
     }
 }
 
 #[test]
-fn with_grad_false_and_with_fk_false_leaves_optional_fields_none() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
-    let batched_solver = BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        1e-3,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-
-    let observations_array = vec![
-        observations_for(&tree, &[0.4, 0.3]),
-        observations_for(&tree, &[-0.1, 0.2]),
-    ];
-    let result = batched_solver.solve(&observations_array, false, false);
-
-    assert_eq!(result.joint_angles.len(), 2);
-    assert!(result.keypoint_pos.is_none());
-    assert!(result.jacobian.is_none());
-    assert!(result.cholesky_l.is_none());
-    // joint_angles/base_pos/base_quat are always populated regardless.
-    assert!((result.joint_angles[0][0] - 0.4).abs() < 1e-2);
-}
-
-#[test]
-fn with_fk_true_reports_keypoint_positions() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
-    let batched_solver = BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        0.0,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-
-    let target_angles = [0.4, 0.3];
-    let observations_array = vec![observations_for(&tree, &target_angles)];
-    let result = batched_solver.solve(&observations_array, false, true);
-
-    let keypoint_pos = result.keypoint_pos.unwrap();
-    let expected = keypoints_at(&tree, &target_angles);
-    assert_eq!(keypoint_pos[0].len(), expected.len());
-    for (a, e) in keypoint_pos[0].iter().zip(&expected) {
-        assert!((a - e).norm() < 1e-2, "actual={a:?} expected={e:?}");
-    }
-}
-
-#[test]
-#[should_panic(expected = "unknown joint name")]
-fn new_rejects_unknown_joint_name() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "nonexistent"]);
-    BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        1e-3,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-}
-
-#[test]
-#[should_panic(expected = "listed more than once")]
-fn new_rejects_duplicate_joint_name() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint1", "tip"]);
-    BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        1e-3,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-}
-
-#[test]
-#[should_panic(expected = "fixed-base tree")]
-fn new_rejects_fixed_base_tree() {
-    let tree = common::fixed_base_two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
-    BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        1e-3,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-}
-
-#[test]
-fn solve_with_single_worker_matches_solve_with_all_workers() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
-    let targets: Vec<[f32; 2]> = vec![[0.4, 0.3], [-0.2, 0.1], [0.3, -0.4], [0.15, 0.25]];
-    let observations_array: Vec<Vec<KeypointObservation>> = targets
-        .iter()
-        .map(|angles| observations_for(&tree, angles))
-        .collect();
-
-    let single_worker = BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        0.0,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order.clone(),
-        1,
-    );
-    let all_workers = BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        0.0,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        -1,
-    );
-
-    let single_result = single_worker.solve(&observations_array, false, false);
-    let all_result = all_workers.solve(&observations_array, false, false);
-
-    assert_eq!(single_result.joint_angles, all_result.joint_angles);
-    assert_eq!(single_result.base_pos, all_result.base_pos);
-    assert_eq!(single_result.base_quat, all_result.base_quat);
-}
-
-#[test]
-#[should_panic(expected = "n_workers must not be 0")]
-fn new_rejects_zero_workers() {
-    let tree = common::two_joint_chain();
-    let keypoints_order = joint_names(&["root", "joint1", "joint2", "tip"]);
-    BatchedSolver::new(
-        &tree,
-        Projection::new_3d(),
-        N_ITERATIONS,
-        1e-3,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-        keypoints_order,
-        0,
-    );
+fn rejects_fixed_base_and_smoothness_priors() {
+    let config = SolverConfig::default();
+    assert!(BatchedSolver::new(&branching_tree(true), &config, 1).is_err());
+    let mut smoothness = SolverConfig::default();
+    smoothness.add_dof_smoothness_prior(1.0).unwrap();
+    assert!(BatchedSolver::new(&branching_tree(false), &smoothness, 1).is_err());
+    assert!(BatchedSolver::new(&branching_tree(false), &config, 0).is_err());
 }

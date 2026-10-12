@@ -41,7 +41,7 @@ from pathlib import Path
 PREPROCESSING_DIR = Path(__file__).resolve().parent
 BENCHMARK_DIR = PREPROCESSING_DIR.parent
 URDF_PATH = BENCHMARK_DIR / "assets" / "g1_raw" / "g1_29dof.urdf"
-OUT_PATH = BENCHMARK_DIR / "assets" / "g1_body_plan.json"
+OUT_PATH = BENCHMARK_DIR.parent / "examples" / "assets" / "g1" / "body_plan.json"
 
 # (name, parent_link) for each revolute joint, in the URDF's own kinematic
 # order (root to leaves, left leg/right leg/waist/left arm/right arm).

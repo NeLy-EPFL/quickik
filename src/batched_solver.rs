@@ -1,280 +1,133 @@
-//! [`BatchedSolver`]: solving a batch of fully independent (never
-//! warm-started) sets of keypoint observations in parallel, for training/
-//! inference with an autodiff framework. See [`BatchedSolver::solve`].
+//! [`BatchedSolver`]: solving a batch of fully independent items in parallel,
+//! for training/inference with an autodiff framework.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use nalgebra::linalg::Cholesky;
 use nalgebra::{DMatrix, Dyn, UnitQuaternion, Vector3};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::body_plan::KinematicTree;
-use crate::observation::{KeypointObservation, Projection};
+use crate::error::{Error, Result, bail};
+use crate::observation::ObservationSequence;
 use crate::sequential_solver::resolve_n_workers;
-use crate::solver::Solver;
+use crate::solver::{SolverConfig, SolverCore, SolverResult};
 use crate::state::State;
 
-/// Every [`BatchedSolver::solve`] item's converged pose and linearization, as
-/// a struct of batched arrays (rather than a `Vec` of per-item structs) to
-/// match how a batch is naturally represented on the PyTorch side.
+/// Every [`BatchedSolver::solve`] item's result, as a struct of per-item
+/// arrays (rather than a `Vec` of per-item structs) to match how a batch is
+/// represented on the PyTorch side.
+#[derive(Debug)]
 pub struct BatchedSolverResult {
-    /// `(batch_size)`, each of length `n_dofs`. DOF order matches the
-    /// `KinematicTree`'s own (`State::dof_angles`'s order): unlike keypoints
-    /// (whose observations typically come from an external, already-fixed-order
-    /// source, e.g. a pretrained detector, that has no reason to match the
-    /// tree's own joint order), DOF order is already fully caller-controlled:
-    /// it's exactly the order joints and their DOFs were listed in when
-    /// the [`KinematicTree`] was built, so there's no equivalent
-    /// DOF-ordering parameter to reorder this by.
-    pub joint_angles: Vec<Vec<f32>>,
-    /// `(batch_size)` free-floating root positions.
-    pub base_pos: Vec<Vector3<f32>>,
-    /// `(batch_size)` free-floating root orientations.
-    pub base_quat: Vec<UnitQuaternion<f32>>,
-    /// `(batch_size)`, each item's world-space keypoint positions, in
-    /// `KinematicTree`'s internal joint order (*not* `keypoints_order`).
-    /// `Some` iff `solve` was called with `with_fk: true`.
+    /// Per item, one value per DOF, in the tree's DOF order.
+    pub dof_values: Vec<Vec<f32>>,
+    pub root_pos: Vec<Vector3<f32>>,
+    pub root_quat: Vec<UnitQuaternion<f32>>,
+    /// Per item, world-frame keypoint positions in joint order. `Some` if and
+    /// only if `solve` had `with_fk: true`.
     pub keypoint_pos: Option<Vec<Vec<Vector3<f32>>>>,
-    /// `(batch_size)`, each item's residual Jacobian (3 rows per keypoint with
-    /// a 3D projection, 2 otherwise; see [`SolverResult::jacobian`]). Rows/columns
-    /// are in `KinematicTree`'s internal keypoint/state order, *not*
-    /// `keypoints_order`: nothing outside this crate reads these entries
-    /// directly, so only the input observations and `joint_angles` need
-    /// reordering by `keypoints_order`. `Some` iff `solve` was called with
+    /// Per item, the residual Jacobian (see
+    /// [`SolverResult::jacobian`]). `Some` if and only if `solve` had
     /// `with_grad: true`.
-    ///
-    /// [`SolverResult::jacobian`]: crate::solver::SolverResult::jacobian
     pub jacobian: Option<Vec<DMatrix<f32>>>,
-    /// `(batch_size)`, each item's Cholesky factor L. The inner `Option` is
-    /// `None` if that item's last iteration wasn't positive-definite
-    /// (gradients can't be computed for it). The outer `Option` is `Some`
-    /// iff `solve` was called with `with_grad: true`.
+    /// Per item, the Cholesky factor, `None` for items whose last iteration
+    /// wasn't positive-definite (see [`SolverResult::cholesky_l`]). `Some` if
+    /// and only if `solve` had `with_grad: true`.
     pub cholesky_l: Option<Vec<Option<Cholesky<f32, Dyn>>>>,
 }
 
-/// Solves a batch of fully independent sets of keypoint observations, for
-/// training/inference with an autodiff framework (e.g. the Python bindings'
-/// PyTorch integration).
-///
-/// Every [`solve`](Self::solve) call is completely independent: each item
-/// always starts from `kinematic_tree`'s neutral pose (no warm-starting,
-/// unlike [`SequenceSolver`](crate::sequential_solver::SequenceSolver)),
-/// since batch composition typically changes every call (e.g. every
-/// minibatch in a training loop). Constructing one `BatchedSolver` and
-/// calling `solve` on it repeatedly (rather than reconstructing one per
-/// call) still pays off: `keypoints_order` is resolved into internal joint
-/// indices once, at construction, not re-resolved every call.
+/// Solves a batch of fully independent items in parallel, each starting from
+/// the neutral pose (no warm start, since batch composition typically changes
+/// every call, e.g. every minibatch).
 pub struct BatchedSolver {
-    kinematic_tree: Arc<KinematicTree>,
-    projection: Projection,
-    n_iterations: usize,
-    neutral_weight: f32,
-    position_tolerance: f32,
-    angle_tolerance: f32,
-    damping: f32,
-    /// `keypoint_to_joint_idx[i]` is the internal joint/keypoint index that
-    /// `solve`'s `observations_array` keypoint axis position `i` corresponds
-    /// to, resolved once here from the external, by-name `keypoints_order`.
-    keypoint_to_joint_idx: Vec<usize>,
-    /// Dedicated pool `solve` runs its batch on, sized from the `n_workers`
-    /// this `BatchedSolver` was constructed with, so it doesn't contend with
-    /// (or get starved by) rayon's global pool or other `BatchedSolver`s.
+    core: SolverCore,
+    /// Dedicated pool, so `solve` neither contends with nor gets starved by
+    /// rayon's global pool or other `BatchedSolver`s.
     thread_pool: ThreadPool,
 }
 
 impl BatchedSolver {
-    /// `kinematic_tree` must be free-floating (not
-    /// [`fixed_base`](KinematicTree::fixed_base)), since
-    /// [`BatchedSolverResult`] always reports `base_pos`/`base_quat`.
-    ///
-    /// `keypoints_order[i]` is the joint name (matching [`Joint::name`]) that
-    /// `solve`'s `observations_array` keypoint axis position `i` corresponds
-    /// to; every joint in `kinematic_tree` must appear in it exactly once.
-    ///
-    /// `n_workers`: number of threads in `solve`'s dedicated thread pool.
-    /// A positive value is used directly, unless it exceeds the number of
-    /// available cores: it's then clipped to that count and a warning is
-    /// logged. A negative value counts backward from all available cores:
-    /// `-1` uses all, `-2` uses all but one, etc. `0` is invalid.
-    ///
-    /// [`Joint::name`]: crate::body_plan::Joint::name
-    #[allow(clippy::too_many_arguments)]
+    /// Returns an error if the tree is fixed-base (results always report the
+    /// root pose), if `config` has smoothness priors (items are independent),
+    /// or if `n_workers` is invalid. `n_workers` follows the convention of
+    /// [`SequentialSolver::solve_parallel`](crate::sequential_solver::SequentialSolver::solve_parallel).
     pub fn new(
         kinematic_tree: &Arc<KinematicTree>,
-        projection: Projection,
-        n_iterations: usize,
-        neutral_weight: f32,
-        position_tolerance: f32,
-        angle_tolerance: f32,
-        damping: f32,
-        keypoints_order: Vec<String>,
+        config: &SolverConfig,
         n_workers: isize,
-    ) -> Self {
-        assert!(
-            !kinematic_tree.fixed_base,
-            "BatchedSolver requires a free-floating-base tree: base_pos/base_quat have no \
-             meaning for a fixed-base tree"
-        );
-        let keypoint_to_joint_idx = resolve_keypoint_order(kinematic_tree, &keypoints_order);
-        let thread_pool = ThreadPoolBuilder::new()
-            .num_threads(resolve_n_workers(n_workers))
-            .build()
-            .expect("failed to build BatchedSolver's thread pool");
-        Self {
-            kinematic_tree: Arc::clone(kinematic_tree),
-            projection,
-            n_iterations,
-            neutral_weight,
-            position_tolerance,
-            angle_tolerance,
-            damping,
-            keypoint_to_joint_idx,
-            thread_pool,
+    ) -> Result<Self> {
+        if kinematic_tree.fixed_base() {
+            bail!("BatchedSolver requires a free-floating tree");
         }
+        if config.priors.has_temporal() {
+            bail!("BatchedSolver doesn't support smoothness priors (items are independent)");
+        }
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(resolve_n_workers(n_workers)?)
+            .build()
+            .map_err(|e| Error::InvalidInput(format!("failed to build thread pool: {e}")))?;
+        Ok(Self {
+            core: SolverCore::new(kinematic_tree, config)?,
+            thread_pool,
+        })
     }
 
-    /// The projection this solver was built with; fixed for its lifetime, same
-    /// as [`Solver::projection`](crate::solver::Solver::projection).
-    pub fn projection(&self) -> Projection {
-        self.projection
+    pub fn kinematic_tree(&self) -> &Arc<KinematicTree> {
+        self.core.tree()
     }
 
-    /// `keypoint_to_joint_idx()[i]` is the internal joint/keypoint index that
-    /// `solve`'s `observations_array` keypoint axis position `i` corresponds
-    /// to (the resolved inverse of the by-name `keypoints_order` this solver
-    /// was constructed with).
-    pub fn keypoint_to_joint_idx(&self) -> &[usize] {
-        &self.keypoint_to_joint_idx
+    pub fn config(&self) -> &SolverConfig {
+        self.core.config()
     }
 
-    /// Solves every item in `observations_array` in parallel on this
-    /// `BatchedSolver`'s own thread pool (sized from the `n_workers` it was
-    /// constructed with), each starting from `kinematic_tree`'s neutral pose
-    /// with its own freshly constructed [`Solver`] (so items never contend
-    /// over solver-internal buffers). `observations_array` is `(batch_size)`,
-    /// each a `Vec<KeypointObservation>` of length `n_joints`, in the order
-    /// given by this `BatchedSolver`'s `keypoints_order` (*not* the
-    /// `KinematicTree`'s internal joint order).
+    /// Solves every frame of `batch` as an independent item.
     pub fn solve(
         &self,
-        observations_array: &[Vec<KeypointObservation>],
+        batch: &ObservationSequence,
         with_grad: bool,
         with_fk: bool,
-    ) -> BatchedSolverResult {
-        let n_joints = self.kinematic_tree.n_joints();
-
-        let per_item_results: Vec<crate::solver::SolverResult> = self.thread_pool.install(|| {
-            observations_array
-                .par_iter()
-                .map(|external_order_observations| {
-                    assert_eq!(
-                        external_order_observations.len(),
-                        n_joints,
-                        "every observations_array item must have length kinematic_tree.n_joints()"
-                    );
-                    // Remap from the external keypoints_order into the
-                    // tree's internal joint order: cheap (O(n_joints)) since
-                    // it's just this one item's small observation list, not
-                    // the Jacobian/Cholesky matrices below.
-                    let mut internal_order_observations =
-                        vec![KeypointObservation::Missing; n_joints];
-                    for (external_idx, &joint_idx) in self.keypoint_to_joint_idx.iter().enumerate()
-                    {
-                        internal_order_observations[joint_idx] =
-                            external_order_observations[external_idx];
-                    }
-
-                    let mut solver = Solver::new(
-                        &self.kinematic_tree,
-                        self.projection,
-                        self.n_iterations,
-                        self.neutral_weight,
-                        self.position_tolerance,
-                        self.angle_tolerance,
-                        self.damping,
-                    );
-                    let mut state = State::neutral_pose(Arc::clone(&self.kinematic_tree));
-                    solver.solve(&mut state, &internal_order_observations, with_grad, with_fk)
-                })
+    ) -> Result<BatchedSolverResult> {
+        self.core.check_sequence(batch)?;
+        let neutral = State::neutral_pose(Arc::clone(self.core.tree()));
+        let results: Vec<SolverResult> = self.thread_pool.install(|| {
+            (0..batch.len())
+                .into_par_iter()
+                // One core (and its buffers) per rayon work split rather than
+                // per item.
+                .map_init(
+                    || self.core.clone(),
+                    |core, i| {
+                        let mut state = neutral.clone();
+                        core.solve_frame(&mut state, None, &batch.frames()[i], with_grad, with_fk)
+                    },
+                )
                 .collect()
         });
 
-        let batch_size = per_item_results.len();
-        let mut joint_angles = Vec::with_capacity(batch_size);
-        let mut base_pos = Vec::with_capacity(batch_size);
-        let mut base_quat = Vec::with_capacity(batch_size);
-        let mut keypoint_pos = with_fk.then(|| Vec::with_capacity(batch_size));
-        let mut jacobian = with_grad.then(|| Vec::with_capacity(batch_size));
-        let mut cholesky_l = with_grad.then(|| Vec::with_capacity(batch_size));
-        for result in per_item_results {
-            joint_angles.push(result.state.dof_values);
-            base_pos.push(result.state.root_pos);
-            base_quat.push(result.state.root_quat);
-            if let Some(keypoint_pos) = &mut keypoint_pos {
-                keypoint_pos.push(result.keypoint_pos.unwrap());
+        let n = results.len();
+        let mut output = BatchedSolverResult {
+            dof_values: Vec::with_capacity(n),
+            root_pos: Vec::with_capacity(n),
+            root_quat: Vec::with_capacity(n),
+            keypoint_pos: with_fk.then(|| Vec::with_capacity(n)),
+            jacobian: with_grad.then(|| Vec::with_capacity(n)),
+            cholesky_l: with_grad.then(|| Vec::with_capacity(n)),
+        };
+        for result in results {
+            output.dof_values.push(result.state.dof_values);
+            output.root_pos.push(result.state.root_pos);
+            output.root_quat.push(result.state.root_quat);
+            if let (Some(all), Some(item)) = (&mut output.keypoint_pos, result.keypoint_pos) {
+                all.push(item);
             }
-            if let Some(jacobian) = &mut jacobian {
-                jacobian.push(result.jacobian.unwrap());
+            if let (Some(all), Some(item)) = (&mut output.jacobian, result.jacobian) {
+                all.push(item);
             }
-            if let Some(cholesky_l) = &mut cholesky_l {
-                cholesky_l.push(result.cholesky_l);
+            if let Some(all) = &mut output.cholesky_l {
+                all.push(result.cholesky_l);
             }
         }
-        BatchedSolverResult {
-            joint_angles,
-            base_pos,
-            base_quat,
-            keypoint_pos,
-            jacobian,
-            cholesky_l,
-        }
+        Ok(output)
     }
-}
-
-/// Resolves `keypoints_order` (external keypoint axis order, given by joint
-/// name) into `keypoint_to_joint_idx[i]` = the internal joint/keypoint index
-/// that `observations_array`'s keypoint axis position `i` corresponds to.
-/// Panics unless `keypoints_order` names every joint in `kinematic_tree`
-/// exactly once.
-fn resolve_keypoint_order(
-    kinematic_tree: &KinematicTree,
-    keypoints_order: &[String],
-) -> Vec<usize> {
-    let n_joints = kinematic_tree.n_joints();
-    assert_eq!(
-        keypoints_order.len(),
-        n_joints,
-        "keypoints_order.len() must equal kinematic_tree.n_joints()"
-    );
-
-    let name_to_idx: HashMap<&str, usize> = kinematic_tree
-        .joints
-        .iter()
-        .enumerate()
-        .map(|(idx, joint)| (joint.name.as_str(), idx))
-        .collect();
-    assert_eq!(
-        name_to_idx.len(),
-        n_joints,
-        "kinematic_tree has duplicate joint names, so keypoints_order can't unambiguously refer \
-         to them by name"
-    );
-
-    let mut joint_seen = vec![false; n_joints];
-    keypoints_order
-        .iter()
-        .map(|name| {
-            let joint_idx = *name_to_idx
-                .get(name.as_str())
-                .unwrap_or_else(|| panic!("keypoints_order: unknown joint name '{name}'"));
-            assert!(
-                !joint_seen[joint_idx],
-                "keypoints_order: joint '{name}' listed more than once"
-            );
-            joint_seen[joint_idx] = true;
-            joint_idx
-        })
-        .collect()
 }

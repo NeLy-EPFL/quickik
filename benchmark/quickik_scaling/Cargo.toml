@@ -10,6 +10,6 @@ name = "quickik-scaling"
 path = "src/main.rs"
 
 [dependencies]
-quickik = { path = "../.." }
+quickik = { package = "quickik_old", path = "../../quickik_old" }
 quickik-benchmark = { path = "../quickik_rust" }
 serde_json = "1.0"

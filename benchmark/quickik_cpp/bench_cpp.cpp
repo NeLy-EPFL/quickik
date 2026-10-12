@@ -370,8 +370,8 @@ int main() {
   const std::string assets_dir = QUICKIK_ASSETS_DIR;
 
   const std::vector<BodySpec> bodies = {
-      {"neuromechfly", assets_dir + "/neuromechfly_ypr_legs.json", assets_dir + "/fixtures.json"},
-      {"g1", assets_dir + "/g1_body_plan.json", assets_dir + "/fixtures_g1.json"},
+      {"neuromechfly", assets_dir + "/../../examples/assets/neuromechfly/body_plan.json", assets_dir + "/fixtures.json"},
+      {"g1", assets_dir + "/../../examples/assets/g1/body_plan.json", assets_dir + "/fixtures_g1.json"},
   };
 
   for (auto &body : bodies) {

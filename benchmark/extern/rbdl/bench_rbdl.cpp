@@ -440,8 +440,8 @@ struct BodyConfig {
 };
 
 constexpr BodyConfig kBodies[] = {
-    {"neuromechfly", "neuromechfly_ypr_legs.json", "fixtures.json"},
-    {"g1", "g1_body_plan.json", "fixtures_g1.json"},
+    {"neuromechfly", "../../examples/assets/neuromechfly/body_plan.json", "fixtures.json"},
+    {"g1", "../../examples/assets/g1/body_plan.json", "fixtures_g1.json"},
 };
 
 }  // namespace

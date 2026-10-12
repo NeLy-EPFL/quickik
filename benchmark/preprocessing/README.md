@@ -1,6 +1,6 @@
 # Preprocessing
 
-Generates the G1 body plan and fixtures (`../assets/g1_body_plan.json`, `../assets/fixtures_g1.json`), in the same JSON schema as the fly's own assets (see `../scripts/generate_fixtures.py`'s docstring), so `plot_comparison.py` can benchmark against a second body: a Unitree G1 humanoid (29 DOF), driven by real human motion capture ([LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset)) rescaled onto G1 – see `g1_fixtures.py`'s module docstring for why this benchmark does that rescale itself rather than starting from a pre-retargeted dataset.
+Generates the G1 body plan and fixtures (`../../examples/assets/g1/body_plan.json`, `../assets/fixtures_g1.json`), in the same JSON schema as the fly's own assets (see `../scripts/generate_fixtures.py`'s docstring), so `plot_comparison.py` can benchmark against a second body: a Unitree G1 humanoid (29 DOF), driven by real human motion capture ([LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset)) rescaled onto G1 – see `g1_fixtures.py`'s module docstring for why this benchmark does that rescale itself rather than starting from a pre-retargeted dataset.
 
 ## Fetch the raw inputs
 
@@ -18,7 +18,7 @@ curl -sL -o benchmark/assets/g1_raw/walk1_subject1.bvh \
 
 ```sh
 cd benchmark/preprocessing
-python g1_body_plan.py     # -> ../assets/g1_body_plan.json
+python g1_body_plan.py     # -> ../../examples/assets/g1/body_plan.json
 uv run --with numpy --with scipy python g1_fixtures.py   # -> ../assets/fixtures_g1.json
 ```
 

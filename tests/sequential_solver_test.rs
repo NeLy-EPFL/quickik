@@ -2,250 +2,213 @@ mod common;
 
 use std::sync::Arc;
 
-use nalgebra::Vector3;
-use quickik::body_plan::KinematicTree;
-use quickik::forward::{ForwardKinematicsWorkspace, forward_kinematics};
-use quickik::observation::{KeypointObservation, Projection};
-use quickik::sequential_solver::SequenceSolver;
+use nalgebra::{Vector2, Vector3};
+use quickik::observation::{
+    KeypointObservation, ObservationSequence, OrthographicViewXY, Projection,
+};
+use quickik::sequential_solver::SequentialSolver;
+use quickik::solver::SolverConfig;
 use quickik::state::State;
 
-const N_ITERATIONS: usize = 10;
-const NEUTRAL_WEIGHT: f32 = 1e-3;
-const POSITION_TOLERANCE: f32 = 1e-3;
-const ANGLE_TOLERANCE: f32 = 1e-3;
-const DAMPING: f32 = 1e-6;
+use common::{branching_tree, max_abs_diff, observations_3d, some_pose};
 
-fn keypoints_at(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<Vector3<f32>> {
-    let mut state = State::neutral_pose(tree.clone());
-    state.dof_values.copy_from_slice(angles);
-    let mut workspace = ForwardKinematicsWorkspace::new(tree);
-    forward_kinematics(&mut workspace, &state);
-    workspace.kpt_positions.clone()
-}
-
-fn observations_for(tree: &Arc<KinematicTree>, angles: &[f32]) -> Vec<KeypointObservation> {
-    keypoints_at(tree, angles)
-        .into_iter()
-        .map(|obs_pos| KeypointObservation::Position3D {
-            obs_pos,
-            weight: 1.0,
+/// A smooth motion: `some_pose` scaled by a factor ramping from 0.5 to 1.5.
+fn motion(tree: &Arc<quickik::body_plan::KinematicTree>, n_frames: usize) -> Vec<State> {
+    let base = some_pose(tree);
+    (0..n_frames)
+        .map(|i| {
+            let s = 0.5 + i as f32 / n_frames as f32;
+            let mut state = base.clone();
+            state.dof_values.iter_mut().for_each(|v| *v *= s);
+            state.root_pos *= s;
+            state
         })
         .collect()
 }
 
-fn new_seq_solver(
-    tree: &Arc<KinematicTree>,
-    n_iterations: usize,
-    neutral_weight: f32,
-) -> SequenceSolver {
-    SequenceSolver::new(
-        tree,
-        Projection::new_3d(),
-        n_iterations,
-        neutral_weight,
-        POSITION_TOLERANCE,
-        ANGLE_TOLERANCE,
-        DAMPING,
-    )
+fn config() -> SolverConfig {
+    let mut config = SolverConfig::default();
+    config.add_dof_neutral_prior(1e-4).unwrap();
+    config
 }
 
 #[test]
-fn solve_always_warm_starts_across_separate_calls() {
-    let tree = common::two_joint_chain();
-    let target = observations_for(&tree, &[0.4, 0.3]);
+fn step_and_solve_agree() {
+    let tree = branching_tree(false);
+    let frames: Vec<_> = motion(&tree, 10).iter().map(observations_3d).collect();
 
-    // Cold start: a single Gauss-Newton iteration from the neutral pose.
-    let mut cold = new_seq_solver(&tree, 1, 0.0);
-    let cold_result = cold.solve(std::slice::from_ref(&target), false, false);
-    let cold_error = (cold_result[0].state.dof_values[0] - 0.4).abs();
+    let mut by_step = SequentialSolver::new(&tree, &config(), None).unwrap();
+    let stepped: Vec<_> = frames
+        .iter()
+        .map(|f| by_step.step(f, false, false).unwrap())
+        .collect();
+    let mut by_solve = SequentialSolver::new(&tree, &config(), None).unwrap();
+    let solved = by_solve
+        .solve(
+            &ObservationSequence::from_lists(frames.clone()),
+            false,
+            false,
+        )
+        .unwrap();
 
-    // Warm start: two separate `.solve()` calls with the same (static)
-    // target; the second call continues from the first call's near-answer
-    // instead of from neutral (SequenceSolver always warm-starts across
-    // calls, for its whole lifetime), so it should end up closer after the
-    // same one iteration.
-    let mut warm = new_seq_solver(&tree, 1, 0.0);
-    warm.solve(std::slice::from_ref(&target), false, false);
-    let warm_results = warm.solve(std::slice::from_ref(&target), false, false);
-    let warm_error = (warm_results[0].state.dof_values[0] - 0.4).abs();
+    for (a, b) in stepped.iter().zip(&solved) {
+        assert_eq!(a.state.dof_values, b.state.dof_values);
+    }
+    assert_eq!(by_step.state().dof_values, by_solve.state().dof_values);
+}
 
-    assert!(
-        warm_error < cold_error,
-        "warm-started second call ({warm_error}) should be closer to the target than a single \
-         cold-start iteration ({cold_error})"
+#[test]
+fn smoothness_priors_pull_toward_previous_frame() {
+    let tree = branching_tree(false);
+    let first = some_pose(&tree);
+    let mut second = first.clone();
+    second.dof_values.iter_mut().for_each(|v| *v += 0.3);
+    second.root_pos += Vector3::new(0.5, 0.0, 0.0);
+    // Weakly observed second frame.
+    let weak: Vec<_> = observations_3d(&second)
+        .into_iter()
+        .map(|mut o| {
+            o.weight = 1e-3;
+            o
+        })
+        .collect();
+
+    let solve_second = |config: &SolverConfig| {
+        let mut solver = SequentialSolver::new(&tree, config, None).unwrap();
+        solver.step(&observations_3d(&first), false, false).unwrap();
+        solver.step(&weak, false, false).unwrap().state
+    };
+    let mut smooth = SolverConfig::new(30, 0.0, 0.0, 1e-6);
+    smooth.add_dof_smoothness_prior(1.0).unwrap();
+    smooth.add_root_smoothness_prior(1.0, 1.0).unwrap();
+    let with_prior = solve_second(&smooth);
+    let without_prior = solve_second(&SolverConfig::new(30, 0.0, 0.0, 1e-6));
+
+    // Without the prior, the weak observations are fit exactly; with it, the
+    // result stays close to the first frame.
+    assert!(max_abs_diff(&without_prior.dof_values, &second.dof_values) < 1e-3);
+    assert!(max_abs_diff(&with_prior.dof_values, &first.dof_values) < 0.05);
+    assert!((with_prior.root_pos - first.root_pos).norm() < 0.05);
+}
+
+#[test]
+fn reset_forgets_previous_frame() {
+    let tree = branching_tree(false);
+    let mut config = SolverConfig::new(30, 0.0, 0.0, 1e-6);
+    config.add_dof_smoothness_prior(1e3).unwrap();
+    let mut solver = SequentialSolver::new(&tree, &config, None).unwrap();
+    solver
+        .step(
+            &observations_3d(&State::neutral_pose(Arc::clone(&tree))),
+            false,
+            false,
+        )
+        .unwrap();
+    solver.reset(None).unwrap();
+    // First frame after the reset: smoothness inactive, so it's fit exactly.
+    let target = some_pose(&tree);
+    let result = solver
+        .step(&observations_3d(&target), false, false)
+        .unwrap();
+    assert!(max_abs_diff(&result.state.dof_values, &target.dof_values) < 1e-3);
+}
+
+#[test]
+fn solve_parallel_matches_sequential_solve() {
+    let tree = branching_tree(false);
+    let truth = motion(&tree, 40);
+    let frames: Vec<_> = truth.iter().map(observations_3d).collect();
+    let sequence = ObservationSequence::from_lists(frames.clone());
+
+    let solver = SequentialSolver::new(&tree, &config(), None).unwrap();
+    for n_overlap in [0, 5, 100] {
+        let results = solver
+            .solve_parallel(&sequence, 4, n_overlap, false, true)
+            .unwrap();
+        assert_eq!(results.len(), truth.len());
+        for (result, expected) in results.iter().zip(&truth) {
+            assert!(max_abs_diff(&result.state.dof_values, &expected.dof_values) < 1e-2);
+            assert!(result.keypoint_pos.is_some());
+        }
+    }
+    // The running state is untouched.
+    assert_eq!(
+        solver.state().dof_values,
+        State::neutral_pose(Arc::clone(&tree)).dof_values
     );
 }
 
 #[test]
-fn solve_returns_one_result_per_frame() {
-    let tree = common::two_joint_chain();
-    let mut seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
+fn from_arrays_matches_from_lists() {
+    let tree = branching_tree(false);
+    let n_joints = tree.n_joints();
+    let truth = motion(&tree, 3);
+    let camera = Projection::from(OrthographicViewXY::new(2.0, Vector2::new(1.0, -1.0)));
 
-    let sequence = vec![
-        observations_for(&tree, &[0.1, 0.05]),
-        observations_for(&tree, &[0.2, 0.1]),
-        observations_for(&tree, &[0.3, 0.15]),
-    ];
-    let results = seq_solver.solve(&sequence, false, false);
-
-    assert_eq!(results.len(), 3);
-    assert!((results[2].state.dof_values[0] - 0.3).abs() < 1e-2);
-    assert!((results[2].state.dof_values[1] - 0.15).abs() < 1e-2);
-}
-
-#[test]
-fn keypoint_pos_matches_the_converged_state() {
-    let tree = common::two_joint_chain();
-    let mut seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let target = observations_for(&tree, &[0.4, 0.3]);
-    let results = seq_solver.solve(std::slice::from_ref(&target), false, true);
-    let result = &results[0];
-
-    let mut expected_state = State::neutral_pose(tree.clone());
-    expected_state
-        .dof_values
-        .copy_from_slice(&result.state.dof_values);
-    expected_state.root_pos = result.state.root_pos;
-    expected_state.root_quat = result.state.root_quat;
-    let mut expected_workspace = ForwardKinematicsWorkspace::new(&tree);
-    forward_kinematics(&mut expected_workspace, &expected_state);
-
-    let actual = result.keypoint_pos.as_ref().unwrap();
-    assert_eq!(actual.len(), expected_workspace.kpt_positions.len());
-    for (a, e) in actual.iter().zip(&expected_workspace.kpt_positions) {
-        assert!((a - e).norm() < 1e-5, "actual={a:?} expected={e:?}");
+    let mut pos_3d = Vec::new();
+    let mut weights_3d = Vec::new();
+    let mut pos_2d = Vec::new();
+    let mut weights_2d = Vec::new();
+    let mut lists = Vec::new();
+    let shared_camera = Arc::new(camera);
+    for (f, state) in truth.iter().enumerate() {
+        let mut list = Vec::new();
+        let positions = common::keypoint_positions(state);
+        for (j, p) in positions.iter().enumerate() {
+            // Joint 2 is missing in frame 1 (NaN weight in the arrays).
+            let w = if f == 1 && j == 2 { f32::NAN } else { 1.0 };
+            pos_3d.extend(p.iter());
+            weights_3d.push(w);
+            list.push(KeypointObservation::position_3d(
+                j,
+                *p,
+                if w.is_nan() { 0.0 } else { w },
+            ));
+        }
+        for (j, p) in positions.iter().enumerate() {
+            let uv = 2.0 * Vector2::new(p.x, p.y) + Vector2::new(1.0, -1.0);
+            pos_2d.extend(uv.iter());
+            weights_2d.push(0.5);
+            list.push(KeypointObservation::position_2d(
+                j,
+                uv,
+                Arc::clone(&shared_camera),
+                0.5,
+            ));
+        }
+        lists.push(list);
     }
-}
+    let from_arrays = ObservationSequence::from_arrays(
+        truth.len(),
+        n_joints,
+        Some(&pos_3d),
+        Some(&weights_3d),
+        &[Arc::clone(&shared_camera)],
+        Some(&pos_2d),
+        Some(&weights_2d),
+    )
+    .unwrap();
+    let from_lists = ObservationSequence::from_lists(lists.clone());
 
-#[test]
-fn with_fk_true_does_not_change_the_converged_trajectory() {
-    let tree = common::two_joint_chain();
-    let sequence = vec![
-        observations_for(&tree, &[0.1, 0.05]),
-        observations_for(&tree, &[0.2, 0.1]),
-        observations_for(&tree, &[0.3, 0.15]),
-    ];
-
-    let mut plain_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let plain_results = plain_solver.solve(&sequence, false, false);
-
-    let mut fk_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let fk_results = fk_solver.solve(&sequence, false, true);
-
-    assert_eq!(fk_results.len(), plain_results.len());
-    for (fk_result, plain_result) in fk_results.iter().zip(&plain_results) {
-        assert_eq!(fk_result.state.dof_values, plain_result.state.dof_values);
-        assert!(fk_result.keypoint_pos.is_some());
-        assert!(plain_result.keypoint_pos.is_none());
+    let solve = |sequence: &ObservationSequence| {
+        let mut solver = SequentialSolver::new(&tree, &config(), None).unwrap();
+        solver.solve(sequence, true, false).unwrap()
+    };
+    for (a, b) in solve(&from_arrays).iter().zip(&solve(&from_lists)) {
+        assert_eq!(a.state.dof_values, b.state.dof_values);
+        let jacobian = a.jacobian.as_ref().unwrap();
+        assert_eq!(jacobian.nrows(), 3 * n_joints + 2 * n_joints);
+        assert_eq!(jacobian, b.jacobian.as_ref().unwrap());
     }
-}
 
-fn sine_trajectory(
-    tree: &Arc<KinematicTree>,
-    n_frames: usize,
-) -> (Vec<Vec<KeypointObservation>>, Vec<[f32; 2]>) {
-    // A smooth trajectory well within joint2's [-0.5, 0.5] limit, so limit
-    // clamping doesn't confound the closeness checks below.
-    let true_angles: Vec<[f32; 2]> = (0..n_frames)
-        .map(|t| {
-            let a = 0.3 * (t as f32 * 0.15).sin();
-            [a, a * 0.5]
-        })
-        .collect();
-    let sequence = true_angles
-        .iter()
-        .map(|angles| observations_for(tree, angles))
-        .collect();
-    (sequence, true_angles)
-}
-
-#[test]
-fn solve_segments_parallel_reconstructs_smooth_trajectory() {
-    let tree = common::two_joint_chain();
-    let n_frames = 40;
-    let (sequence, true_angles) = sine_trajectory(&tree, n_frames);
-
-    let seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    // A handful of workers (not tied to this machine's core count), giving
-    // segments of ~10 frames each, large enough for each segment's own
-    // internal warm-starting to settle onto the trajectory.
-    let results = seq_solver.solve_segments_parallel(&sequence, 4, false, false);
-
-    assert_eq!(results.len(), n_frames);
-    for (result, angles) in results.iter().zip(&true_angles) {
-        assert!(
-            (result.state.dof_values[0] - angles[0]).abs() < 1e-2,
-            "dof0 mismatch: got {}, want {}",
-            result.state.dof_values[0],
-            angles[0]
-        );
-        assert!(
-            (result.state.dof_values[1] - angles[1]).abs() < 1e-2,
-            "dof1 mismatch: got {}, want {}",
-            result.state.dof_values[1],
-            angles[1]
-        );
-    }
-}
-
-#[test]
-fn solve_segments_parallel_with_one_worker_matches_plain_solve_exactly() {
-    // n_workers: 1 forces the whole sequence through a single segment, cold
-    // started once and warm-started throughout: bit-for-bit the same
-    // computation a fresh SequenceSolver's plain `solve` would do over the
-    // same sequence.
-    let tree = common::two_joint_chain();
-    let (sequence, _) = sine_trajectory(&tree, 40);
-
-    let mut plain_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let plain_results = plain_solver.solve(&sequence, false, false);
-
-    let parallel_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let parallel_results = parallel_solver.solve_segments_parallel(&sequence, 1, false, false);
-
-    assert_eq!(parallel_results.len(), plain_results.len());
-    for (parallel_result, plain_result) in parallel_results.iter().zip(&plain_results) {
-        assert_eq!(
-            parallel_result.state.dof_values,
-            plain_result.state.dof_values
-        );
-        assert_eq!(parallel_result.state.root_pos, plain_result.state.root_pos);
-        assert_eq!(
-            parallel_result.state.root_quat,
-            plain_result.state.root_quat
-        );
-    }
-}
-
-#[test]
-fn solve_segments_parallel_handles_empty_input() {
-    let tree = common::two_joint_chain();
-    let seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    let results = seq_solver.solve_segments_parallel(&[], -1, false, false);
-    assert!(results.is_empty());
-}
-
-#[test]
-fn solve_segments_parallel_does_not_affect_the_solver_s_own_running_state() {
-    // solve_segments_parallel is a self-contained bulk operation: it must
-    // never read or write this object's own warm-started `solve` state.
-    let tree = common::two_joint_chain();
-    let mut seq_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-
-    let target_a = observations_for(&tree, &[0.4, 0.3]);
-    seq_solver.solve(std::slice::from_ref(&target_a), false, false);
-
-    // A completely unrelated bulk sequence, run through solve_segments_parallel.
-    let (unrelated_sequence, _) = sine_trajectory(&tree, 10);
-    seq_solver.solve_segments_parallel(&unrelated_sequence, 2, false, false);
-
-    // The object's own running state should still warm-start from target_a's
-    // converged pose, unaffected by the parallel call above.
-    let mut reference_solver = new_seq_solver(&tree, N_ITERATIONS, NEUTRAL_WEIGHT);
-    reference_solver.solve(std::slice::from_ref(&target_a), false, false);
-    let target_b = observations_for(&tree, &[0.41, 0.31]);
-    let expected = reference_solver.solve(std::slice::from_ref(&target_b), false, false);
-    let actual = seq_solver.solve(std::slice::from_ref(&target_b), false, false);
-
-    assert_eq!(actual[0].state.dof_values, expected[0].state.dof_values);
+    let bad = ObservationSequence::from_arrays(
+        2,
+        n_joints,
+        Some(&pos_3d),
+        Some(&weights_3d),
+        &[],
+        None,
+        None,
+    );
+    assert!(bad.is_err(), "wrong array length was accepted");
 }
