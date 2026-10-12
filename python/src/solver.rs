@@ -1,64 +1,144 @@
-use nalgebra::DMatrix;
-use numpy::{IntoPyArray, PyArray2};
+use numpy::{AllowTypeChange, PyArray2, PyArrayLike1};
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
-use crate::catch_panic;
-use crate::observation::{
-    KeypointObservation, Projection, as_row_major, extract_observations, positions_to_pyarray,
-};
+use crate::observation::{KeypointObservation, extract};
 use crate::state::State;
+use crate::{matrix_to_py, points_to_py, to_py_err, to_vector};
 
-/// Converts a Jacobian or Cholesky-factor matrix into an `(nrows, ncols)`
-/// float32 NumPy array.
-pub(crate) fn matrix_to_pyarray<'py>(
-    py: Python<'py>,
-    mat: &DMatrix<f32>,
-) -> Bound<'py, PyArray2<f32>> {
-    as_row_major(mat).to_owned().into_pyarray(py)
+/// Iteration settings (fixed at construction) plus priors (added with the
+/// `add_*` methods, each at most once). No priors by default.
+///
+/// Copied into each solver on construction. Checked there too: root priors on
+/// a fixed-base tree, and smoothness priors in `SingleFrameSolver` or
+/// `BatchedSolver`, raise `ValueError`.
+#[pyclass(module = "quickik", from_py_object)]
+#[derive(Clone)]
+pub(crate) struct SolverConfig {
+    pub(crate) inner: quickik_core::solver::SolverConfig,
 }
 
-/// The converged pose (and, optionally, linearization) from one
-/// `Solver.solve` call, or one item of a `SequenceSolver` sequence.
+#[pymethods]
+impl SolverConfig {
+    /// - `n_iterations`: maximum number of Gauss-Newton steps per frame.
+    /// - `position_tolerance`, `angle_tolerance`: stop early once a step's
+    ///   largest root-position component is at most `position_tolerance` and
+    ///   its largest angle component (root rotation and every DOF) is at most
+    ///   `angle_tolerance` (radians). Set both to 0 to always run
+    ///   `n_iterations` steps.
+    /// - `damping`: Levenberg-Marquardt damping, relative to the normal
+    ///   equations' diagonal (floored at 1). Only for numerical stability, so
+    ///   keep it very small.
+    #[new]
+    #[pyo3(signature = (
+        n_iterations=10, position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
+    ))]
+    fn new(
+        n_iterations: usize,
+        position_tolerance: f32,
+        angle_tolerance: f32,
+        damping: f32,
+    ) -> Self {
+        SolverConfig {
+            inner: quickik_core::solver::SolverConfig::new(
+                n_iterations,
+                position_tolerance,
+                angle_tolerance,
+                damping,
+            ),
+        }
+    }
+
+    #[getter]
+    fn n_iterations(&self) -> usize {
+        self.inner.n_iterations()
+    }
+
+    #[getter]
+    fn position_tolerance(&self) -> f32 {
+        self.inner.position_tolerance()
+    }
+
+    #[getter]
+    fn angle_tolerance(&self) -> f32 {
+        self.inner.angle_tolerance()
+    }
+
+    #[getter]
+    fn damping(&self) -> f32 {
+        self.inner.damping()
+    }
+
+    /// Pulls each DOF toward its `Dof.neutral` value, with per-DOF weight
+    /// `weight * Dof.weight_multiplier`. Improves robustness to missing or
+    /// noisy keypoints, but biases the solution toward the neutral pose.
+    fn add_dof_neutral_prior(&mut self, weight: f32) -> PyResult<()> {
+        self.inner.add_dof_neutral_prior(weight).map_err(to_py_err)
+    }
+
+    /// Pulls the root's local `body_up` axis toward the world-frame `world_up`
+    /// (e.g. +z, or a tilted vector on a slope), leaving rotation about the up
+    /// axis free. Both vectors are normalized.
+    fn add_root_upright_prior(
+        &mut self,
+        weight: f32,
+        body_up: PyArrayLike1<'_, f32, AllowTypeChange>,
+        world_up: PyArrayLike1<'_, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        let body_up = to_vector::<3>(body_up, "body_up")?.into();
+        let world_up = to_vector::<3>(world_up, "world_up")?.into();
+        let result = self.inner.add_root_upright_prior(weight, body_up, world_up);
+        result.map_err(to_py_err)
+    }
+
+    /// Pulls each DOF toward its value in the previous frame, with per-DOF
+    /// weight `weight * Dof.weight_multiplier`. Inactive on a sequence's first
+    /// frame.
+    fn add_dof_smoothness_prior(&mut self, weight: f32) -> PyResult<()> {
+        self.inner
+            .add_dof_smoothness_prior(weight)
+            .map_err(to_py_err)
+    }
+
+    /// Pulls the root position and rotation toward the previous frame's, with
+    /// separate weights since their units differ (length vs radians). Inactive
+    /// on a sequence's first frame.
+    fn add_root_smoothness_prior(
+        &mut self,
+        position_weight: f32,
+        rotation_weight: f32,
+    ) -> PyResult<()> {
+        let result = self
+            .inner
+            .add_root_smoothness_prior(position_weight, rotation_weight);
+        result.map_err(to_py_err)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
+    }
+}
+
+/// One frame's converged pose and, optionally, its linearization. Immutable.
 #[pyclass(module = "quickik", frozen)]
 pub(crate) struct SolverResult {
     inner: quickik_core::solver::SolverResult,
 }
 
-impl SolverResult {
-    pub(crate) fn new(inner: quickik_core::solver::SolverResult) -> Self {
+impl From<quickik_core::solver::SolverResult> for SolverResult {
+    fn from(inner: quickik_core::solver::SolverResult) -> Self {
         SolverResult { inner }
     }
 }
 
+/// Converts core results to Python ones.
+pub(crate) fn to_py_results(results: Vec<quickik_core::solver::SolverResult>) -> Vec<SolverResult> {
+    results.into_iter().map(SolverResult::from).collect()
+}
+
 #[pymethods]
 impl SolverResult {
-    /// Angles of all joint DOFs, in `KinematicTree`'s own order. Shorthand
-    /// for `.state.dof_angles`.
-    #[getter]
-    fn dof_angles(&self) -> Vec<f32> {
-        self.inner.state.dof_values.clone()
-    }
-
-    /// Position of the root joint in world coordinates. Shorthand for
-    /// `.state.root_pos`.
-    #[getter]
-    fn root_pos(&self) -> (f32, f32, f32) {
-        let p = self.inner.state.root_pos;
-        (p.x, p.y, p.z)
-    }
-
-    /// `(w, x, y, z)`. Shorthand for `.state.root_rot`.
-    #[getter]
-    fn root_rot(&self) -> (f32, f32, f32, f32) {
-        let q = self.inner.state.root_quat.quaternion();
-        (q.w, q.i, q.j, q.k)
-    }
-
-    /// The converged pose as a full `State` object (e.g. to feed into
-    /// another `Solver.solve` call). Built on demand: prefer `dof_angles`/
-    /// `root_pos`/`root_rot` directly if that's all you need, since those
-    /// don't pay for constructing this.
+    /// The converged pose (a copy).
     #[getter]
     fn state(&self) -> State {
         State {
@@ -66,104 +146,79 @@ impl SolverResult {
         }
     }
 
-    /// World-space keypoint positions (`(n_joints, 3)` float32, always 3D
-    /// regardless of the solver's projection), in `KinematicTree`'s joint order.
-    /// `None` unless `solve` was called with `with_fk=True`.
+    /// `(n_joints, 3)` world-frame keypoint positions at `state`, in joint
+    /// order. `None` unless the solve had `with_fk=True`.
     #[getter]
     fn keypoint_pos<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray2<f32>>> {
-        self.inner
-            .keypoint_pos
-            .as_deref()
-            .map(|p| positions_to_pyarray(py, p))
+        let keypoint_pos = self.inner.keypoint_pos.as_deref();
+        keypoint_pos.map(|positions| points_to_py(py, positions))
     }
 
-    /// The residual Jacobian at (approximately) the converged pose: float32,
-    /// `(3 * n_joints, state_dim)` for a 3D projection, or
-    /// `(2 * n_joints, state_dim)` otherwise, in which case it's already
-    /// mapped through that projection. See
-    /// `quickik_core::solver::SolverResult::jacobian`'s docs. `None` unless
-    /// `solve` was called with `with_grad=True`.
+    /// Residual Jacobian `(n_rows, state_dim)`: one row block per observation,
+    /// in the frame's input order, 3 rows for a 3D observation and 2 for a 2D
+    /// one (already mapped through its projection). Weight-0 observations get
+    /// rows too. Linearized at the pose just before the last iteration's
+    /// update, which is small at convergence. `None` unless the solve had
+    /// `with_grad=True`.
     #[getter]
     fn jacobian<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray2<f32>>> {
-        self.inner
-            .jacobian
-            .as_ref()
-            .map(|j| matrix_to_pyarray(py, j))
+        let jacobian = self.inner.jacobian.as_ref();
+        jacobian.map(|jacobian| matrix_to_py(py, jacobian))
     }
 
-    /// Lower-triangular Cholesky factor `L` of the normal-equations matrix at
-    /// the same linearization as `jacobian` (`jtj = L @ L.T`). `None` if
-    /// `with_grad=False`, or if that linearization wasn't positive-definite
-    /// (gradients can't be computed from this solve).
+    /// Lower-triangular Cholesky factor `L` `(state_dim, state_dim)` of the
+    /// normal-equations matrix (priors and damping included) at the same
+    /// linearization as `jacobian`. `None` unless the solve had
+    /// `with_grad=True` and that matrix was positive-definite.
     #[getter]
     fn cholesky_l<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray2<f32>>> {
-        self.inner
-            .cholesky_l
-            .as_ref()
-            .map(|chol| matrix_to_pyarray(py, &chol.l()))
+        let cholesky = self.inner.cholesky_l.as_ref();
+        cholesky.map(|cholesky| matrix_to_py(py, &cholesky.l()))
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "SolverResult(dof_angles={:?}, root_pos={:?}, root_rot={:?})",
-            self.dof_angles(),
-            self.root_pos(),
-            self.root_rot()
-        )
+        format!("SolverResult(state={:?})", self.inner.state)
     }
 }
 
-/// The inverse kinematics solver.
-///
-/// `projection` says what space this solver's observations live in; it
-/// defaults to `Projection.new_3d()` and is fixed for this `Solver`'s
-/// lifetime, so there's no setter, only the read-only `projection` property.
-/// The other tuning parameters (`n_iterations`, `neutral_weight`,
-/// `position_tolerance`, `angle_tolerance`, `damping`) are plain attributes,
-/// freely retunable between `solve` calls.
+/// Solves one frame at a time, with the caller managing the state.
 #[pyclass(module = "quickik")]
-pub(crate) struct Solver {
-    inner: quickik_core::solver::Solver,
+pub(crate) struct SingleFrameSolver {
+    inner: quickik_core::solver::SingleFrameSolver,
 }
 
 #[pymethods]
-impl Solver {
+impl SingleFrameSolver {
+    /// Raises `ValueError` if `config` has smoothness priors (there is no
+    /// previous frame) or root priors on a fixed-base tree.
     #[new]
-    #[pyo3(signature = (
-        kinematic_tree, projection=Projection::default(), n_iterations=10, neutral_weight=1e-3,
-        position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
-    ))]
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        kinematic_tree: KinematicTree,
-        projection: Projection,
-        n_iterations: usize,
-        neutral_weight: f32,
-        position_tolerance: f32,
-        angle_tolerance: f32,
-        damping: f32,
-    ) -> PyResult<Self> {
-        Ok(Solver {
-            inner: quickik_core::solver::Solver::new(
-                &kinematic_tree.inner,
-                projection.inner,
-                n_iterations,
-                neutral_weight,
-                position_tolerance,
-                angle_tolerance,
-                damping,
-            ),
+    fn new(kinematic_tree: KinematicTree, config: SolverConfig) -> PyResult<Self> {
+        let solver =
+            quickik_core::solver::SingleFrameSolver::new(&kinematic_tree.inner, &config.inner);
+        Ok(SingleFrameSolver {
+            inner: solver.map_err(to_py_err)?,
         })
     }
 
-    /// Runs up to `self.n_iterations` Gauss-Newton steps in place on `state`,
-    /// given one `KeypointObservation` per joint (in `kinematic_tree.joints`
-    /// order; use `KeypointObservation.missing()` for keypoints not observed
-    /// this frame), and returns the converged pose. `with_grad`/`with_fk`
-    /// gate `SolverResult.jacobian`/`SolverResult.cholesky_l` and
-    /// `SolverResult.keypoint_pos` respectively; each costs a little extra
-    /// work, so only request what you'll use. Raises `ValueError` if
-    /// `len(observations) != kinematic_tree.n_joints`.
+    #[getter]
+    fn kinematic_tree(&self) -> KinematicTree {
+        KinematicTree {
+            inner: self.inner.kinematic_tree().clone(),
+        }
+    }
+
+    /// A copy of the solver's configuration.
+    #[getter]
+    fn config(&self) -> SolverConfig {
+        SolverConfig {
+            inner: self.inner.config().clone(),
+        }
+    }
+
+    /// Refines `state` in place, starting from its current value, and returns
+    /// the result. `with_grad` and `with_fk` request `SolverResult.jacobian`/
+    /// `SolverResult.cholesky_l` and `SolverResult.keypoint_pos`
+    /// respectively; each costs a little extra.
     #[pyo3(signature = (state, observations, with_grad=false, with_fk=false))]
     fn solve(
         &mut self,
@@ -172,73 +227,10 @@ impl Solver {
         with_grad: bool,
         with_fk: bool,
     ) -> PyResult<SolverResult> {
-        let observations = extract_observations(observations);
-        let inner = &mut self.inner;
-        catch_panic(move || {
-            SolverResult::new(inner.solve(&mut state.inner, &observations, with_grad, with_fk))
-        })
-    }
-
-    /// Fixed at construction (read-only).
-    #[getter]
-    fn projection(&self) -> Projection {
-        Projection {
-            inner: self.inner.projection(),
-        }
-    }
-
-    /// Number of Gauss-Newton steps per `solve` call. Also the cap on early
-    /// termination: see `position_tolerance`/`angle_tolerance`.
-    #[getter]
-    fn n_iterations(&self) -> usize {
-        self.inner.n_iterations
-    }
-    #[setter]
-    fn set_n_iterations(&mut self, value: usize) {
-        self.inner.n_iterations = value;
-    }
-
-    /// Weight pulling every joint angle toward the neutral pose. Improves
-    /// robustness to missing/noisy keypoints, at the cost of some bias.
-    #[getter]
-    fn neutral_weight(&self) -> f32 {
-        self.inner.neutral_weight
-    }
-    #[setter]
-    fn set_neutral_weight(&mut self, value: f32) {
-        self.inner.neutral_weight = value;
-    }
-
-    /// Stop iterating early once an update step's largest root-position
-    /// component drops below this value, and the largest angle update drops
-    /// below `angle_tolerance`. 0 disables early termination.
-    #[getter]
-    fn position_tolerance(&self) -> f32 {
-        self.inner.position_tolerance
-    }
-    #[setter]
-    fn set_position_tolerance(&mut self, value: f32) {
-        self.inner.position_tolerance = value;
-    }
-
-    /// Angle-space counterpart to `position_tolerance`, in radians.
-    #[getter]
-    fn angle_tolerance(&self) -> f32 {
-        self.inner.angle_tolerance
-    }
-    #[setter]
-    fn set_angle_tolerance(&mut self, value: f32) {
-        self.inner.angle_tolerance = value;
-    }
-
-    /// Levenberg-Marquardt damping added to the normal equations' diagonal,
-    /// for numerical stability only; keep it very small (e.g. 1e-6).
-    #[getter]
-    fn damping(&self) -> f32 {
-        self.inner.damping
-    }
-    #[setter]
-    fn set_damping(&mut self, value: f32) {
-        self.inner.damping = value;
+        let observations = extract(observations);
+        let result = self
+            .inner
+            .solve(&mut state.inner, &observations, with_grad, with_fk);
+        Ok(result.map_err(to_py_err)?.into())
     }
 }

@@ -15,3 +15,14 @@ torch = ["torch"]
 [tool.maturin]
 module-name = "quickik"
 python-source = "python"
+
+[tool.uv]
+# Rebuild when the Rust sources change, not only this file (e.g. for the examples,
+# which depend on this package by path through `uv run`).
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "src/**/*.rs" },
+    { file = "../Cargo.toml" },
+    { file = "../src/**/*.rs" },
+]

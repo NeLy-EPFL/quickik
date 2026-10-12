@@ -20,15 +20,15 @@ README) with quickik additionally installed into it:
     cd ../python && maturin develop --release
     python ../benchmark/quickik_python/bench.py
 
-One thing the Rust benchmark can do that this one can't, since it's not
-exposed to Python: forward kinematics on its own (`quickik::forward` isn't
-bound). So instead of an independent FK re-check via quickik's own
-(unexposed) `evaluate_fwdkin`, this script reimplements forward kinematics
-directly from the JSON body plan (a fresh, independent computation, not
-calling into quickik at all) for the keypoint comparisons below. The
-performance benchmark's single-frame-latency target is one of the fixture's
-own targets (`synthetic_frames[0]`), matching the Rust and C++ benchmarks
-exactly, for a fair cross-language comparison.
+For the keypoint comparisons below, this script reimplements forward
+kinematics directly from the JSON body plan rather than calling
+`quickik.forward_kinematics`, so they are an independent check of quickik's
+solved state. The performance benchmark's single-frame-latency target is one of
+the fixture's own targets (`synthetic_frames[0]`), matching the Rust and C++
+benchmarks exactly, for a fair cross-language comparison.
+
+Solver settings match the old API's defaults that the Rust and C++ benchmarks
+still use: a DOF neutral prior of weight `NEUTRAL_WEIGHT` and no other priors.
 """
 
 import json
@@ -91,13 +91,13 @@ def build_body_context(name, body_plan, fixtures):
 # -----------------------------------------------------------------------------
 # Independent forward kinematics, straight from the JSON body plan: does not
 # call into quickik at all, so it's a genuine cross-check of quickik's solved
-# state, mirroring the Rust benchmark's use of quickik's own (Python-unexposed)
-# evaluate_fwdkin for the same purpose.
+# state.
 # -----------------------------------------------------------------------------
-def forward_kinematics(ctx, dof_angles, root_pos, root_rot_wxyz):
+def forward_kinematics(ctx, state):
     """Returns keypoint positions in `ctx.leg_joint_names` order (root
     excluded), matching `target_ego`'s layout in the fixtures."""
-    w, x, y, z = root_rot_wxyz
+    dof_values, root_pos = state.dof_values, state.root_pos
+    w, x, y, z = state.root_quat
     world_pos = {}
     world_rot = {}
     for j in ctx.joints:
@@ -112,24 +112,37 @@ def forward_kinematics(ctx, dof_angles, root_pos, root_rot_wxyz):
         dof_start = ctx.dof_offsets[name]
         for i, dof in enumerate(j["dofs"]):
             axis = np.array(dof["axis"])
-            rot = rot * R.from_rotvec(axis * dof_angles[dof_start + i])
+            rot = rot * R.from_rotvec(axis * dof_values[dof_start + i])
         world_pos[name], world_rot[name] = origin, rot
     return np.array([world_pos[name] for name in ctx.leg_joint_names])
 
 
+# Weight of the DOF neutral prior, the old API's default (see module docstring).
+NEUTRAL_WEIGHT = 1e-3
+
+
+def solver_config(neutral_weight=NEUTRAL_WEIGHT, **kwargs):
+    """`kwargs` are passed to `quickik.SolverConfig` (e.g. `position_tolerance=0.0,
+    angle_tolerance=0.0` to force the full iteration count)."""
+    config = quickik.SolverConfig(**kwargs)
+    config.add_dof_neutral_prior(neutral_weight)
+    return config
+
+
 def build_observations(target_ego):
-    obs = [quickik.KeypointObservation.missing()]
-    obs += [quickik.KeypointObservation.position_3d(list(p), 1.0) for p in target_ego]
-    return obs
+    """Every keypoint but the root's (joint 0), which isn't observed."""
+    return [
+        quickik.KeypointObservation.position_3d(j + 1, p)
+        for j, p in enumerate(target_ego)
+    ]
 
 
 def build_position_weight_arrays(n_keypoints, frames):
     """positions: (n_frames, n_keypoints, 3) float32, weights: (n_frames,
-    n_keypoints) float32, for `SequenceSolver.solve`/`solve_segments_parallel`.
-    The root (index 0) always gets weight 0 (missing), matching
-    `build_observations`' convention. Given as raw arrays rather than one
-    `KeypointObservation` per keypoint per frame, avoiding that per-object
-    construction (and its matching per-object unwrapping on the Rust side)."""
+    n_keypoints) float32, for `quickik.ObservationSequence.from_arrays`. The
+    root (index 0) always gets weight 0 (missing), matching
+    `build_observations`. Raw arrays avoid constructing one
+    `KeypointObservation` per keypoint per frame."""
     targets = np.array([f["target_ego"] for f in frames], dtype=np.float32)
     positions = np.zeros((len(frames), n_keypoints, 3), dtype=np.float32)
     positions[:, 1:, :] = targets
@@ -154,8 +167,8 @@ def run_correctness(ctx):
     print(
         f"{'frame':>6} {'kpt rms':>16} {'kpt max':>16} {'angle err deg':>18} {'angle err deg (w=0)':>20}"
     )
-    default_solver = quickik.Solver(tree)
-    zero_reg_solver = quickik.Solver(tree, neutral_weight=0.0)
+    default_solver = quickik.SingleFrameSolver(tree, solver_config())
+    zero_reg_solver = quickik.SingleFrameSolver(tree, solver_config(0.0))
     for i, frame in enumerate(ctx.fixtures["synthetic_frames"]):
         target = np.array(frame["target_ego"])
         ground_truth = np.concatenate(
@@ -168,15 +181,13 @@ def run_correctness(ctx):
 
         state = quickik.State.neutral_pose(tree)
         result = default_solver.solve(state, obs)
-        solved_pts = forward_kinematics(
-            ctx, result.dof_angles, result.root_pos, result.root_rot
-        )
+        solved_pts = forward_kinematics(ctx, result.state)
         residual = np.linalg.norm(solved_pts - target, axis=1)
-        angle_err = angle_error_deg(result.dof_angles, ground_truth)
+        angle_err = angle_error_deg(result.state.dof_values, ground_truth)
 
         state0 = quickik.State.neutral_pose(tree)
         result0 = zero_reg_solver.solve(state0, obs)
-        angle_err0 = angle_error_deg(result0.dof_angles, ground_truth)
+        angle_err0 = angle_error_deg(result0.state.dof_values, ground_truth)
 
         print(
             f"{i:>6} {np.sqrt((residual**2).mean()):>16.6f} {residual.max():>16.6f} "
@@ -191,8 +202,8 @@ def run_correctness(ctx):
     print("== Real mocap frames (cross-solver vs. flygym.ik) ==")
     frames = ctx.fixtures["real_frames"]
     positions, weights = build_position_weight_arrays(len(ctx.joints), frames)
-    seq = quickik.SequenceSolver(tree)
-    results = seq.solve(positions, weights)
+    sequence = quickik.ObservationSequence.from_arrays(positions, weights)
+    results = quickik.SequentialSolver(tree, solver_config()).solve(sequence)
     # Per-frame (rms, max) first, then aggregate across frames, matching
     # correctness.rs's residual_stats/rms_of/mean/max_of exactly, so the two
     # benchmarks' numbers are directly comparable (a flat rms/mean over every
@@ -201,9 +212,7 @@ def run_correctness(ctx):
     quickik_rms, quickik_max, cross_rms, cross_max = [], [], [], []
     for result, frame in zip(results, frames, strict=True):
         target = np.array(frame["target_ego"])
-        solved_pts = forward_kinematics(
-            ctx, result.dof_angles, result.root_pos, result.root_rot
-        )
+        solved_pts = forward_kinematics(ctx, result.state)
         dists = np.linalg.norm(solved_pts - target, axis=1)
         quickik_rms.append(np.sqrt((dists**2).mean()))
         quickik_max.append(dists.max())
@@ -249,13 +258,12 @@ def summarize(label, samples_sec):
     return mean
 
 
-def bench_single_frame_latency(tree, target, n_calls, **solver_kwargs):
+def bench_single_frame_latency(tree, target, n_calls, **config_kwargs):
     """Single-frame latency: a fresh State.neutral_pose() solved against a
     fixed real target every call (no warm start), the same fixture-derived
-    target used by the Rust and C++ benchmarks. `solver_kwargs` are passed
-    straight to `quickik.Solver` (e.g. `position_tolerance=0.0,
-    angle_tolerance=0.0` to force the full iteration count)."""
-    solver = quickik.Solver(tree, **solver_kwargs)
+    target used by the Rust and C++ benchmarks. `config_kwargs` are passed to
+    `solver_config`."""
+    solver = quickik.SingleFrameSolver(tree, solver_config(**config_kwargs))
     obs = build_observations(target)
     for _ in range(500):
         state = quickik.State.neutral_pose(tree)
@@ -270,24 +278,24 @@ def bench_single_frame_latency(tree, target, n_calls, **solver_kwargs):
     return samples
 
 
-def tile_arrays(positions, weights, length):
+def tiled_sequence(positions, weights, length):
+    """`positions`/`weights` repeated to `length` frames, as a sequence."""
     idx = np.arange(length) % positions.shape[0]
-    return positions[idx], weights[idx]
+    return quickik.ObservationSequence.from_arrays(positions[idx], weights[idx])
 
 
-def bench_solve_sequence(tree, positions, weights):
+def bench_solve_sequence(tree, sequence):
     """Single-thread sequence throughput: one bulk call to
-    `SequenceSolver.solve`, instead of looping `.solve()` once per frame from
+    `SequentialSolver.solve`, instead of calling `.step()` once per frame from
     Python (avoids paying Python/PyO3 call overhead on every single frame).
-    A second, fresh `SequenceSolver` is used for the timed pass after warming
+    A second, fresh `SequentialSolver` is used for the timed pass after warming
     up once, so the sequence's own frame-to-frame warm-starting (not
     cross-call warm-starting from the warm-up pass) is what's measured."""
-    warmup_seq = quickik.SequenceSolver(tree)
-    warmup_seq.solve(positions, weights)
+    quickik.SequentialSolver(tree, solver_config()).solve(sequence)
 
-    timed_seq = quickik.SequenceSolver(tree)
+    timed_solver = quickik.SequentialSolver(tree, solver_config())
     t0 = time.perf_counter()
-    timed_seq.solve(positions, weights)
+    timed_solver.solve(sequence)
     return time.perf_counter() - t0
 
 
@@ -295,7 +303,7 @@ def bench_solve_sequence(tree, positions, weights):
 # `n_segments`-worker run gets exactly one segment per worker).
 SEGMENT_LEN = 200
 # Worker count for the main "multi-thread sequence throughput" metric,
-# passed explicitly to `solve_segments_parallel`'s `n_workers`, fixed
+# passed explicitly to `solve_parallel`'s `n_workers`, fixed
 # rather than detected, matching perf.rs (see its comment).
 MULTITHREAD_N_THREADS = 8
 # Frame count for the single-thread sequence-throughput metric, tiled from
@@ -308,15 +316,15 @@ def frames_for_n_segments(n_segments):
     return SEGMENT_LEN * n_segments
 
 
-def bench_multithread_sequence_throughput(tree, positions, weights, n_workers):
-    """`solve_segments_parallel` never reads or writes its `SequenceSolver`'s
-    own running state, so (unlike `bench_solve_sequence`) the same instance
-    is reused for both the warm-up and timed calls without biasing the
-    result."""
-    seq = quickik.SequenceSolver(tree)
-    seq.solve_segments_parallel(positions, weights, n_workers)  # warm up
+def bench_multithread_sequence_throughput(tree, sequence, n_workers):
+    """`solve_parallel` never reads or writes its `SequentialSolver`'s own
+    running state, so (unlike `bench_solve_sequence`) the same instance is
+    reused for both the warm-up and timed calls without biasing the result.
+    Segments don't overlap (`n_overlap=0`), matching the Rust benchmark."""
+    solver = quickik.SequentialSolver(tree, solver_config())
+    solver.solve_parallel(sequence, n_workers)  # warm up
     t0 = time.perf_counter()
-    seq.solve_segments_parallel(positions, weights, n_workers)
+    solver.solve_parallel(sequence, n_workers)
     return time.perf_counter() - t0
 
 
@@ -348,7 +356,7 @@ def write_results_json(
 
 def run_performance(ctx):
     tree = ctx.tree
-    print(f"quickik Python-bindings benchmark (state_dim={tree.n_dofs + 6})\n")
+    print(f"quickik Python-bindings benchmark (state_dim={tree.state_dim})\n")
 
     # Same fixture-derived target used by the Rust and C++ benchmarks, so
     # this number is directly comparable across all three.
@@ -360,7 +368,7 @@ def run_performance(ctx):
 
     # Early stop disabled (tolerances = 0), so every call runs the full
     # n_iterations, the worst case if a frame never converges early.
-    n_iterations = quickik.Solver(tree).n_iterations
+    n_iterations = quickik.SolverConfig().n_iterations
     print(
         f"\n-- single-frame time (latency), early stop disabled ({n_iterations} iterations) --"
     )
@@ -377,13 +385,11 @@ def run_performance(ctx):
     base_positions, base_weights = build_position_weight_arrays(
         len(ctx.joints), ctx.fixtures["native_rate_frames"]
     )
-    single_positions, single_weights = tile_arrays(
-        base_positions, base_weights, SINGLE_THREAD_N_FRAMES
-    )
-    elapsed = bench_solve_sequence(tree, single_positions, single_weights)
-    single_thread_fps = single_positions.shape[0] / elapsed
+    sequence = tiled_sequence(base_positions, base_weights, SINGLE_THREAD_N_FRAMES)
+    elapsed = bench_solve_sequence(tree, sequence)
+    single_thread_fps = len(sequence) / elapsed
     print(
-        f"SequenceSolver.solve                n_frames={single_positions.shape[0]:<6} "
+        f"SequentialSolver.solve              n_frames={len(sequence):<6} "
         f"elapsed={elapsed * 1e3:>9.3f}ms  throughput={single_thread_fps:>10.1f} frames/s"
     )
 
@@ -392,13 +398,13 @@ def run_performance(ctx):
         f"{MULTITHREAD_N_THREADS} threads) --"
     )
     n_frames = frames_for_n_segments(MULTITHREAD_N_THREADS)
-    mt_positions, mt_weights = tile_arrays(base_positions, base_weights, n_frames)
+    sequence = tiled_sequence(base_positions, base_weights, n_frames)
     elapsed = bench_multithread_sequence_throughput(
-        tree, mt_positions, mt_weights, MULTITHREAD_N_THREADS
+        tree, sequence, MULTITHREAD_N_THREADS
     )
     multithread_fps = n_frames / elapsed
     print(
-        f"solve_segments_parallel             n_frames={n_frames:<6} "
+        f"solve_parallel                      n_frames={n_frames:<6} "
         f"elapsed={elapsed * 1e3:>9.3f}ms  throughput={multithread_fps:>10.1f} frames/s"
     )
 

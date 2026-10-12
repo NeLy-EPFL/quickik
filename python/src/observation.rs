@@ -1,140 +1,259 @@
-use numpy::ndarray::{Array2, ArrayView2, ArrayView3};
-use numpy::{IntoPyArray, PyArray2};
+use std::sync::Arc;
+
+use nalgebra::{Vector2, Vector3};
+use numpy::ndarray::{ArrayView, CowArray, Dimension};
+use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1, PyArrayLike2, PyArrayLike3};
+use numpy::{PyArrayLike4, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::pyclass_init::PyClassInitializer;
 
-/// Views a column-major nalgebra matrix as a row-major `ndarray`, without
-/// copying. Both `numpy` and this crate's outputs are row-major, so every
-/// matrix crossing into Python goes through here rather than an element-by-
-/// element loop.
-pub(crate) fn as_row_major(mat: &nalgebra::DMatrix<f32>) -> ArrayView2<'_, f32> {
-    ArrayView2::from_shape((mat.ncols(), mat.nrows()), mat.as_slice())
-        .expect("nalgebra matrices are contiguous")
-        .reversed_axes()
-}
+use crate::{matrix_to_py, to_matrix3, to_py_err, to_vector, vector_to_py};
 
-fn vec_to_array<const N: usize>(v: &[f32], name: &str) -> PyResult<[f32; N]> {
-    v.try_into()
-        .map_err(|_| PyValueError::new_err(format!("{name} must have exactly {N} elements")))
-}
+use quickik_core::observation::{ObservedPosition, Projection as CoreProjection};
 
-/// What space a solver's keypoint observations live in. Build one with
-/// `new_3d()`, `new_ortho_xy()`, or `new_pinhole_camera(...)`; a solver takes
-/// it as its `projection` argument and holds it for its lifetime.
-#[pyclass(module = "quickik", from_py_object, frozen)]
-#[derive(Clone, Copy)]
+// =============================================================================
+//  Projections
+// =============================================================================
+
+/// Maps a 3D world position to 2D, e.g. camera pixel coordinates. Not
+/// constructible itself: build one of its subclasses, `PinholeCamera` or
+/// `OrthographicViewXY`. Immutable.
+///
+/// Build each projection (e.g. each camera) once and pass the same object to
+/// every observation made with it.
+#[pyclass(module = "quickik", subclass, frozen)]
 pub(crate) struct Projection {
-    pub(crate) inner: quickik_core::observation::Projection,
-}
-
-impl Default for Projection {
-    fn default() -> Self {
-        Projection {
-            inner: quickik_core::observation::Projection::new_3d(),
-        }
-    }
+    pub(crate) inner: Arc<CoreProjection>,
 }
 
 #[pymethods]
 impl Projection {
-    /// Observations are 3D world positions; nothing is projected.
-    #[staticmethod]
-    fn new_3d() -> Self {
-        Projection::default()
+    /// Returns `(uv, d_uv_d_pos)`: the 2D position `(2,)` that the world
+    /// position `pos_3d` projects to, and its derivative `(2, 3)` w.r.t.
+    /// `pos_3d`.
+    #[allow(clippy::type_complexity)]
+    fn project<'py>(
+        &self,
+        py: Python<'py>,
+        pos_3d: PyArrayLike1<'_, f32, AllowTypeChange>,
+    ) -> PyResult<(Bound<'py, PyArray1<f32>>, Bound<'py, PyArray2<f32>>)> {
+        let pos_3d = Vector3::from(to_vector::<3>(pos_3d, "pos_3d")?);
+        let (uv, d_uv_d_pos) = self.inner.project(&pos_3d);
+        Ok((
+            vector_to_py(py, uv.as_slice()),
+            matrix_to_py(py, &d_uv_d_pos),
+        ))
     }
 
-    /// Observations are world X-Y coordinates with Z dropped.
-    #[staticmethod]
-    fn new_ortho_xy() -> Self {
-        Projection {
-            inner: quickik_core::observation::Projection::new_ortho_xy(),
-        }
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
     }
+}
 
-    /// Observations are pixel coordinates from a calibrated pinhole camera.
-    ///
-    /// `fx`/`fy` are focal lengths in pixels and `cx`/`cy` the principal
-    /// point. `world2cam_pos` must have exactly 3 elements and
-    /// `world2cam_rot_mat` exactly 9 (row-major 3x3), giving the extrinsics as
-    /// `p_cam = world2cam_rot_mat @ p_world + world2cam_pos`; raises
-    /// `ValueError` otherwise.
-    #[staticmethod]
-    fn new_pinhole_camera(
+/// A pinhole camera, for keypoints observed as pixel coordinates:
+/// `p_cam = world2cam_rot_mat @ p_world + world2cam_pos`, then
+/// `uv = (fx * x / z + cx, fy * y / z + cy)`.
+#[pyclass(module = "quickik", extends = Projection, frozen)]
+pub(crate) struct PinholeCamera {
+    camera: quickik_core::observation::PinholeCamera,
+}
+
+#[pymethods]
+impl PinholeCamera {
+    /// `fx`, `fy` are the focal lengths and `cx`, `cy` the principal point, in
+    /// pixels. `world2cam_pos` `(3,)` and `world2cam_rot_mat` `(3, 3)` are the
+    /// extrinsics, as above.
+    #[new]
+    fn new(
         fx: f32,
         fy: f32,
         cx: f32,
         cy: f32,
-        world2cam_pos: Vec<f32>,
-        world2cam_rot_mat: Vec<f32>,
-    ) -> PyResult<Self> {
-        let pos = vec_to_array::<3>(&world2cam_pos, "world2cam_pos")?;
-        let rot = vec_to_array::<9>(&world2cam_rot_mat, "world2cam_rot_mat")?;
-        Ok(Projection {
-            inner: quickik_core::observation::Projection::new_pinhole_camera(
-                fx,
-                fy,
-                cx,
-                cy,
-                nalgebra::Vector3::from(pos),
-                nalgebra::Matrix3::from_row_slice(&rot),
-            ),
-        })
+        world2cam_pos: PyArrayLike1<'_, f32, AllowTypeChange>,
+        world2cam_rot_mat: PyArrayLike2<'_, f32, AllowTypeChange>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let camera = quickik_core::observation::PinholeCamera::new(
+            fx,
+            fy,
+            cx,
+            cy,
+            Vector3::from(to_vector::<3>(world2cam_pos, "world2cam_pos")?),
+            to_matrix3(world2cam_rot_mat, "world2cam_rot_mat")?,
+        );
+        let base = Projection {
+            inner: Arc::new(camera.into()),
+        };
+        Ok(PyClassInitializer::from(base).add_subclass(PinholeCamera { camera }))
     }
 
-    /// Whether this is `new_3d()`, i.e. observations need no projecting.
     #[getter]
-    fn is_3d(&self) -> bool {
-        self.inner.is_3d()
+    fn fx(&self) -> f32 {
+        self.camera.fx
     }
 
-    fn __repr__(&self) -> String {
-        format!("{:?}", self.inner)
+    #[getter]
+    fn fy(&self) -> f32 {
+        self.camera.fy
+    }
+
+    #[getter]
+    fn cx(&self) -> f32 {
+        self.camera.cx
+    }
+
+    #[getter]
+    fn cy(&self) -> f32 {
+        self.camera.cy
+    }
+
+    #[getter]
+    fn world2cam_pos<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        vector_to_py(py, self.camera.world2cam_pos.as_slice())
+    }
+
+    #[getter]
+    fn world2cam_rot_mat<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f32>> {
+        matrix_to_py(py, &self.camera.world2cam_rot_mat)
     }
 }
 
-/// Observation of a single keypoint: `missing()`, `position_3d(pos, weight)`,
-/// or `position_2d(pos, weight)`.
-#[pyclass(module = "quickik", from_py_object, frozen)]
-#[derive(Clone, Copy)]
+/// An orthographic view along world Z: `uv = scale * (x, y) + offset`.
+#[pyclass(module = "quickik", extends = Projection, frozen)]
+pub(crate) struct OrthographicViewXY {
+    view: quickik_core::observation::OrthographicViewXY,
+}
+
+#[pymethods]
+impl OrthographicViewXY {
+    #[new]
+    #[pyo3(signature = (scale=1.0, offset=None))]
+    fn new(
+        scale: f32,
+        offset: Option<PyArrayLike1<'_, f32, AllowTypeChange>>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let offset = match offset {
+            Some(offset) => Vector2::from(to_vector::<2>(offset, "offset")?),
+            None => Vector2::zeros(),
+        };
+        let view = quickik_core::observation::OrthographicViewXY::new(scale, offset);
+        let base = Projection {
+            inner: Arc::new(view.into()),
+        };
+        Ok(PyClassInitializer::from(base).add_subclass(OrthographicViewXY { view }))
+    }
+
+    #[getter]
+    fn scale(&self) -> f32 {
+        self.view.scale
+    }
+
+    #[getter]
+    fn offset<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        vector_to_py(py, self.view.offset.as_slice())
+    }
+}
+
+/// Wraps a core projection in the matching Python subclass.
+fn projection_to_py(py: Python<'_>, projection: &Arc<CoreProjection>) -> PyResult<Py<PyAny>> {
+    let base = PyClassInitializer::from(Projection {
+        inner: Arc::clone(projection),
+    });
+    Ok(match **projection {
+        CoreProjection::PinholeCamera(camera) => {
+            Py::new(py, base.add_subclass(PinholeCamera { camera }))?.into_any()
+        }
+        CoreProjection::OrthographicViewXY(view) => {
+            Py::new(py, base.add_subclass(OrthographicViewXY { view }))?.into_any()
+        }
+    })
+}
+
+// =============================================================================
+//  Observations
+// =============================================================================
+
+/// One observation of one joint's keypoint. Immutable.
+///
+/// A frame's observations are a flat list in any order. A joint may appear any
+/// number of times (e.g. once per camera) or not at all (e.g. occluded): leave
+/// missing keypoints out. An observation with weight 0 contributes nothing to
+/// the solve but still gets its rows in `SolverResult.jacobian`.
+#[pyclass(module = "quickik", frozen)]
 pub(crate) struct KeypointObservation {
-    inner: quickik_core::observation::KeypointObservation,
+    pub(crate) inner: quickik_core::observation::KeypointObservation,
 }
 
 #[pymethods]
 impl KeypointObservation {
-    /// Not observed this frame, e.g. occluded.
+    /// A 3D world position `pos` `(3,)`, e.g. triangulated from several
+    /// cameras. `weight` is multiplied by the joint's `weight_multiplier` to
+    /// give the final weight.
     #[staticmethod]
-    fn missing() -> Self {
-        KeypointObservation {
-            inner: quickik_core::observation::KeypointObservation::Missing,
+    #[pyo3(signature = (joint_idx, pos, weight=1.0))]
+    fn position_3d(
+        joint_idx: usize,
+        pos: PyArrayLike1<'_, f32, AllowTypeChange>,
+        weight: f32,
+    ) -> PyResult<Self> {
+        let pos = Vector3::from(to_vector::<3>(pos, "pos")?);
+        Ok(KeypointObservation {
+            inner: quickik_core::observation::KeypointObservation::position_3d(
+                joint_idx, pos, weight,
+            ),
+        })
+    }
+
+    /// A 2D position `pos` `(2,)` in the space `projection` maps into.
+    /// `weight` is as in `position_3d`.
+    #[staticmethod]
+    #[pyo3(signature = (joint_idx, pos, projection, weight=1.0))]
+    fn position_2d(
+        joint_idx: usize,
+        pos: PyArrayLike1<'_, f32, AllowTypeChange>,
+        projection: PyRef<'_, Projection>,
+        weight: f32,
+    ) -> PyResult<Self> {
+        let pos = Vector2::from(to_vector::<2>(pos, "pos")?);
+        Ok(KeypointObservation {
+            inner: quickik_core::observation::KeypointObservation::position_2d(
+                joint_idx,
+                pos,
+                Arc::clone(&projection.inner),
+                weight,
+            ),
+        })
+    }
+
+    #[getter]
+    fn joint_idx(&self) -> usize {
+        self.inner.joint_idx
+    }
+
+    /// The observed position: `(3,)` for a 3D observation, `(2,)` for a 2D
+    /// one.
+    #[getter]
+    fn pos<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f32>> {
+        match &self.inner.position {
+            ObservedPosition::Position3D(pos) => vector_to_py(py, pos.as_slice()),
+            ObservedPosition::Position2D(pos, _) => vector_to_py(py, pos.as_slice()),
         }
     }
 
-    /// A 3D world position, e.g. triangulated from multiple calibrated
-    /// cameras. Raises `ValueError` if `pos` doesn't have exactly 3
-    /// elements.
-    #[staticmethod]
-    fn position_3d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
-        Ok(KeypointObservation {
-            inner: quickik_core::observation::KeypointObservation::Position3D {
-                obs_pos: nalgebra::Vector3::from(vec_to_array::<3>(&pos, "pos")?),
-                weight,
-            },
-        })
+    /// The projection of a 2D observation, or `None` for a 3D one.
+    #[getter]
+    fn projection(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        match &self.inner.position {
+            ObservedPosition::Position3D(_) => Ok(None),
+            ObservedPosition::Position2D(_, projection) => {
+                projection_to_py(py, projection).map(Some)
+            }
+        }
     }
 
-    /// A 2D position in whatever space the consuming `Solver`'s `projection`
-    /// expects (e.g. camera pixel coordinates). Raises `ValueError` if `pos`
-    /// doesn't have exactly 2 elements.
-    #[staticmethod]
-    fn position_2d(pos: Vec<f32>, weight: f32) -> PyResult<Self> {
-        let [x, y] = vec_to_array::<2>(&pos, "pos")?;
-        Ok(KeypointObservation {
-            inner: quickik_core::observation::KeypointObservation::Position2D {
-                obs_pos: nalgebra::Vector2::new(x, y),
-                weight,
-            },
-        })
+    #[getter]
+    fn weight(&self) -> f32 {
+        self.inner.weight
     }
 
     fn __repr__(&self) -> String {
@@ -142,104 +261,155 @@ impl KeypointObservation {
     }
 }
 
-pub(crate) fn extract_observations(
-    observations: Vec<PyRef<'_, KeypointObservation>>,
-) -> Vec<quickik_core::observation::KeypointObservation> {
-    observations.iter().map(|obs| obs.inner).collect()
-}
+type CoreObservation = quickik_core::observation::KeypointObservation;
 
-/// Builds one frame's-worth of `Position3D`/`Position2D`/`Missing`
-/// observations per row of `positions`/`weights` (a keypoint with
-/// `!(weight > 0.0)` (i.e. zero, negative, or NaN) is treated as
-/// [`KeypointObservation::missing`]), without ever constructing a Python
-/// `KeypointObservation` object, unlike [`extract_observations`], which
-/// unwraps objects a caller already built one per keypoint. Used by
-/// array-based entry points (`SequenceSolver.solve`, `BatchedSolver.solve`)
-/// for callers that already have their data in numpy arrays, to avoid that
-/// per-keypoint Python object construction and unwrapping.
-///
-/// `positions`'s last dimension selects the observation kind: 3 builds
-/// `Position3D`, 2 builds `Position2D`. Call [`validate_position_weight_shapes`]
-/// first to ensure this matches whether a projection is set. Used by
-/// [`SequenceSolver`](crate::sequential_solver::SequenceSolver) and
-/// [`BatchedSolver`](crate::batched_solver::BatchedSolver)'s array-based
-/// `solve` methods.
-pub(crate) fn observations_from_arrays(
-    positions: ArrayView3<'_, f32>,
-    weights: ArrayView2<'_, f32>,
-) -> Vec<Vec<quickik_core::observation::KeypointObservation>> {
-    let is_2d = positions.dim().2 == 2;
-    positions
-        .outer_iter()
-        .zip(weights.outer_iter())
-        .map(|(frame_positions, frame_weights)| {
-            frame_positions
-                .outer_iter()
-                .zip(frame_weights.iter())
-                .map(|(pos, &weight)| {
-                    // A NaN weight counts as missing, not poison this frame's
-                    // shared normal-equations matrices
-                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
-                    if !(weight > 0.0) {
-                        quickik_core::observation::KeypointObservation::Missing
-                    } else if is_2d {
-                        quickik_core::observation::KeypointObservation::Position2D {
-                            obs_pos: nalgebra::Vector2::new(pos[0], pos[1]),
-                            weight,
-                        }
-                    } else {
-                        quickik_core::observation::KeypointObservation::Position3D {
-                            obs_pos: nalgebra::Vector3::new(pos[0], pos[1], pos[2]),
-                            weight,
-                        }
-                    }
-                })
-                .collect()
-        })
+/// Converts Python observations (e.g. one frame's) to the core type.
+pub(crate) fn extract(observations: Vec<PyRef<'_, KeypointObservation>>) -> Vec<CoreObservation> {
+    let observations = observations.iter();
+    observations
+        .map(|observation| observation.inner.clone())
         .collect()
 }
 
-/// Converts world-space keypoint positions (e.g. from
-/// [`SolverResult::keypoint_pos`](quickik_core::solver::SolverResult::keypoint_pos))
-/// into a `(n_joints, 3)` float32 NumPy array, in the same joint order.
-pub(crate) fn positions_to_pyarray<'py>(
-    py: Python<'py>,
-    positions: &[nalgebra::Vector3<f32>],
-) -> Bound<'py, PyArray2<f32>> {
-    Array2::from_shape_fn((positions.len(), 3), |(i, axis)| positions[i][axis]).into_pyarray(py)
+// =============================================================================
+//  Sequences
+// =============================================================================
+
+/// Many frames of observations, e.g. a recording (for `SequentialSolver`) or a
+/// batch of independent items (for `BatchedSolver`). Immutable.
+#[pyclass(module = "quickik", frozen)]
+pub(crate) struct ObservationSequence {
+    pub(crate) inner: quickik_core::observation::ObservationSequence,
 }
 
-/// Checks that `positions`/`weights` have the shapes
-/// [`observations_from_arrays`] expects: `(n_frames, n_joints)` for
-/// `weights`, and for `positions`, `(n_frames, n_joints, 3)` if `is_2d`
-/// is `false` (3D observations), or `(n_frames, n_joints, 2)` if `true` (2D
-/// observations, projected by whichever projection the solver was constructed
-/// with).
-pub(crate) fn validate_position_weight_shapes(
-    positions: &ArrayView3<'_, f32>,
-    weights: &ArrayView2<'_, f32>,
-    n_joints: usize,
-    is_2d: bool,
-) -> PyResult<()> {
-    let (n_frames, n_keypoints, dim) = positions.dim();
-    let expected_dim = if is_2d { 2 } else { 3 };
-    if dim != expected_dim {
-        return Err(PyValueError::new_err(format!(
-            "positions must have shape (n_frames, n_keypoints, {expected_dim}) since this \
-             solver's projection is {}, got last dimension {dim}",
-            if is_2d { "2D" } else { "3D" }
-        )));
+#[pymethods]
+impl ObservationSequence {
+    /// One list of observations per frame. Frames may differ in which and how
+    /// many observations they have (e.g. moving cameras).
+    #[staticmethod]
+    fn from_lists(frames: Vec<Vec<PyRef<'_, KeypointObservation>>>) -> Self {
+        let frames = frames.into_iter().map(extract).collect();
+        ObservationSequence {
+            inner: quickik_core::observation::ObservationSequence::from_lists(frames),
+        }
     }
-    if n_keypoints != n_joints {
-        return Err(PyValueError::new_err(format!(
-            "positions has {n_keypoints} keypoints, but kinematic_tree has {n_joints} joints"
-        )));
+
+    /// Same as `from_lists`, with all frames concatenated: frame `i` is the
+    /// next `frame_lengths[i]` observations. Raises `ValueError` if
+    /// `frame_lengths` doesn't add up to `len(observations)`.
+    #[staticmethod]
+    fn from_flat(
+        observations: Vec<PyRef<'_, KeypointObservation>>,
+        frame_lengths: Vec<usize>,
+    ) -> PyResult<Self> {
+        let sequence = quickik_core::observation::ObservationSequence::from_flat(
+            extract(observations),
+            &frame_lengths,
+        );
+        Ok(ObservationSequence {
+            inner: sequence.map_err(to_py_err)?,
+        })
     }
-    if weights.dim() != (n_frames, n_keypoints) {
-        return Err(PyValueError::new_err(format!(
-            "weights must have shape (n_frames, n_keypoints) = ({n_frames}, {n_keypoints}), got {:?}",
-            weights.dim()
-        )));
+
+    /// Builds frames with a fixed layout from arrays, much faster than building
+    /// one `KeypointObservation` per keypoint per frame. Per frame: the 3D
+    /// block (all joints, in joint order) if given, then one 2D block per view
+    /// in `projections` order.
+    ///
+    /// - `pos_3d`: `(n_frames, n_joints, 3)`, with `weights_3d`:
+    ///   `(n_frames, n_joints)`. Either both or neither.
+    /// - `pos_2d`: `(n_frames, n_views, n_joints, 2)`, with `weights_2d`:
+    ///   `(n_frames, n_views, n_joints)`, where `n_views = len(projections)`.
+    ///   Required if and only if `projections` is non-empty.
+    ///
+    /// Every entry is kept, so every frame's Jacobian has the same rows. A
+    /// weight that isn't positive (including NaN) marks a missing keypoint:
+    /// it's stored as weight 0 with a zeroed position.
+    #[staticmethod]
+    #[pyo3(signature = (
+        pos_3d=None, weights_3d=None, projections=Vec::new(), pos_2d=None, weights_2d=None,
+    ))]
+    fn from_arrays(
+        pos_3d: Option<PyArrayLike3<'_, f32, AllowTypeChange>>,
+        weights_3d: Option<PyArrayLike2<'_, f32, AllowTypeChange>>,
+        projections: Vec<PyRef<'_, Projection>>,
+        pos_2d: Option<PyArrayLike4<'_, f32, AllowTypeChange>>,
+        weights_2d: Option<PyArrayLike3<'_, f32, AllowTypeChange>>,
+    ) -> PyResult<Self> {
+        // Every array's expected shape follows from these sizes.
+        let n_views = projections.len();
+        let (n_frames, n_joints) = match (&pos_3d, &pos_2d) {
+            (Some(pos), _) => (pos.shape()[0], pos.shape()[1]),
+            (None, Some(pos)) => (pos.shape()[0], pos.shape()[2]),
+            (None, None) => return Err(PyValueError::new_err("pos_3d or pos_2d must be given")),
+        };
+        check_shape(
+            "pos_3d",
+            pos_3d.as_ref().map(|a| a.shape()),
+            &[n_frames, n_joints, 3],
+        )?;
+        check_shape(
+            "weights_3d",
+            weights_3d.as_ref().map(|a| a.shape()),
+            &[n_frames, n_joints],
+        )?;
+        let expected = [n_frames, n_views, n_joints, 2];
+        check_shape("pos_2d", pos_2d.as_ref().map(|a| a.shape()), &expected)?;
+        let expected = [n_frames, n_views, n_joints];
+        check_shape(
+            "weights_2d",
+            weights_2d.as_ref().map(|a| a.shape()),
+            &expected,
+        )?;
+
+        let pos_3d = pos_3d.as_ref().map(|a| contiguous(a.as_array()));
+        let weights_3d = weights_3d.as_ref().map(|a| contiguous(a.as_array()));
+        let pos_2d = pos_2d.as_ref().map(|a| contiguous(a.as_array()));
+        let weights_2d = weights_2d.as_ref().map(|a| contiguous(a.as_array()));
+        let projections: Vec<_> = projections.iter().map(|p| Arc::clone(&p.inner)).collect();
+        let sequence = quickik_core::observation::ObservationSequence::from_arrays(
+            n_frames,
+            n_joints,
+            pos_3d.as_ref().map(as_slice),
+            weights_3d.as_ref().map(as_slice),
+            &projections,
+            pos_2d.as_ref().map(as_slice),
+            weights_2d.as_ref().map(as_slice),
+        );
+        Ok(ObservationSequence {
+            inner: sequence.map_err(to_py_err)?,
+        })
     }
-    Ok(())
+
+    /// Number of frames.
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ObservationSequence(n_frames={})", self.inner.len())
+    }
+}
+
+fn check_shape(name: &str, shape: Option<&[usize]>, expected: &[usize]) -> PyResult<()> {
+    match shape {
+        Some(shape) if shape != expected => Err(PyValueError::new_err(format!(
+            "{name} has shape {shape:?}, expected {expected:?}"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// `array` in standard (C-contiguous) layout, copied only if needed.
+fn contiguous<'a, D: Dimension>(array: ArrayView<'a, f32, D>) -> CowArray<'a, f32, D> {
+    match array.is_standard_layout() {
+        true => array.into(),
+        false => array.as_standard_layout().into_owned().into(),
+    }
+}
+
+fn as_slice<'a, D: Dimension>(array: &'a CowArray<'_, f32, D>) -> &'a [f32] {
+    array
+        .as_slice()
+        .expect("standard layout arrays are contiguous")
 }

@@ -6,17 +6,18 @@ via implicit differentiation of the fixed point (adjoint solve against the
 solve's own Cholesky factor), rather than unrolling the solver's iterations.
 `QuickIKSolve` is a thin `nn.Module` wrapper around it.
 
-Any `batched_solver.projection` works, including a pinhole camera:
+Observations are either 3D positions, or 2D positions in any number of views
+(e.g. calibrated cameras), laid out as in `ObservationSequence.from_arrays`.
 `BatchedSolver.solve` returns the *residual* Jacobian, already mapped through
-whatever projection the solver holds, so the adjoint solve below never needs to
-know which one that was.
+each observation's projection, so the adjoint solve below never needs to know
+which projections were used.
 
 Constraints inherited from `BatchedSolver`:
-- `batched_solver.kinematic_tree` must be free-floating (not fixed-base);
-  `BatchedSolver.__init__` already enforces this.
-- Gradients are only computed for `positions`, not `weights` (that would
-  need the solve's residual vector, which isn't currently exposed) and not a
-  camera's own calibration.
+- The kinematic tree must be free-floating (not fixed-base), and the solver
+  config can't have smoothness priors; `BatchedSolver` already enforces both.
+- Gradients are only computed for positions, not weights (that would need the
+  solve's residual vector, which isn't exposed) and not a projection's own
+  parameters.
 - Items whose last Gauss-Newton iteration wasn't positive-definite get a
   zeroed gradient (their forward values are still meaningful; there just
   isn't a usable linearization to differentiate through).
@@ -38,22 +39,27 @@ __all__ = ["QuickIKSolve", "SolveIK"]
 class SolveIK(torch.autograd.Function):
     """Differentiable batched inverse-kinematics solve.
 
-    `forward(batched_solver, positions, weights)` returns `(joint_angles,
-    base_pos, base_quat)`:
-    - `joint_angles`: `(batch_size, n_dofs)`, in `batched_solver.kinematic_tree`'s
-      own DOF order.
-    - `base_pos`: `(batch_size, 3)`.
-    - `base_quat`: `(batch_size, 4)`, `(w, x, y, z)`.
+    `forward(batched_solver, positions, weights, projections=None)` returns
+    `(dof_values, root_pos, root_quat)`:
+    - `dof_values`: `(batch_size, n_dofs)`.
+    - `root_pos`: `(batch_size, 3)`.
+    - `root_quat`: `(batch_size, 4)`, `(w, x, y, z)`.
 
-    `positions` is `(batch_size, n_joints, 3)` for a 3D projection, or
-    `(batch_size, n_joints, 2)` otherwise; `weights` is
-    `(batch_size, n_joints)`; both are in `batched_solver`'s own
-    `keypoints_order`. `batched_solver` is treated as a constant (no
-    gradient); only `positions` gets one back.
+    Inputs, with every joint of `batched_solver.kinematic_tree` in joint order:
+    - 3D observations (`projections=None`): `positions` is
+      `(batch_size, n_joints, 3)` and `weights` is `(batch_size, n_joints)`.
+    - 2D observations: `projections` is a list of `n_views` projections (e.g.
+      `quickik.PinholeCamera`), `positions` is
+      `(batch_size, n_views, n_joints, 2)` and `weights` is
+      `(batch_size, n_views, n_joints)`.
+
+    A weight that isn't positive (including NaN) marks a missing keypoint.
+    `batched_solver` and `projections` are treated as constants (no gradient);
+    only `positions` gets one back.
     """
 
     @staticmethod
-    def forward(ctx, batched_solver, positions, weights):
+    def forward(ctx, batched_solver, positions, weights, projections=None):
         if weights.requires_grad:
             raise ValueError(
                 "SolveIK doesn't support gradients w.r.t. weights (only positions): "
@@ -62,132 +68,111 @@ class SolveIK(torch.autograd.Function):
 
         positions_np = positions.detach().cpu().numpy()
         weights_np = weights.detach().cpu().numpy()
-        result = batched_solver.solve(positions_np, weights_np, with_grad=True)
+        if projections is None:
+            batch = quickik.ObservationSequence.from_arrays(
+                pos_3d=positions_np, weights_3d=weights_np
+            )
+        else:
+            batch = quickik.ObservationSequence.from_arrays(
+                projections=projections, pos_2d=positions_np, weights_2d=weights_np
+            )
+        result = batched_solver.solve(batch, with_grad=True)
 
         device, dtype = positions.device, positions.dtype
 
         def to_tensor(array):
             return torch.from_numpy(array).to(device=device, dtype=dtype)
 
-        keypoint_to_joint_idx = torch.tensor(
-            batched_solver.keypoint_to_joint_idx, dtype=torch.long, device=device
+        # The weight the solve actually used for each observation: missing
+        # keypoints count as 0, and every weight is multiplied by its joint's
+        # `weight_multiplier`. Joints are the last axis in both layouts.
+        joints = batched_solver.kinematic_tree.joints
+        multipliers = torch.tensor(
+            [joint.weight_multiplier for joint in joints], device=device, dtype=dtype
         )
-        # Inverse permutation (internal joint index -> external keypoint
-        # index): needed to bring `weights` into the Jacobian's internal
-        # joint order for `backward`. See the module docstring on why the
-        # Jacobian itself stays in internal order.
-        internal_to_keypoint_idx = torch.argsort(keypoint_to_joint_idx)
+        effective_weights = torch.where(weights > 0, weights, 0) * multipliers
 
-        # The effective per-keypoint weight the solve actually used is
-        # `weight * joint.weight_scaler` (see `Solver`'s own normal-equation
-        # accumulation), not just `weight` alone.
-        joint_weight_scalers = torch.tensor(
-            batched_solver.kinematic_tree.joint_weight_scalers,
-            device=device,
-            dtype=dtype,
-        )
-        weights_tensor = to_tensor(weights_np)
-        effective_weights_internal = (
-            weights_tensor.index_select(1, internal_to_keypoint_idx)
-            * joint_weight_scalers
-        )
-
-        base_quat_tensor = to_tensor(result.base_quat)
-
-        ctx.keypoint_to_joint_idx = keypoint_to_joint_idx
-        ctx.effective_weights_internal = effective_weights_internal
+        root_quat = to_tensor(result.root_quat)
+        # One entry per observation, in the solve's (and Jacobian rows') order.
+        ctx.effective_weights = effective_weights.reshape(weights.shape[0], -1)
+        ctx.positions_shape = positions.shape
         ctx.jacobian = to_tensor(result.jacobian)
         ctx.cholesky_l = to_tensor(result.cholesky_l)
-        ctx.valid = torch.from_numpy(result.valid).to(device=device)
-        ctx.base_quat = base_quat_tensor
+        ctx.cholesky_valid = torch.from_numpy(result.cholesky_valid).to(device=device)
+        ctx.root_quat = root_quat
 
-        return (
-            to_tensor(result.joint_angles),
-            to_tensor(result.base_pos),
-            base_quat_tensor,
-        )
+        return to_tensor(result.dof_values), to_tensor(result.root_pos), root_quat
 
     @staticmethod
-    def backward(ctx, grad_joint_angles, grad_base_pos, grad_base_quat):
-        weights = ctx.effective_weights_internal  # (batch, n_joints), internal order
-        # (batch, n_obs_dims * n_joints, state_dim), internal order, already
-        # projected through the solver's projection if it has one.
+    def backward(ctx, grad_dof_values, grad_root_pos, grad_root_quat):
+        weights = ctx.effective_weights  # (batch, n_observations)
+        # (batch, obs_dim * n_observations, state_dim), already projected through
+        # each observation's projection for 2D observations.
         jacobian = ctx.jacobian
         cholesky_l = ctx.cholesky_l  # (batch, state_dim, state_dim)
-        valid = ctx.valid  # (batch,) bool
-        base_quat = ctx.base_quat  # (batch, 4), (w, x, y, z)
+        valid = ctx.cholesky_valid  # (batch,) bool
+        root_quat = ctx.root_quat  # (batch, 4), (w, x, y, z)
 
-        batch_size, n_residual_rows, state_dim = jacobian.shape
-        n_joints = weights.shape[1]
-        n_obs_dims = n_residual_rows // n_joints
+        batch_size, n_rows, state_dim = jacobian.shape
+        n_observations = weights.shape[1]
+        obs_dim = n_rows // n_observations
 
-        # base_quat's incoming gradient is w.r.t. the quaternion (w, x, y,
-        # z) itself, but the linear system operates in the root's 3-dim
-        # rotation *tangent* space (State::apply_delta left-multiplies a
-        # small-angle quaternion: root_rot_new = exp(delta) * root_rot).
-        # For q = (w, vec), d(q)/d(delta)|_0 = 0.5 * [-vec^T; w*I + skew(vec)],
-        # so d(Loss)/d(delta) = 0.5 * (w*grad_vec - grad_w*vec -
-        # cross(vec, grad_vec)).
-        qw, qvec = base_quat[..., 0], base_quat[..., 1:4]
-        gw, gvec = grad_base_quat[..., 0], grad_base_quat[..., 1:4]
+        # root_quat's incoming gradient is w.r.t. the quaternion (w, x, y, z)
+        # itself, but the linear system operates in the root's 3-dim rotation
+        # *tangent* space (`State::apply_delta` left-multiplies a small-angle
+        # quaternion: root_quat_new = exp(delta) * root_quat). For q = (w, vec),
+        # d(q)/d(delta)|_0 = 0.5 * [-vec^T; w*I + skew(vec)], so
+        # d(Loss)/d(delta) = 0.5 * (w*grad_vec - grad_w*vec - cross(vec, grad_vec)).
+        qw, qvec = root_quat[..., 0], root_quat[..., 1:4]
+        gw, gvec = grad_root_quat[..., 0], grad_root_quat[..., 1:4]
         v_rot_tangent = 0.5 * (
             qw.unsqueeze(-1) * gvec
             - gw.unsqueeze(-1) * qvec
             - torch.linalg.cross(qvec, gvec, dim=-1)
         )
 
-        v = torch.cat([grad_base_pos, v_rot_tangent, grad_joint_angles], dim=-1)
+        # State order: root position, root rotation, then every DOF.
+        v = torch.cat([grad_root_pos, v_rot_tangent, grad_dof_values], dim=-1)
 
-        # Substitute the identity for invalid (non-positive-definite) items
-        # so cholesky_solve doesn't produce NaN/Inf; their contribution is
-        # zeroed out below regardless (there's no meaningful linearization
-        # to solve against for them).
+        # Substitute the identity for invalid (non-positive-definite) items so
+        # cholesky_solve doesn't produce NaN/Inf; their contribution is zeroed
+        # out below regardless (there's no meaningful linearization to solve
+        # against for them).
         eye = torch.eye(state_dim, dtype=cholesky_l.dtype, device=cholesky_l.device)
         safe_cholesky_l = torch.where(valid.view(-1, 1, 1), cholesky_l, eye)
-        # `mu = jtj^-1 @ v` (jtj is `Solver`'s normal-equations matrix, i.e.
-        # what `cholesky_l` actually factors). The implicit-function-theorem
-        # adjoint variable is `lambda = H^-1 @ v` for `H = dg/dx`, but
-        # `H = -jtj` here: `g = J^T W r + prior_grad` with `r = obs_pos -
-        # fwdkin_pos(x)`, so `dr/dx = -J` and (dropping the Gauss-Newton
-        # second-order term) `dg/dx ~= -J^T W J + prior_hessian = -jtj` (the
-        # prior term's sign in `accumulate_neutral_pose_prior`, `+weight`
-        # into `jtj` vs. `d(g_prior)/dx = -weight`, confirms this
-        # independently). So `lambda = -mu`, which flips the sign again
-        # below and cancels against the leading `-` in `d(Loss)/dtheta =
-        # -lambda^T @ dg/dtheta`, leaving a net `+`.
-        mu = torch.cholesky_solve(
-            v.unsqueeze(-1), safe_cholesky_l, upper=False
-        ).squeeze(-1)
-        mu = mu * valid.unsqueeze(-1).to(mu.dtype)
+        # `mu = jtj^-1 @ v` (jtj is the solver's normal-equations matrix, i.e.
+        # what `cholesky_l` factors). The implicit-function-theorem adjoint
+        # variable is `lambda = H^-1 @ v` for `H = dg/dx`, but `H = -jtj` here:
+        # `g = J^T W r + prior_grad` with `r = obs_pos - fk_pos(x)`, so
+        # `dr/dx = -J` and (dropping the Gauss-Newton second-order term)
+        # `dg/dx ~= -J^T W J - prior_hessian = -jtj`. So `lambda = -mu`, which
+        # cancels against the leading `-` in `d(Loss)/dtheta = -lambda^T @
+        # dg/dtheta`, leaving a net `+`.
+        mu = torch.cholesky_solve(v.unsqueeze(-1), safe_cholesky_l, upper=False)
+        mu = mu.squeeze(-1) * valid.unsqueeze(-1).to(mu.dtype)
 
-        # d(Loss)/d(obs_pos_k) = weight_k * J_k @ mu, per keypoint, in the
-        # tree's internal keypoint order.
-        jac_per_keypoint = jacobian.view(batch_size, n_joints, n_obs_dims, state_dim)
-        grad_positions_internal = weights.unsqueeze(-1) * torch.einsum(
-            "bnij,bj->bni", jac_per_keypoint, mu
+        # d(Loss)/d(obs_pos_k) = weight_k * J_k @ mu, per observation.
+        jac_per_obs = jacobian.view(batch_size, n_observations, obs_dim, state_dim)
+        grad_positions = weights.unsqueeze(-1) * torch.einsum(
+            "bnij,bj->bni", jac_per_obs, mu
         )
 
-        # Un-permute from internal joint order back into keypoints_order,
-        # matching the order `positions` was actually given in.
-        grad_positions = grad_positions_internal.index_select(
-            1, ctx.keypoint_to_joint_idx
-        )
-
-        return None, grad_positions, None
+        return None, grad_positions.reshape(ctx.positions_shape), None, None
 
 
 class QuickIKSolve(torch.nn.Module):
     """Thin `nn.Module` wrapper around `SolveIK`, for dropping into a model.
 
-    Holds `batched_solver` (fixed for this module's lifetime);
-    `forward(positions, weights)` returns `(joint_angles, base_pos,
-    base_quat)`. See `SolveIK` for the actual differentiable op and its
-    constraints (no gradient w.r.t. weights or the projection's parameters).
+    Holds `batched_solver` and `projections` (fixed for this module's lifetime;
+    `None` for 3D observations). `forward(positions, weights)` returns
+    `(dof_values, root_pos, root_quat)`. See `SolveIK` for the input layout and
+    constraints.
     """
 
-    def __init__(self, batched_solver):
+    def __init__(self, batched_solver, projections=None):
         super().__init__()
         self.batched_solver = batched_solver
+        self.projections = projections
 
     def forward(self, positions, weights):
-        return SolveIK.apply(self.batched_solver, positions, weights)
+        return SolveIK.apply(self.batched_solver, positions, weights, self.projections)

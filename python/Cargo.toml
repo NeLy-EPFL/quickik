@@ -10,7 +10,7 @@ name = "quickik"
 crate-type = ["cdylib"]
 
 [dependencies]
-quickik_core = { package = "quickik_old", path = "../quickik_old" }
+quickik_core = { package = "quickik", path = ".." }
 nalgebra = "0.35"
 pyo3 = { version = "0.29", features = ["extension-module"] }
 numpy = "0.29.0"

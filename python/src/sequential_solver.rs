@@ -1,144 +1,133 @@
-use std::sync::Arc;
-
-use numpy::{AllowTypeChange, PyArrayLike2, PyArrayLike3};
 use pyo3::prelude::*;
 
 use crate::body_plan::KinematicTree;
-use crate::catch_panic;
-use crate::observation::{Projection, observations_from_arrays, validate_position_weight_shapes};
-use crate::solver::SolverResult;
+use crate::observation::{KeypointObservation, ObservationSequence, extract};
+use crate::solver::{SolverConfig, SolverResult, to_py_results};
+use crate::state::State;
+use crate::to_py_err;
 
-/// Warm-started solving for a continuous sequence of frames; see
-/// `quickik_core::sequential_solver::SequenceSolver`'s docs for exactly what
-/// "warm-started" means and how `solve_segments_parallel` relates to it.
+/// Warm-started solving of one continuous stream.
 ///
-/// `projection` is fixed for this object's lifetime, mirroring `Solver`'s own
-/// `projection` property (no setter). Unlike `Solver`, the other tuning
-/// parameters (`n_iterations`, `neutral_weight`, ...) aren't exposed as
-/// retunable attributes here.
+/// Holds a single running state that `step` and `solve` advance: each frame
+/// starts from the previous frame's solution, which is also the smoothness
+/// priors' target. Construct one per independent stream (e.g. per tracked
+/// subject).
 #[pyclass(module = "quickik")]
-pub(crate) struct SequenceSolver {
-    inner: quickik_core::sequential_solver::SequenceSolver,
-    kinematic_tree: Arc<quickik_core::body_plan::KinematicTree>,
+pub(crate) struct SequentialSolver {
+    inner: quickik_core::sequential_solver::SequentialSolver,
 }
 
 #[pymethods]
-impl SequenceSolver {
-    /// Starts a new continuous sequence at the neutral pose.
+impl SequentialSolver {
+    /// Starts a stream at `initial_state`, or the neutral pose if `None`.
+    /// Raises `ValueError` if `config` has root priors and the tree is
+    /// fixed-base, or if `initial_state` doesn't match the tree.
     #[new]
-    #[pyo3(signature = (
-        kinematic_tree, projection=Projection::default(), n_iterations=10, neutral_weight=1e-3,
-        position_tolerance=1e-3, angle_tolerance=1e-3, damping=1e-6,
-    ))]
-    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (kinematic_tree, config, initial_state=None))]
     fn new(
         kinematic_tree: KinematicTree,
-        projection: Projection,
-        n_iterations: usize,
-        neutral_weight: f32,
-        position_tolerance: f32,
-        angle_tolerance: f32,
-        damping: f32,
+        config: SolverConfig,
+        initial_state: Option<State>,
     ) -> PyResult<Self> {
-        Ok(SequenceSolver {
-            inner: quickik_core::sequential_solver::SequenceSolver::new(
-                &kinematic_tree.inner,
-                projection.inner,
-                n_iterations,
-                neutral_weight,
-                position_tolerance,
-                angle_tolerance,
-                damping,
-            ),
-            kinematic_tree: Arc::clone(&kinematic_tree.inner),
+        let solver = quickik_core::sequential_solver::SequentialSolver::new(
+            &kinematic_tree.inner,
+            &config.inner,
+            initial_state.map(|state| state.inner),
+        );
+        Ok(SequentialSolver {
+            inner: solver.map_err(to_py_err)?,
         })
     }
 
-    /// Solves every frame in order, each warm-started from wherever this
-    /// object's last `solve`/`solve_segments_parallel` call left off (see the
-    /// class docstring). Returns one `SolverResult` per frame.
-    ///
-    /// `weights` is `(n_frames, n_joints)`; `positions` is `(n_frames,
-    /// n_joints, 3)` for a 3D projection, or `(n_frames, n_joints, 2)`
-    /// otherwise (2D observations in that projection's space). Both
-    /// are in `kinematic_tree.joints` order; a keypoint with `weight <= 0`
-    /// (or NaN) is treated as missing. Given as raw arrays rather than a list
-    /// of per-frame `KeypointObservation` lists so this never constructs one
-    /// Python object per keypoint per frame, which otherwise dominates call
-    /// overhead for long recordings. Any dtype is accepted and cast to
-    /// `float32`, following NumPy's own casting rules.
-    #[pyo3(signature = (positions, weights, with_grad=false, with_fk=false))]
+    #[getter]
+    fn kinematic_tree(&self) -> KinematicTree {
+        KinematicTree {
+            inner: self.inner.kinematic_tree().clone(),
+        }
+    }
+
+    /// A copy of the solver's configuration.
+    #[getter]
+    fn config(&self) -> SolverConfig {
+        SolverConfig {
+            inner: self.inner.config().clone(),
+        }
+    }
+
+    /// A copy of the running state after the last `step`/`solve` call.
+    #[getter]
+    fn state(&self) -> State {
+        State {
+            inner: self.inner.state().clone(),
+        }
+    }
+
+    /// Starts a new stream: sets the running state (neutral pose if `None`) and
+    /// forgets the previous frame, so smoothness priors are inactive on the
+    /// next frame.
+    #[pyo3(signature = (state=None))]
+    fn reset(&mut self, state: Option<State>) -> PyResult<()> {
+        let state = state.map(|state| state.inner);
+        self.inner.reset(state).map_err(to_py_err)
+    }
+
+    /// Solves the next frame of the stream, given its observations.
+    #[pyo3(signature = (observations, with_grad=false, with_fk=false))]
+    fn step(
+        &mut self,
+        observations: Vec<PyRef<'_, KeypointObservation>>,
+        with_grad: bool,
+        with_fk: bool,
+    ) -> PyResult<SolverResult> {
+        let observations = extract(observations);
+        let result = self.inner.step(&observations, with_grad, with_fk);
+        Ok(result.map_err(to_py_err)?.into())
+    }
+
+    /// `step` for each frame of `sequence` in order. Returns one result per
+    /// frame.
+    #[pyo3(signature = (sequence, with_grad=false, with_fk=false))]
     fn solve(
         &mut self,
-        positions: PyArrayLike3<'_, f32, AllowTypeChange>,
-        weights: PyArrayLike2<'_, f32, AllowTypeChange>,
+        py: Python<'_>,
+        sequence: PyRef<'_, ObservationSequence>,
         with_grad: bool,
         with_fk: bool,
     ) -> PyResult<Vec<SolverResult>> {
-        let positions_arr = positions.as_array();
-        let weights_arr = weights.as_array();
-        validate_position_weight_shapes(
-            &positions_arr,
-            &weights_arr,
-            self.kinematic_tree.n_joints(),
-            !self.inner.projection().is_3d(),
-        )?;
-        let sequence = observations_from_arrays(positions_arr, weights_arr);
+        let sequence = &sequence.inner;
         let inner = &mut self.inner;
-        catch_panic(move || {
-            inner
-                .solve(&sequence, with_grad, with_fk)
-                .into_iter()
-                .map(SolverResult::new)
-                .collect()
-        })
+        let results = py.detach(|| inner.solve(sequence, with_grad, with_fk));
+        Ok(to_py_results(results.map_err(to_py_err)?))
     }
 
-    /// Solves `positions`/`weights` in parallel by splitting them into
-    /// exactly `n_workers` contiguous, non-overlapping segments, each
-    /// cold-started at the neutral pose and then warm-started within itself.
-    /// See `quickik_core::sequential_solver::SequenceSolver::solve_segments_parallel`
-    /// for the exact `n_workers` convention. Never reads or writes this
-    /// object's own `solve` state.
+    /// Offline: splits `sequence` into up to `n_workers` contiguous chunks of
+    /// near-equal length, solved in parallel. Never reads or writes the running
+    /// state.
     ///
-    /// `positions`/`weights` follow the same convention as `solve`.
-    #[pyo3(signature = (positions, weights, n_workers, with_grad=false, with_fk=false))]
-    #[allow(clippy::too_many_arguments)]
-    fn solve_segments_parallel(
+    /// Each chunk starts from the neutral pose. Every chunk but the first
+    /// starts `n_overlap` frames early (or at the sequence start if that's
+    /// closer) and discards those warm-up results, so its first real frame is
+    /// warm-started and has a previous frame for the smoothness priors.
+    /// `n_overlap=0` makes chunks fully independent.
+    ///
+    /// `n_workers`: a positive value is used directly, unless it exceeds the
+    /// number of available cores, in which case it's clipped to that. A
+    /// negative value counts back from all available cores: `-1` uses all,
+    /// `-2` all but one, etc. `0` raises `ValueError`.
+    #[pyo3(signature = (sequence, n_workers=-1, n_overlap=0, with_grad=false, with_fk=false))]
+    fn solve_parallel(
         &self,
         py: Python<'_>,
-        positions: PyArrayLike3<'_, f32, AllowTypeChange>,
-        weights: PyArrayLike2<'_, f32, AllowTypeChange>,
+        sequence: PyRef<'_, ObservationSequence>,
         n_workers: isize,
+        n_overlap: usize,
         with_grad: bool,
         with_fk: bool,
     ) -> PyResult<Vec<SolverResult>> {
-        let positions_arr = positions.as_array();
-        let weights_arr = weights.as_array();
-        validate_position_weight_shapes(
-            &positions_arr,
-            &weights_arr,
-            self.kinematic_tree.n_joints(),
-            !self.inner.projection().is_3d(),
-        )?;
+        let sequence = &sequence.inner;
         let inner = &self.inner;
-        py.detach(|| {
-            catch_panic(|| {
-                let sequence = observations_from_arrays(positions_arr, weights_arr);
-                inner
-                    .solve_segments_parallel(&sequence, n_workers, with_grad, with_fk)
-                    .into_iter()
-                    .map(SolverResult::new)
-                    .collect()
-            })
-        })
-    }
-
-    /// Fixed at construction (read-only).
-    #[getter]
-    fn projection(&self) -> Projection {
-        Projection {
-            inner: self.inner.projection(),
-        }
+        let results =
+            py.detach(|| inner.solve_parallel(sequence, n_workers, n_overlap, with_grad, with_fk));
+        Ok(to_py_results(results.map_err(to_py_err)?))
     }
 }
